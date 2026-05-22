@@ -4,15 +4,13 @@
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)
 ](https://github.com/pre-commit/pre-commit)
 
-
-[![GNU Bash](https://cdn.rawgit.com/odb/official-bash-logo/master/assets/Logos/Identity/PNG/BASH_logo-transparent-bg-color.png)
-](https://www.gnu.org/software/bash/)
-
 [comment]: # (END FRONMATTER - BEGIN USER CONTENT)
 
-# Git-BA$H-Ed
+# just-bashit
 
 Evolving set of [shfmt](https://github.com/mvdan/sh#shfmt)-conformant, [bats](https://bats-core.readthedocs.io/en/stable/)-tested, [shellcheck](https://www.shellcheck.net/)-linted tools, templates, and more.
+
+**[Documentation](https://just-buildit.github.io/just-bashit/)**
 
 ## Getting Started
 
@@ -30,7 +28,7 @@ just-bashit
     +--test-results/
 ```
 
-Some libraries depend on others so it's best to just use the whole package and source whatever you need, for example:
+Some libraries depend on others so it's best to use the whole package and source whatever you need, for example:
 
 ```bash
 . just-bashit/src/datetime.sh # contains iso-8601-basic()

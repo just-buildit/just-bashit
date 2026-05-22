@@ -1,0 +1,29 @@
+h1#__skip {
+  display: none;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: #0d1b2a;
+  --md-default-bg-color--light: #112035;
+  --md-default-bg-color--lighter: #152540;
+  --md-default-bg-color--lightest: #1a2f4a;
+  --md-code-bg-color: #091623;
+}
+
+.md-typeset table:not([class]) {
+  border-left: 3px solid #f59e0b;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.md-typeset table:not([class]) th {
+  background-color: #1a3050;
+  color: #f59e0b;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-bottom: 2px solid #f59e0b;
+}
+
+.md-typeset table:not([class]) tr:hover td {
+  background-color: rgba(245, 158, 11, 0.07);
+}
