@@ -19,7 +19,7 @@ Evolving set of [shfmt](https://github.com/mvdan/sh#shfmt)-conformant, [bats](ht
 A release package contains shell libraries along with a script and two function templates for developing your own tools.
 
 ```
-git-bash-ed
+just-bashit
     +--README.md
     +--src/
     |   +-- datetime.sh
@@ -33,7 +33,7 @@ git-bash-ed
 Some libraries depend on others so it's best to just use the whole package and source whatever you need, for example:
 
 ```bash
-. git-bash-ed/src/datetime.sh # contains iso-8601-basic()
+. just-bashit/src/datetime.sh # contains iso-8601-basic()
 iso-8601-basic -d '10:32 AM EDT Jan 5 1982'
 19820105T143200Z
 ```

@@ -1,7 +1,7 @@
 #!/bin/bash
 # ############################################################################
 # LIBRARY: file.sh                                                           #
-# PACKAGE: git-bash-ed version 0.1.4                                         #
+# PACKAGE: just-bashit version 0.1.4                                         #
 # ############################################################################
 
 # Enforce sourcing of the script by taking advantage of the fact that return

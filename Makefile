@@ -1,7 +1,7 @@
 all : lint test
 
 MAKEHOME := $(CURDIR)
-ARTIFACT = git-bash-ed.tar.gz
+ARTIFACT = just-bashit.tar.gz
 TESTHELPER_PATH = test/test_helper
 REPORT_PATH = test-results
 SONARQUBE_PATH = ./gcovr

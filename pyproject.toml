@@ -6,7 +6,7 @@ build-backend = "just_buildit"
 pure = true
 
 [project]
-name = "git-bash-ed"
+name = "just-bashit"
 version = "0.1.4"
 description = "Evolving set of auto-formatted, bats-tested, shellcheck-linted tools, templates, and more."
 readme = "README.md"
@@ -33,5 +33,5 @@ files = [
     "src/path.sh",
     "src/script-template",
 ]
-search='# PACKAGE: git-bash-ed version {current_version}                                         #'
-replace='# PACKAGE: git-bash-ed version {new_version}                                         #'
+search='# PACKAGE: just-bashit version {current_version}                                         #'
+replace='# PACKAGE: just-bashit version {new_version}                                         #'

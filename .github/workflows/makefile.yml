@@ -35,8 +35,8 @@ jobs:
 
     - uses: actions/upload-artifact@v5
       with:
-        name: git-bash-ed
-        path: git-bash-ed.tar.gz
+        name: just-bashit
+        path: just-bashit.tar.gz
 
   release:
 
@@ -52,12 +52,12 @@ jobs:
 
     - uses: actions/download-artifact@v5
       with:
-        name: git-bash-ed
+        name: just-bashit
 
     - name: Read version
       id: ver
       run: |
-        VER=$(grep 'PACKAGE: git-bash-ed version' src/datetime.sh \
+        VER=$(grep 'PACKAGE: just-bashit version' src/datetime.sh \
               | grep -oP '\d+\.\d+\.\d+')
         echo "version=${VER}" >> "$GITHUB_OUTPUT"
 
@@ -73,6 +73,6 @@ jobs:
         else
           TAG="${VER}"
         fi
-        gh release create "${TAG}" git-bash-ed.tar.gz \
-          --title "git-bash-ed ${TAG}" \
+        gh release create "${TAG}" just-bashit.tar.gz \
+          --title "just-bashit ${TAG}" \
           --notes "Automated release from commit ${{ github.sha }}."
