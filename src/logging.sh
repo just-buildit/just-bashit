@@ -30,7 +30,7 @@ log-wait() {
 	-h | -[a-zA-Z])
 		[ "${ARG1}" != "-h" ] && echo "Invalid option: ${ARG1}"
 		# Prefer help to commenst since it's user-oriented and runtime-available.
-		echo 'Usage: minimalist-template [-h] DURATION'
+		echo 'Usage: log-wait [-h] DURATION'
 		echo
 		echo '  Sleep for given duration (default 1 second).'
 		echo
@@ -48,7 +48,7 @@ log-wait() {
 			sleep "${DURATION}"
 		else
 			echo "DURATION must be >= 0."
-			exit 1
+			return 1
 		fi
 		;;
 
@@ -89,7 +89,6 @@ log() {
 	local OPTIND=0
 	local DEBUG=0
 	local -i COLORS=0
-	local -i USERSPECIFIED=0
 	[ -t 1 ] && COLORS=1
 	local LOGTYPE='INFO'
 	local LOGCOLOR="${LOGFORMAT[${LOGTYPE}]}"
@@ -154,7 +153,6 @@ log() {
 			IFS=' ' read -r -a TYPEANDCOLOR <<<"${OPTARG}"
 			LOGTYPE="${TYPEANDCOLOR[0]}"
 			LOGCOLOR="${TYPEANDCOLOR[1]}"
-			USERSPECIFIED=1
 			;;
 
 		esac
@@ -166,8 +164,6 @@ log() {
 	if ((COLORS)); then
 		if ((DEBUG)); then
 			color-echo -dbc "${LOGCOLOR}" "[$(iso-8601-basic "${RESOLUTION}")::${LOGTYPE}]::${*}"
-		elif ((USERSPECIFIED)); then
-			color-echo -bc "${LOGCOLOR}" "[$(iso-8601-basic "${RESOLUTION}")::${LOGTYPE}]::${*}"
 		else
 			color-echo -bc "${LOGCOLOR}" "[$(iso-8601-basic "${RESOLUTION}")::${LOGTYPE}]::${*}"
 		fi

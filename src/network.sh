@@ -96,8 +96,8 @@ test-internet-access() {
 
 	# Remove options from the input list $@ so the first remaining argument is $1.
 	shift "$((OPTIND - 1))"
-	local URL=${*:-${ARGS[@]}}
-	IFS=" " read -r -a URL <<<"${URL}"
+	local -a URL=("$@")
+	[[ ${#URL[@]} -eq 0 ]] && URL=("${ARGS[@]}")
 
 	# Print status if verbose
 	if ((VERBOSE == 1)); then
@@ -133,12 +133,13 @@ test-internet-access() {
 	fi
 
 	# Start the timeout counter and begin testing
+	local BEGIN
 	BEGIN=$(date +%s)
 	for SITE in "${URL[@]}"; do
 
 		for COMMAND in "${AVAILABLE_COMMANDS[@]}"; do
 
-			REM="${TIME_REMAINING}"
+			local REM="${TIME_REMAINING}"
 			ARGS=(--preserve-status "${REM}s")
 			case "${COMMAND}" in
 			ping) ARGS+=(ping -W "${REM}" "${PING_ARGS[@]}") ;;
@@ -153,7 +154,7 @@ test-internet-access() {
 			fi
 
 			# Update time remaining
-			ELAPSED=$(($(date +%s) - BEGIN))
+			local ELAPSED=$(($(date +%s) - BEGIN))
 			((TIME_REMAINING -= ELAPSED))
 			((VERBOSE == 1)) && echo "Time remaining: ${TIME_REMAINING}"
 			if ((TIME_REMAINING <= 0)); then

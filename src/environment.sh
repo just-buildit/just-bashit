@@ -102,6 +102,7 @@ unset-bashrc() {
 	# Initialize all referenced variables
 	local HELP
 	local OPTARG=""
+	local OPTIND=0
 	local BASHRC="${HOME}/.bashrc"
 
 	read -r -d '' HELP <<-'EOF' || true
@@ -184,7 +185,7 @@ unset-bashrc() {
 check-command-exists() {
 
 	# Assume we are running under -u so initialize any referenced variables
-	ARG1=${1:-}
+	local ARG1=${1:-}
 
 	# Forget getopts, manually parse for handful of inputs
 	case "${ARG1}" in

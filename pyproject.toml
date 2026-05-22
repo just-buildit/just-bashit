@@ -1,19 +1,24 @@
-[tool.poetry]
+[build-system]
+requires = ["just-buildit"]
+build-backend = "just_buildit"
+
+[tool.just-buildit]
+pure = true
+
+[project]
 name = "git-bash-ed"
 version = "0.1.4"
 description = "Evolving set of auto-formatted, bats-tested, shellcheck-linted tools, templates, and more."
-authors = ["Matthew T Hunter <matthew.t.hunter@aero.org>"]
 readme = "README.md"
-package-mode = false
+requires-python = ">=3.9"
+authors = [
+    { name = "Matthew T Hunter", email = "matthew.t.hunter@aero.org" },
+]
 
-[tool.poetry.dependencies]
-python = "^3.9"
-pre-commit = "*"
-poetry = "^2.0.1"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+[dependency-groups]
+dev = [
+    "pre-commit",
+]
 
 [[tool.poetry_bumpversion.replacements]]
 files = [

@@ -15,17 +15,61 @@ jobs:
         shell: bash
     container:
       image: kcov/kcov:latest
-    
+
     steps:
-    
+
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
     - uses: luizm/action-sh-checker@master
     - name: Install make
       run: |
         apt update && apt upgrade -y
         apt install -y make git shellcheck xmlstarlet
-    - uses: actions/checkout@v4
-      with: 
-        submodules: recursive
 
     - name: Build & Test
       run: make all
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: git-bash-ed
+        path: git-bash-ed.tar.gz
+
+  release:
+
+    needs: build
+    runs-on: ubuntu-22.04
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+
+    steps:
+
+    - uses: actions/checkout@v4
+
+    - uses: actions/download-artifact@v4
+      with:
+        name: git-bash-ed
+
+    - name: Read version
+      id: ver
+      run: |
+        VER=$(grep 'PACKAGE: git-bash-ed version' src/datetime.sh \
+              | grep -oP '\d+\.\d+\.\d+')
+        echo "version=${VER}" >> "$GITHUB_OUTPUT"
+
+    - name: Publish GitHub Release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        VER="v${{ steps.ver.outputs.version }}"
+        SHORT="${{ github.sha }}"
+        SHORT="${SHORT:0:7}"
+        if gh release view "${VER}" >/dev/null 2>&1; then
+          TAG="${VER}-${SHORT}"
+        else
+          TAG="${VER}"
+        fi
+        gh release create "${TAG}" git-bash-ed.tar.gz \
+          --title "git-bash-ed ${TAG}" \
+          --notes "Automated release from commit ${{ github.sha }}."

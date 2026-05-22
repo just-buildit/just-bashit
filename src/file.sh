@@ -69,14 +69,10 @@ add-line() {
 	local ENTRY=${1:-}
 	local FILEPATH=${2:-}
 
-	# For two inputs assume standard operation
-	if [ -n "${FILEPATH}" ]; then
-		local FILEPATH="${FILEPATH}"
-
-	# If only one input, write blank line, unless told not to.
-	elif [ -n "${ENTRY}" ]; then
-		local FILEPATH="${ENTRY}"
-		local ENTRY=""
+	# For two inputs assume standard operation; if one, treat it as FILEPATH.
+	if [ -z "${FILEPATH}" ] && [ -n "${ENTRY}" ]; then
+		FILEPATH="${ENTRY}"
+		ENTRY=""
 
 	# Print some help if they didn't provide anything.
 	else
@@ -164,24 +160,19 @@ remove-line() {
 	local ENTRY=${1:-}
 	local FILEPATH=${2:-}
 
-	# For two inputs assume standard operation
-	if [ -n "${FILEPATH}" ]; then
-		local FILEPATH="${FILEPATH}"
-
-	# If only one input, write blank line, unless told not to.
-	elif [ -n "${ENTRY}" ]; then
-		if ((BLANK)); then
-			local FILEPATH="${ENTRY}"
-			local ENTRY=""
+	# For two inputs assume standard operation; if one, treat it as FILEPATH.
+	if [ -z "${FILEPATH}" ]; then
+		if [ -n "${ENTRY}" ]; then
+			if ((BLANK)); then
+				FILEPATH="${ENTRY}"
+				ENTRY=""
+			else
+				return 0
+			fi
 		else
-			return 0
+			echo "Not enough arguments."
+			echo "${HELP}"
 		fi
-
-	# Print some help if they didn't provide anything.
-	else
-		echo "Not enough arguments."
-		echo "${HELP}"
-
 	fi
 
 	# Check permissions and create if necessary.

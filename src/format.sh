@@ -168,7 +168,7 @@ color-echo() {
 			;;
 
 		c)
-			case $(echo "${OPTARG}" | tr '[:upper:]' '[:lower:]') in
+			case "${OPTARG,,}" in
 
 			black)
 				FOREGROUND=30

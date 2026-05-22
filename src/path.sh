@@ -12,7 +12,7 @@
 get-scriptpath() {
 
 	# Assume we are running under -u so initialize any referenced variables
-	ARG1=${1:-}
+	local ARG1=${1:-}
 
 	# Forget getopts, maually parse for handful of inputs
 	case $ARG1 in
@@ -46,7 +46,7 @@ get-scriptpath() {
 set-scriptpath() {
 
 	# Assume we are running under -u so initialize any referenced variables
-	ARG1=${1:-}
+	local ARG1=${1:-}
 
 	# Forget getopts, maually parse for handful of inputs
 	case $ARG1 in
