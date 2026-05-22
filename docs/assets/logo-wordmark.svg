@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 80" width="420" height="80">
+
+  <!-- Background -->
+  <rect width="420" height="80" rx="16" fill="#0d1117"/>
+
+  <!-- Traffic light dots -->
+  <circle cx="22" cy="26" r="6" fill="#ff5f57"/>
+  <circle cx="40" cy="26" r="6" fill="#ffbd2e"/>
+  <circle cx="58" cy="26" r="6" fill="#28c840"/>
+
+  <!-- Divider -->
+  <line x1="76" y1="14" x2="76" y2="66" stroke="#30363d" stroke-width="1.5"/>
+
+  <!-- Prompt $ -->
+  <text
+    x="90" y="53"
+    font-family="'Courier New', Courier, monospace"
+    font-size="36"
+    font-weight="bold"
+    fill="#f59e0b"
+  >$</text>
+
+  <!-- just-bashit wordmark -->
+  <text
+    x="124" y="53"
+    font-family="'Courier New', Courier, monospace"
+    font-size="36"
+    font-weight="bold"
+  >
+    <tspan fill="#ffffff">just-</tspan><tspan fill="#f59e0b">bashit</tspan>
+  </text>
+
+  <!-- Cursor -->
+  <rect x="398" y="22" width="14" height="32" rx="2" fill="#f59e0b" opacity="0.85"/>
+
+</svg>
