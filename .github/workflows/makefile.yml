@@ -27,6 +27,8 @@ jobs:
       with:
         submodules: recursive
     - uses: luizm/action-sh-checker@master
+      with:
+        sh_checker_exclude: "test/bats test/test_helper"
 
     - name: Build & Test
       run: make all
