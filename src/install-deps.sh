@@ -115,7 +115,7 @@ _template() {
 #   install-deps.sh -g runtime,dev deps.toml
 #
 # Remove sections for package managers you don't support.
-# Use jr gh:just-buildit/just-bashit/src/install-deps.sh < deps.toml
+# Use jx install-deps < deps.toml
 
 [runtime.apt]
 packages = [
