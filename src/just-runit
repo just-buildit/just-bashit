@@ -44,7 +44,7 @@ read -r -d '' HELP <<-EOF || true
 	  ARGS, then discard — no installation, no environment pollution.
 
 	URL Shortcuts:
-	  jbs:LIBRARY           just-bashit library  (e.g. jbs:logging)
+	  jbs:SCRIPT            just-bashit src/ script (e.g. jbs:logging, jbs:install-deps)
 	  gh:USER/REPO/PATH     GitHub raw, default branch main
 	  gh:USER/REPO/PATH@REF GitHub raw at a specific ref/tag/sha
 
@@ -211,6 +211,10 @@ _acquire_jbs() {
 		for l in "${_JBS_LIBS[@]}"; do
 			_fetch_to "${_JBS_BASE}/${l}.sh" "${jbs_dir}/${l}.sh"
 		done
+		# fetch the target itself when it is not one of the core libs
+		if ! printf '%s\n' "${_JBS_LIBS[@]}" | grep -qx "${lib}"; then
+			_fetch_to "${_JBS_BASE}/${lib}.sh" "${dest}"
+		fi
 	else
 		_log "cache hit: ${dest}"
 	fi
