@@ -7,7 +7,7 @@ be invoked ephemerally via [`just-runit`](just-runit.md) — no local
 installation required.
 
 ```bash
-jx gh:just-buildit/just-bashit/src/install-deps.sh < deps.toml
+jbx gh:just-buildit/just-bashit/src/install-deps.sh < deps.toml
 ```
 
 ---
@@ -88,7 +88,7 @@ install-deps.sh --template deps.toml
 Or ephemerally:
 
 ```bash
-jx gh:just-buildit/just-bashit/src/install-deps.sh --template deps.toml
+jbx gh:just-buildit/just-bashit/src/install-deps.sh --template deps.toml
 ```
 
 The generated file includes usage instructions and example values for every
@@ -131,8 +131,8 @@ curl -fsSL https://example.com/deps.toml | install-deps.sh -g runtime,dev
 ### Via just-runit (no local install)
 
 ```bash
-jx gh:just-buildit/just-bashit/src/install-deps.sh < deps.toml
-jx gh:just-buildit/just-bashit/src/install-deps.sh -g runtime,dev < deps.toml
+jbx gh:just-buildit/just-bashit/src/install-deps.sh < deps.toml
+jbx gh:just-buildit/just-bashit/src/install-deps.sh -g runtime,dev < deps.toml
 ```
 
 ---
@@ -192,13 +192,13 @@ install-deps.sh -g runtime,dev,test deps.toml
 ### Pin to a specific commit for reproducible CI
 
 ```bash
-jx gh:just-buildit/just-bashit/src/install-deps.sh@abc1234 < deps.toml
+jbx gh:just-buildit/just-bashit/src/install-deps.sh@abc1234 < deps.toml
 ```
 
 ### Thin project shim
 
 Projects that want a one-step `./install-deps.sh` without requiring
-`jx` on the caller's `PATH` can include a shim:
+`jb` on the caller's `PATH` can include a shim:
 
 ```bash
 #!/usr/bin/env bash
@@ -206,15 +206,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 JBS="gh:just-buildit/just-bashit/src/install-deps.sh"
 
-if command -v jx >/dev/null 2>&1; then
-    jx "${JBS}" "$@" <"${SCRIPT_DIR}/deps.toml"
+if command -v jbx >/dev/null 2>&1; then
+    jbx "${JBS}" "$@" <"${SCRIPT_DIR}/deps.toml"
 elif command -v just-runit >/dev/null 2>&1; then
     just-runit "${JBS}" "$@" <"${SCRIPT_DIR}/deps.toml"
 elif [ -f "${SCRIPT_DIR}/../just-bashit/src/install-deps.sh" ]; then
     bash "${SCRIPT_DIR}/../just-bashit/src/install-deps.sh" "$@" \
         "${SCRIPT_DIR}/deps.toml"
 else
-    echo "error: just-runit (jx) not found." >&2
+    echo "error: just-runit (jb) not found." >&2
     exit 1
 fi
 ```

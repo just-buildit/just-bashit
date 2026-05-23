@@ -1,17 +1,17 @@
 # just-runit
 
-`just-runit` (alias: `jx`) is an ephemeral bash tool runner. Fetch a script from a URL or
-namespace, call a function it defines, then discard — no installation, no leftover environment
-pollution. The bash equivalent of `uvx`, for anything reachable over HTTPS.
+`just-runit` (aliases: `jb run`, `jbx`) is an ephemeral bash tool runner. Fetch a script from a
+URL or namespace, call a function it defines, then discard — no installation, no leftover
+environment pollution. The bash equivalent of `uvx`, for anything reachable over HTTPS.
 
 !!! danger "You are responsible for what you run"
-    `jx` fetches and executes arbitrary code from any URL you provide.
+    `jbx` fetches and executes arbitrary code from any URL you provide.
     It performs no review, scanning, or sandboxing of remote scripts.
     There is no safety guarantee of any kind — that responsibility
     belongs entirely to you. Always inspect a script before running it.
 
 ```bash
-jx just-bashit:datetime iso-8601-basic -m
+jbx just-bashit:datetime iso-8601-basic -m
 # 20260522T174523.841Z
 ```
 
@@ -19,15 +19,15 @@ jx just-bashit:datetime iso-8601-basic -m
 
 ## Getting just-runit
 
-Source the install script — it downloads `just-runit`, drops a `jx` symlink
-in `~/.local/bin`, and exports the updated `PATH` into your current shell
-immediately (no new terminal needed):
+Source the install script — it downloads `just-runit`, creates `jb`, `jbx`, and
+`just-buildit` symlinks in `~/.local/bin`, and exports the updated `PATH` into your
+current shell immediately (no new terminal needed):
 
 ```bash
 . <(curl -sSL https://just-buildit.github.io/get-just-runit.sh)
 ```
 
-That's it. `jx` is live in the shell you ran that in.
+That's it. `jb` and `jbx` are live in the shell you ran that in.
 
 !!! warning "Use at your own risk"
     This script is provided as-is, without warranty of any kind. It writes
@@ -41,15 +41,22 @@ That's it. `jx` is live in the shell you ran that in.
     `export PATH=...` reaches you directly. `bash <(...)` or
     `curl ... | bash` spawn a subshell — PATH changes die with it.
 
+To force reinstall even when already at the current version:
+
+```bash
+JB_REINSTALL=1 . <(curl -sSL https://just-buildit.github.io/get-just-runit.sh)
+```
+
 ---
 
 ## How it works
 
 ```
-jx [OPTIONS] SPEC [FUNCTION [ARGS...]]
+jb run [OPTIONS] SPEC [FUNCTION [ARGS...]]
+   or: jbx [OPTIONS] SPEC [FUNCTION [ARGS...]]
 ```
 
-`jx` resolves `SPEC` to a script URL, fetches it, sources it into a subshell,
+`jbx` resolves `SPEC` to a script URL, fetches it, sources it into a subshell,
 optionally calls `FUNCTION` with `ARGS`, then exits. The subshell boundary is
 the isolation — nothing leaks back to the calling shell.
 
@@ -76,21 +83,21 @@ reused on subsequent calls until the TTL expires (default 1 hour).
 
 ```bash
 # Default namespace (just-buildit.github.io)
-jx install-deps -s apt
+jbx install-deps -s apt
 
 # Explicit just-bashit namespace
-jx just-bashit:logging log -t SUCCESS "deployed"
+jbx just-bashit:logging log -t SUCCESS "deployed"
 
 # GitHub shorthand, pinned to a tag
-jx gh:user/repo/scripts/deploy.sh@v1.4.0 run --env prod
+jbx gh:user/repo/scripts/deploy.sh@v1.4.0 run --env prod
 
 # Full URL
-jx https://example.com/tools/setup.sh configure
+jbx https://example.com/tools/setup.sh configure
 ```
 
 !!! note "just-bashit namespace co-fetch"
     Libraries like `logging` and `network` depend on other just-bashit
-    libraries. When you use `just-bashit:NAME`, `jx` co-fetches the entire `src/`
+    libraries. When you use `just-bashit:NAME`, `jbx` co-fetches the entire `src/`
     directory into a single cache folder so relative inter-source calls
     resolve correctly — you don't have to manage this yourself.
 
@@ -116,7 +123,7 @@ jx https://example.com/tools/setup.sh configure
 **Discover what a script exposes before calling it:**
 
 ```bash
-jx -l just-bashit:logging
+jbx -l just-bashit:logging
 # color-echo
 # is-number
 # iso-8601-basic
@@ -128,41 +135,41 @@ jx -l just-bashit:logging
 **Pin to a checksum for auditable CI use:**
 
 ```bash
-jx -k sha256:abc123def456 https://infra.example.com/bootstrap.sh setup
+jbx -k sha256:abc123def456 https://infra.example.com/bootstrap.sh setup
 ```
 
 **Clean environment — script sees only HOME, TERM, PATH:**
 
 ```bash
-jx -c https://example.com/tool.sh run
+jbx -c https://example.com/tool.sh run
 ```
 
 **Pass specific vars into a clean environment:**
 
 ```bash
-jx -c -p DEPLOY_TOKEN,AWS_REGION https://example.com/deploy.sh run
+jbx -c -p DEPLOY_TOKEN,AWS_REGION https://example.com/deploy.sh run
 ```
 
 **Force a fresh fetch (e.g. after a release):**
 
 ```bash
-jx -r just-bashit:logging log "refreshed"
+jbx -r just-bashit:logging log "refreshed"
 ```
 
 **Skip the cache entirely — nothing touches disk:**
 
 ```bash
-jx -n https://example.com/ephemeral.sh do-thing
+jbx -n https://example.com/ephemeral.sh do-thing
 ```
 
 **Script mode — no function name, just source and run:**
 
 ```bash
-jx https://example.com/setup.sh   # runs whatever the script does top-level
+jbx https://example.com/setup.sh   # runs whatever the script does top-level
 ```
 
 **One-liner in CI:**
 
 ```bash
-jx just-bashit:network test-internet-access -vt 10 || exit 1
+jbx just-bashit:network test-internet-access -vt 10 || exit 1
 ```
