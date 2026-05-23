@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # ############################################################################
-# EXECUTABLE: just-runit (alias: jr)                                         #
+# EXECUTABLE: just-runit (alias: jx)                                         #
 # PACKAGE: just-bashit version 0.1.4                                         #
 # ############################################################################
-# Ephemeral bash tool runner. Fetch a script from a URL, optionally call a  #
-# function it defines, then discard — no installation, no env pollution.     #
-# Analogous to uvx but for any bash script reachable over HTTPS.             #
+# Ephemeral bash tool runner. Fetch a script from a URL or namespace, call  #
+# an optional function, then discard — no installation, no env pollution.    #
+# Analogous to uvx but for any bash/Python script reachable over HTTPS.     #
 # ############################################################################
 set -euo pipefail
 IFS=$'\n\t'
@@ -15,6 +15,12 @@ IFS=$'\n\t'
 _CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/just-runit"
 _ME="$(basename "$0")"
 _DEFAULT_TTL=3600
+
+# Default namespace base URL (just-buildit org pages root).
+_JX_DEFAULT_NS="just-buildit"
+_JX_DEFAULT_BASE="https://just-buildit.github.io"
+
+# just-bashit raw source base — scripts co-fetched for inter-lib calls.
 _JBS_BASE="https://raw.githubusercontent.com/just-buildit/just-bashit/main/src"
 # All src/ libs; fetched together so relative inter-source calls resolve.
 _JBS_LIBS=(
@@ -38,19 +44,29 @@ OPTIND=0
 # ---- help -------------------------------------------------------------------
 
 read -r -d '' HELP <<-EOF || true
-	Usage: ${_ME} [OPTIONS] URL [FUNCTION [ARGS...]]
+	Usage: ${_ME} [OPTIONS] SPEC [FUNCTION [ARGS...]]
 
-	  Ephemeral bash tool runner. Fetch URL, optionally call FUNCTION with
-	  ARGS, then discard — no installation, no environment pollution.
+	  Ephemeral tool runner. Resolve SPEC to a script, optionally call
+	  FUNCTION with ARGS, then discard — no installation, no env pollution.
 
-	URL Shortcuts:
-	  jbs:SCRIPT            just-bashit src/ script (e.g. jbs:logging, jbs:install-deps)
+	SPEC forms:
+	  NAME                  bare name, resolved via default namespace (just-buildit)
+	  NS:NAME               explicit namespace (e.g. just-bashit:logging)
 	  gh:USER/REPO/PATH     GitHub raw, default branch main
 	  gh:USER/REPO/PATH@REF GitHub raw at a specific ref/tag/sha
+	  https://URL           direct URL
+
+	Namespaces:
+	  just-buildit          ${_JX_DEFAULT_BASE}/   (default)
+	  just-bashit           ${_JBS_BASE}/
+
+	Resolution order for NAME / NS:NAME:
+	  1. aliases.toml at namespace base
+	  2. Direct URL probe: NS_BASE/NAME.sh then NS_BASE/NAME.py
 
 	Options:
 	  -h        Show this message and exit.
-	  -l        List functions defined by URL then exit.
+	  -l        List functions defined by SPEC then exit.
 	  -r        Refresh — ignore and overwrite cached copy.
 	  -n        No-cache — fetch fresh and discard (nothing written).
 	  -c        Clean environment (minimal, like sudo without -E).
@@ -65,18 +81,16 @@ read -r -d '' HELP <<-EOF || true
 	                       FUNCTION not supported for Python — pass args directly.
 
 	Examples:
-	  ${_ME} jbs:datetime iso-8601-basic -m
+	  ${_ME} install-deps -s apt
+	  ${_ME} just-bashit:logging info "hello"
+	  ${_ME} just-bashit:datetime iso-8601-basic -m
 	  ${_ME} gh:user/repo/tools/deploy.sh run --env prod
 	  ${_ME} gh:user/repo/tool.sh@v2.1.0 setup
 	  ${_ME} https://example.com/tool.sh
 	  ${_ME} https://example.com/tool.py --flag value
-	  ${_ME} -l jbs:logging
-	  ${_ME} -l https://example.com/tool.py
+	  ${_ME} -l just-bashit:logging
 	  ${_ME} -c -p HOME,TERM https://example.com/tool.sh func arg
 	  ${_ME} -n -k sha256:abc123 https://example.com/tool.sh fn
-
-	Note: jbs: libraries with inter-dependencies (logging, network) work
-	because all src/ files are co-fetched into the same cache directory.
 EOF
 
 # ---- parse options ----------------------------------------------------------
@@ -109,7 +123,7 @@ shift "$((OPTIND - 1))"
 	exit 1
 }
 
-RAW_URL="${1}"
+RAW_SPEC="${1}"
 shift
 FUNC="${1:-}"
 shift || true
@@ -123,14 +137,114 @@ _err() {
 	exit 1
 }
 
+# ---- namespace resolution ---------------------------------------------------
+
+# Parse aliases.toml fetched from NS_BASE/aliases.toml and look up a name.
+# Returns the resolved URL, or empty string if not found.
+_lookup_alias() {
+	local base="${1}" name="${2}"
+	local aliases_url="${base}/aliases.toml"
+	local key
+	key=$(printf '%s' "${base}" | sha256sum | cut -d' ' -f1)
+	local aliases_cache="${_CACHE_DIR}/aliases-${key}.toml"
+
+	if [[ ${OPT_REFRESH} -eq 1 ]] || ! _cache_valid "${aliases_cache}"; then
+		mkdir -p "${_CACHE_DIR}"
+		_log "fetching ${aliases_url}"
+		if ! curl -sSL --proto '=https' --tlsv1.2 --max-time 10 \
+			-o "${aliases_cache}.new" "${aliases_url}" 2>/dev/null; then
+			rm -f "${aliases_cache}.new"
+			echo ""
+			return
+		fi
+		mv "${aliases_cache}.new" "${aliases_cache}"
+		printf 'ts=%s\nurl=%s\n' "$(date +%s)" "${aliases_url}" \
+			>"$(_meta_path "${aliases_cache}")"
+	fi
+
+	# Parse: find key under [aliases] section.
+	awk -v target="${name}" '
+		/^\[aliases\]/ { in_sec=1; next }
+		/^\[/          { in_sec=0 }
+		in_sec && /^[[:space:]]*[^#=[:space:]]/ {
+			split($0, a, /[[:space:]]*=[[:space:]]*/)
+			key = a[1]; gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+			val = a[2]; gsub(/^[[:space:]"]+|["[:space:]]+$/, "", val)
+			if (key == target) { print val; exit }
+		}
+	' "${aliases_cache}"
+}
+
+# Probe whether a URL exists (HEAD, no download).  Returns 0 if 200/301/302.
+_head_ok() {
+	local url="${1}"
+	local code
+	code=$(curl -sSL --proto '=https' --tlsv1.2 --max-time 5 \
+		-o /dev/null -w '%{http_code}' --head "${url}" 2>/dev/null)
+	[[ ${code} == "200" || ${code} == "301" || ${code} == "302" ]]
+}
+
+# Resolve NS:NAME or bare NAME against a namespace base URL.
+# Returns a URL or the internal "jbs:NAME" marker for just-bashit.
+_resolve_ns() {
+	local ns="${1}" name="${2}"
+
+	# Map namespace to base URL.
+	local base
+	case "${ns}" in
+	just-buildit) base="${_JX_DEFAULT_BASE}" ;;
+	just-bashit)
+		# just-bashit uses the co-fetch mechanism; return internal marker.
+		echo "jbs:${name}"
+		return
+		;;
+	*)
+		_err "unknown namespace '${ns}'; known: just-buildit, just-bashit"
+		;;
+	esac
+
+	# 1. Check aliases.toml first (one cached round-trip covers all names).
+	local alias_url
+	alias_url=$(_lookup_alias "${base}" "${name}")
+	if [[ -n ${alias_url} ]]; then
+		_log "resolved '${name}' via aliases.toml -> ${alias_url}"
+		echo "${alias_url}"
+		return
+	fi
+
+	# 2. Probe direct .sh then .py.
+	local url_sh="${base}/${name}.sh"
+	local url_py="${base}/${name}.py"
+	if _head_ok "${url_sh}"; then
+		_log "resolved '${name}' via direct probe -> ${url_sh}"
+		echo "${url_sh}"
+		return
+	fi
+	if _head_ok "${url_py}"; then
+		_log "resolved '${name}' via direct probe -> ${url_py}"
+		echo "${url_py}"
+		return
+	fi
+
+	_err "cannot resolve '${name}' in namespace '${ns}' (checked ${base}/aliases.toml and ${url_sh})"
+}
+
 # ---- URL resolution ---------------------------------------------------------
 
 _resolve() {
 	local raw="${1}"
 	case "${raw}" in
-	jbs:*)
-		# Resolved separately in _acquire; pass through as-is.
-		echo "${raw}"
+	just-bashit:*)
+		# Explicit just-bashit namespace; use co-fetch mechanism.
+		echo "jbs:${raw#just-bashit:}"
+		;;
+	*://*)
+		# Looks like an absolute URL with scheme — handle below.
+		case "${raw}" in
+		https://*) echo "${raw}" ;;
+		http://*) _err "HTTP not allowed; use HTTPS" ;;
+		*) _err "unrecognised URL scheme: ${raw}" ;;
+		esac
 		;;
 	gh:*)
 		local spec="${raw#gh:}" ref="main"
@@ -145,14 +259,14 @@ _resolve() {
 		path="${spec#*/}"
 		echo "https://raw.githubusercontent.com/${user}/${repo}/${ref}/${path}"
 		;;
-	https://*)
-		echo "${raw}"
-		;;
-	http://*)
-		_err "HTTP not allowed; use HTTPS"
+	*:*)
+		# NS:NAME form (not a URL scheme — no :// present).
+		local ns="${raw%%:*}" name="${raw#*:}"
+		_resolve_ns "${ns}" "${name}"
 		;;
 	*)
-		_err "unrecognised URL scheme: ${raw}"
+		# Bare name — resolve against default namespace.
+		_resolve_ns "${_JX_DEFAULT_NS}" "${raw}"
 		;;
 	esac
 }
@@ -192,8 +306,8 @@ _fetch_to() {
 
 # ---- acquire script ---------------------------------------------------------
 
-# For jbs: shortcuts, all src/ libs are co-fetched into cache/jbs/ so that
-# relative inter-source calls (e.g. logging.sh -> format.sh) resolve correctly.
+# For just-bashit scripts, all src/ libs are co-fetched into cache/jbs/ so
+# that relative inter-source calls (e.g. logging.sh -> format.sh) resolve.
 _acquire_jbs() {
 	local lib="${1}"
 	local jbs_dir="${_CACHE_DIR}/jbs"
@@ -325,11 +439,11 @@ _run_python() {
 	shift
 
 	if ! command -v uv >/dev/null 2>&1; then
-		_log "uv not found — installing via jr"
+		_log "uv not found — installing via jx"
 		"${0}" https://astral.sh/uv/install.sh
 		hash -r 2>/dev/null || true
 		command -v uv >/dev/null 2>&1 ||
-			_err "uv install failed; try manually: jr https://astral.sh/uv/install.sh"
+			_err "uv install failed; try manually: jx https://astral.sh/uv/install.sh"
 	fi
 
 	_log "using uv run"
@@ -378,7 +492,7 @@ _run() {
 
 # ---- main -------------------------------------------------------------------
 
-URL=$(_resolve "${RAW_URL}")
+URL=$(_resolve "${RAW_SPEC}")
 _log "resolved: ${URL}"
 
 SCRIPT=$(_acquire "${URL}")
@@ -386,7 +500,7 @@ _log "script: ${SCRIPT}"
 
 [[ -n ${OPT_CHECKSUM} ]] && _verify "${SCRIPT}" "${OPT_CHECKSUM}"
 
-SCRIPT_LANG=$(_detect_lang "${SCRIPT}" "${RAW_URL}")
+SCRIPT_LANG=$(_detect_lang "${SCRIPT}" "${RAW_SPEC}")
 _log "language: ${SCRIPT_LANG}"
 
 if [[ ${OPT_LIST} -eq 1 ]]; then
