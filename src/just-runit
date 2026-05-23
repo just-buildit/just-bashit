@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # ############################################################################
-# EXECUTABLE: just-runit (alias: jx)                                         #
+# EXECUTABLE: just-runit (aliases: jb run, jbx)                              #
 # PACKAGE: just-bashit version 0.1.4                                         #
 # ############################################################################
-# Ephemeral bash tool runner. Fetch a script from a URL or namespace, call  #
+# Ephemeral bash tool runner. Fetch a script from a URL or namespace, call   #
 # an optional function, then discard — no installation, no env pollution.    #
-# Analogous to uvx but for any bash/Python script reachable over HTTPS.     #
+# Analogous to uvx but for any bash/Python script reachable over HTTPS.      #
 # ############################################################################
 set -euo pipefail
 IFS=$'\n\t'
@@ -17,8 +17,8 @@ _ME="$(basename "$0")"
 _DEFAULT_TTL=3600
 
 # Default namespace base URL (just-buildit org pages root).
-_JX_DEFAULT_NS="just-buildit"
-_JX_DEFAULT_BASE="https://just-buildit.github.io"
+_JB_DEFAULT_NS="just-buildit"
+_JB_DEFAULT_BASE="https://just-buildit.github.io"
 
 # just-bashit raw source base — scripts co-fetched for inter-lib calls.
 _JBS_BASE="https://raw.githubusercontent.com/just-buildit/just-bashit/main/src"
@@ -27,6 +27,34 @@ _JBS_LIBS=(
 	datetime environment file format
 	function-template logging match network path
 )
+
+# ---- top-level dispatch (when called as "jb" or "just-buildit") -------------
+
+if [[ ${_ME} == "jb" || ${_ME} == "just-buildit" ]]; then
+	SUBCMD="${1:-}"
+	case "${SUBCMD}" in
+	run)
+		shift
+		_ME="${_ME} run"
+		;;
+	"" | help | -h | --help)
+		cat <<-EOF
+			Usage: ${_ME} <command> [OPTIONS] [ARGS...]
+
+			Commands:
+			  run     Ephemeral script runner (alias: jbx)
+
+			Run '${_ME} <command> -h' for details.
+		EOF
+		exit 0
+		;;
+	*)
+		echo "${_ME}: unknown command '${SUBCMD}'" >&2
+		echo "Run '${_ME} help' for usage." >&2
+		exit 1
+		;;
+	esac
+fi
 
 # ---- option state -----------------------------------------------------------
 
@@ -39,12 +67,13 @@ OPT_TTL="${_DEFAULT_TTL}"
 OPT_CHECKSUM=""
 OPT_PASS=()
 OPTARG=""
-OPTIND=0
+OPTIND=1
 
 # ---- help -------------------------------------------------------------------
 
 read -r -d '' HELP <<-EOF || true
 	Usage: ${_ME} [OPTIONS] SPEC [FUNCTION [ARGS...]]
+	   or: jbx [OPTIONS] SPEC [FUNCTION [ARGS...]]
 
 	  Ephemeral tool runner. Resolve SPEC to a script, optionally call
 	  FUNCTION with ARGS, then discard — no installation, no env pollution.
@@ -57,7 +86,7 @@ read -r -d '' HELP <<-EOF || true
 	  https://URL           direct URL
 
 	Namespaces:
-	  just-buildit          ${_JX_DEFAULT_BASE}/   (default)
+	  just-buildit          ${_JB_DEFAULT_BASE}/   (default)
 	  just-bashit           ${_JBS_BASE}/
 
 	Resolution order for NAME / NS:NAME:
@@ -139,7 +168,7 @@ _err() {
 
 # ---- namespace resolution ---------------------------------------------------
 
-# Parse aliases.toml fetched from NS_BASE/aliases.toml and look up a name.
+# Parse aliases.toml from NS_BASE/aliases.toml and look up a name.
 # Returns the resolved URL, or empty string if not found.
 _lookup_alias() {
 	local base="${1}" name="${2}"
@@ -175,7 +204,7 @@ _lookup_alias() {
 	' "${aliases_cache}"
 }
 
-# Probe whether a URL exists (HEAD, no download).  Returns 0 if 200/301/302.
+# Probe whether a URL exists (HEAD, no download).  Returns 0 if 2xx/3xx.
 _head_ok() {
 	local url="${1}"
 	local code
@@ -192,7 +221,7 @@ _resolve_ns() {
 	# Map namespace to base URL.
 	local base
 	case "${ns}" in
-	just-buildit) base="${_JX_DEFAULT_BASE}" ;;
+	just-buildit) base="${_JB_DEFAULT_BASE}" ;;
 	just-bashit)
 		# just-bashit uses the co-fetch mechanism; return internal marker.
 		echo "jbs:${name}"
@@ -239,7 +268,6 @@ _resolve() {
 		echo "jbs:${raw#just-bashit:}"
 		;;
 	*://*)
-		# Looks like an absolute URL with scheme — handle below.
 		case "${raw}" in
 		https://*) echo "${raw}" ;;
 		http://*) _err "HTTP not allowed; use HTTPS" ;;
@@ -266,7 +294,7 @@ _resolve() {
 		;;
 	*)
 		# Bare name — resolve against default namespace.
-		_resolve_ns "${_JX_DEFAULT_NS}" "${raw}"
+		_resolve_ns "${_JB_DEFAULT_NS}" "${raw}"
 		;;
 	esac
 }
@@ -439,11 +467,11 @@ _run_python() {
 	shift
 
 	if ! command -v uv >/dev/null 2>&1; then
-		_log "uv not found — installing via jx"
+		_log "uv not found — installing via jb run"
 		"${0}" https://astral.sh/uv/install.sh
 		hash -r 2>/dev/null || true
 		command -v uv >/dev/null 2>&1 ||
-			_err "uv install failed; try manually: jx https://astral.sh/uv/install.sh"
+			_err "uv install failed; try manually: jb run https://astral.sh/uv/install.sh"
 	fi
 
 	_log "using uv run"
