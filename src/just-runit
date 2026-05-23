@@ -111,7 +111,7 @@ read -r -d '' HELP <<-EOF || true
 
 	Examples:
 	  ${_ME} install-deps -s apt
-	  ${_ME} just-bashit:logging info "hello"
+	  ${_ME} just-bashit:logging log "hello"
 	  ${_ME} just-bashit:datetime iso-8601-basic -m
 	  ${_ME} gh:user/repo/tools/deploy.sh run --env prod
 	  ${_ME} gh:user/repo/tool.sh@v2.1.0 setup
@@ -154,8 +154,14 @@ shift "$((OPTIND - 1))"
 
 RAW_SPEC="${1}"
 shift
+# Only treat the next arg as a function name if it doesn't look like a flag.
+# Flags (starting with -) and missing args fall through to ARGS unchanged.
 FUNC="${1:-}"
-shift || true
+if [[ -n ${FUNC} && ${FUNC} != -* ]]; then
+	shift || true
+else
+	FUNC=""
+fi
 ARGS=("$@")
 
 # ---- helpers ----------------------------------------------------------------
