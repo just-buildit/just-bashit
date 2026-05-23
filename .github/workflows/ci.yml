@@ -16,7 +16,7 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update && apt-get install -y --no-install-recommends \
-            make git shellcheck bats
+            ca-certificates make git shellcheck bats
 
       - uses: actions/checkout@v4
         with:
