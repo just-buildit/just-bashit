@@ -20,18 +20,69 @@ dev = [
     "pre-commit",
 ]
 
-[[tool.poetry_bumpversion.replacements]]
-files = [
-    "src/datetime.sh",
-    "src/environment.sh",
-    "src/file.sh",
-    "src/format.sh",
-    "src/function-template.sh",
-    "src/logging.sh",
-    "src/match.sh",
-    "src/network.sh",
-    "src/path.sh",
-    "src/script-template",
-]
-search='# PACKAGE: just-bashit version {current_version}                                         #'
-replace='# PACKAGE: just-bashit version {new_version}                                         #'
+[tool.bumpversion]
+current_version = "0.1.4"
+commit = true
+tag = true
+tag_name = "v{new_version}"
+message = "chore: release v{new_version}"
+
+[[tool.bumpversion.files]]
+filename = "src/datetime.sh"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+[[tool.bumpversion.files]]
+filename = "src/environment.sh"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+[[tool.bumpversion.files]]
+filename = "src/file.sh"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+[[tool.bumpversion.files]]
+filename = "src/format.sh"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+[[tool.bumpversion.files]]
+filename = "src/function-template.sh"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+[[tool.bumpversion.files]]
+filename = "src/install-deps.sh"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+[[tool.bumpversion.files]]
+filename = "src/just-runit"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+[[tool.bumpversion.files]]
+filename = "src/logging.sh"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+[[tool.bumpversion.files]]
+filename = "src/match.sh"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+[[tool.bumpversion.files]]
+filename = "src/network.sh"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+[[tool.bumpversion.files]]
+filename = "src/path.sh"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+[[tool.bumpversion.files]]
+filename = "src/script-template"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"

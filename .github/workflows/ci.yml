@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    container:
+      image: kcov/kcov:latest
+
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends \
+            make git shellcheck bats
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Run tests with coverage
+        run: make test
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: test-results/coverage/bats.*/cobertura.xml
+        continue-on-error: true
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: just-bashit
+          path: just-bashit.tar.gz
+
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck (SARIF → Code Scanning)
+        run: |
+          shellcheck --format=sarif src/*.sh > shellcheck.sarif || true
+
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: shellcheck.sarif
+
+  release:
+    needs: [test, lint]
+    runs-on: ubuntu-22.04
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: just-bashit
+
+      - name: Read version
+        id: ver
+        run: |
+          VER=$(grep 'PACKAGE: just-bashit version' src/datetime.sh \
+                | grep -oP '\d+\.\d+\.\d+')
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER="v${{ steps.ver.outputs.version }}"
+          SHORT="${{ github.sha }}"
+          SHORT="${SHORT:0:7}"
+          if gh release view "${VER}" >/dev/null 2>&1; then
+            TAG="${VER}-${SHORT}"
+          else
+            TAG="${VER}"
+          fi
+          gh release create "${TAG}" just-bashit.tar.gz \
+            --title "just-bashit ${TAG}" \
+            --notes "Automated release from commit ${{ github.sha }}."

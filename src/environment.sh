@@ -170,15 +170,8 @@ unset-bashrc() {
 
 	# Remove entry if present using built in editor
 	# ---------------------------------------------
-	# printf '%s\n': print each subsequent argument on a newline input to ed
-	# line 1: regex match causes vi to move "current line" to match or EOF
-	# line d: command instructs vi to delete the entire current line
-	# line w: command writes the content of the file to disk
-	# line q: quits the program
-	# -es: vi ex and silent mode.
-	# > /dev/null: silence stdout
-
-	printf '%s\n' "/^${BASHRC_ENTRY}$/" d w q | vi -es "${BASHRC}" >/dev/null
+	# Delete the exact line in-place; -i'' works on both GNU and BSD sed.
+	sed -i'' "/^$(printf '%s' "${BASHRC_ENTRY}" | sed 's/[[\.*^$()+?{}|]/\\&/g')$/d" "${BASHRC}"
 
 }
 
