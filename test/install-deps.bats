@@ -172,3 +172,20 @@ EOF
 	assert_output --partial "UCRT64"
 	assert_output --partial "cmake"
 }
+
+@test 'auto-discovers jbs-deps.toml in CWD' {
+	local tmpdir="${BATS_TEST_TMPDIR}/autodiscover"
+	mkdir -p "${tmpdir}"
+	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/jbs-deps.toml"
+	run bash -c "cd '${tmpdir}' && install-deps.sh -n -s apt"
+	assert_success
+	assert_output --partial "curl"
+}
+
+@test 'falls back to stdin when no file and no jbs-deps.toml' {
+	local tmpdir="${BATS_TEST_TMPDIR}/nofile"
+	mkdir -p "${tmpdir}"
+	run bash -c "printf '[runtime.apt]\npackages = [\"curl\"]\n' | (cd '${tmpdir}' && install-deps.sh -n -s apt)"
+	assert_success
+	assert_output --partial "curl"
+}
