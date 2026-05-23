@@ -504,12 +504,12 @@ _run() {
 		return
 	fi
 
-	# Validate func exists in the script before calling it.
+	# Validate func is defined after sourcing the script. Using declare -F
+	# rather than the before/after diff in _list_fns so that script functions
+	# which shadow same-named env functions are accepted.
 	if [[ -n ${func} ]]; then
-		local defined
-		defined=$(_list_fns "${script}" "bash")
-		printf '%s\n' "${defined}" | grep -qx "${func}" ||
-			_err "'${func}' is not a function defined by this script (defined: $(printf '%s\n' "${defined}" | tr '\n' ' '))"
+		bash -c "source ${script@Q} 2>/dev/null && declare -F ${func@Q} >/dev/null" ||
+			_err "'${func}' is not a function defined by this script"
 	fi
 
 	# Build the command string; %q ensures safe quoting of paths/names.
