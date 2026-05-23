@@ -504,6 +504,14 @@ _run() {
 		return
 	fi
 
+	# Validate func exists in the script before calling it.
+	if [[ -n ${func} ]]; then
+		local defined
+		defined=$(_list_fns "${script}" "bash")
+		printf '%s\n' "${defined}" | grep -qx "${func}" ||
+			_err "'${func}' is not a function defined by this script (defined: $(printf '%s\n' "${defined}" | tr '\n' ' '))"
+	fi
+
 	# Build the command string; %q ensures safe quoting of paths/names.
 	local cmd
 	if [[ -n ${func} ]]; then
