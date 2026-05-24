@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ############################################################################
 # EXECUTABLE: just-runit (aliases: jb run, jbx)                              #
-# PACKAGE: just-bashit version 0.1.4                                         #
+# PACKAGE: just-bashit version 0.1.5                                         #
 # ############################################################################
 # Ephemeral bash tool runner. Fetch a script from a URL or namespace, call   #
 # an optional function, then discard — no installation, no env pollution.    #

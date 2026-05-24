@@ -1,7 +1,7 @@
 #!/bin/bash
 # ############################################################################
 # LIBRARY: format.sh                                                         #
-# PACKAGE: just-bashit version 0.1.4                                         #
+# PACKAGE: just-bashit version 0.1.5                                         #
 # ############################################################################
 
 # Enforce sourcing of the script by taking advantage of the fact that return
