@@ -88,6 +88,49 @@ if [[ ${_ME} == "jb" || ${_ME} == "just-buildit" ]]; then
 		esac
 		exit 0
 		;;
+	install)
+		# Find jb.toml walking up from CWD.
+		_toml=""
+		_dir="${PWD}"
+		while [[ "${_dir}" != "/" ]]; do
+			if [[ -f "${_dir}/jb.toml" ]]; then
+				_toml="${_dir}/jb.toml"
+				break
+			fi
+			_dir="$(dirname "${_dir}")"
+		done
+		if [[ -z "${_toml}" ]]; then
+			echo "${_ME}: no jb.toml found (searched up from ${PWD})" >&2
+			exit 1
+		fi
+		printf '  reading %s\n' "${_toml}"
+		# Extract all source = "..." values from [tools.*] sections.
+		mapfile -t _sources < <(awk '
+			/^\[tools\./ { in_t=1; next }
+			/^\[/        { in_t=0 }
+			in_t && /^[[:space:]]*source[[:space:]]*=/ {
+				gsub(/.*=[[:space:]]*"|".*/, ""); print
+			}
+		' "${_toml}")
+		if [[ ${#_sources[@]} -eq 0 ]]; then
+			echo "${_ME}: no [tools.*] entries with source in ${_toml}"
+			exit 0
+		fi
+		_runner="$(readlink -f "${BASH_SOURCE[0]}")"
+		_ok=0; _fail=0
+		for _src in "${_sources[@]}"; do
+			printf '  -> %s ' "${_src}"
+			if "${_runner}" -l "${_src}" >/dev/null 2>&1; then
+				printf 'ok\n'; ((_ok++)) || true
+			else
+				printf 'failed\n' >&2; ((_fail++)) || true
+			fi
+		done
+		printf '  %d fetched' "${_ok}"
+		[[ ${_fail} -gt 0 ]] && printf ', %d failed' "${_fail}"
+		printf '\n'
+		[[ ${_fail} -gt 0 ]] && exit 1 || exit 0
+		;;
 	version | -V | --version)
 		echo "${_ME} v${_VERSION}"
 		exit 0
@@ -98,6 +141,7 @@ if [[ ${_ME} == "jb" || ${_ME} == "just-buildit" ]]; then
 
 			Commands:
 			  run      Ephemeral script runner (alias: jbx)
+			  install  Pre-fetch all tools declared in jb.toml
 			  cache    Manage the local script cache
 			  version  Print version and exit
 
