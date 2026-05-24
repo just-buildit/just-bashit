@@ -136,16 +136,25 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Run tests with kcov
+      - name: Collect coverage per test file
         run: |
           mkdir -p test-results/coverage
           for f in test/*.bats; do
             kcov \
+              --collect-only \
               --include-pattern=/src \
               --exclude-pattern=/test \
               test-results/coverage \
               bats "$f" >/dev/null 2>&1 || true
           done
+
+      - name: Merge coverage and generate report
+        run: |
+          kcov \
+            --report-only \
+            --include-pattern=/src \
+            --exclude-pattern=/test \
+            test-results/coverage
 
       - name: Generate coverage badge JSON
         run: |
