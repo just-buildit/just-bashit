@@ -141,19 +141,19 @@ EOF
 @test 'error on missing group' {
 	run install-deps.sh -n -s apt -g test "${GROUPED_FILE}"
 	assert_failure
-	assert_output --partial "no packages found"
+	assert_output --partial "no packages or cmd found"
 }
 
 @test 'error on missing section' {
 	run install-deps.sh -n -s dnf "${GROUPED_FILE}"
 	assert_failure
-	assert_output --partial "no packages found"
+	assert_output --partial "no packages or cmd found"
 }
 
 @test 'error on empty packages array' {
 	run install-deps.sh -n -s apt "${EMPTY_FILE}"
 	assert_failure
-	assert_output --partial "no packages found"
+	assert_output --partial "no packages or cmd found"
 }
 
 @test 'msys2 section always prints instructions' {
@@ -208,4 +208,101 @@ EOF
 	run bash -c "cd '${tmpdir}' && install-deps.sh -n -s apt <'${INLINE_FILE}'"
 	assert_success
 	assert_output --partial "curl"
+}
+
+@test 'no -g installs all groups when no toml groups key' {
+	run install-deps.sh -n -s apt "${GROUPED_FILE}"
+	assert_success
+	assert_output --partial "curl"
+	assert_output --partial "git"
+}
+
+@test '[tools.install-deps].groups restricts default groups' {
+	local f="${BATS_TEST_TMPDIR}/with_tool_groups.toml"
+	cat >"${f}" <<'EOF'
+[tools.install-deps]
+source = "just-bashit:install-deps"
+groups = ["runtime"]
+
+[runtime.apt]
+packages = ["curl"]
+
+[dev.apt]
+packages = ["git"]
+EOF
+	run install-deps.sh -n -s apt "${f}"
+	assert_success
+	assert_output --partial "curl"
+	refute_output --partial "git"
+}
+
+@test 'explicit -g overrides toml groups key' {
+	local f="${BATS_TEST_TMPDIR}/override_groups.toml"
+	cat >"${f}" <<'EOF'
+[tools.install-deps]
+groups = ["runtime"]
+
+[runtime.apt]
+packages = ["curl"]
+
+[dev.apt]
+packages = ["git"]
+EOF
+	run install-deps.sh -n -s apt -g dev "${f}"
+	assert_success
+	assert_output --partial "git"
+	refute_output --partial "curl"
+}
+
+@test 'cmd is executed verbatim instead of pm install' {
+	local f="${BATS_TEST_TMPDIR}/cmd.toml"
+	printf '[runtime.apt]\ncmd = ["echo", "custom-cmd-ran"]\n' >"${f}"
+	run install-deps.sh -s apt "${f}"
+	assert_success
+	assert_output --partial "custom-cmd-ran"
+}
+
+@test 'cmd dry-run prints the command' {
+	local f="${BATS_TEST_TMPDIR}/cmd_dry.toml"
+	printf '[runtime.apt]\ncmd = ["sudo", "apt-get", "install", "-y", "mypkg"]\n' >"${f}"
+	run install-deps.sh -n -s apt "${f}"
+	assert_success
+	assert_output --partial "sudo apt-get install -y mypkg"
+}
+
+@test 'cmd takes precedence over packages in same section' {
+	local f="${BATS_TEST_TMPDIR}/cmd_precedence.toml"
+	cat >"${f}" <<'EOF'
+[runtime.apt]
+cmd = ["echo", "from-cmd"]
+packages = ["curl"]
+EOF
+	run install-deps.sh -s apt "${f}"
+	assert_success
+	assert_output --partial "from-cmd"
+	refute_output --partial "apt-get"
+}
+
+@test 'cmd and packages coexist across groups' {
+	local f="${BATS_TEST_TMPDIR}/cmd_and_pkgs.toml"
+	cat >"${f}" <<'EOF'
+[runtime.apt]
+cmd = ["echo", "runtime-cmd"]
+
+[dev.apt]
+packages = ["git"]
+EOF
+	run install-deps.sh -n -s apt "${f}"
+	assert_success
+	assert_output --partial "echo runtime-cmd"
+	assert_output --partial "apt-get"
+	assert_output --partial "git"
+}
+
+@test 'error message mentions cmd when nothing found' {
+	local f="${BATS_TEST_TMPDIR}/empty_cmd.toml"
+	printf '[runtime.apt]\npackages = []\n' >"${f}"
+	run install-deps.sh -n -s apt -g dev "${f}"
+	assert_failure
+	assert_output --partial "no packages or cmd found"
 }

@@ -9,40 +9,56 @@ IFS=$'\n\t'
 DRY_RUN=0
 VERBOSE=0
 SECTION_OVERRIDE=""
-GROUPS_STR="runtime"
+GROUPS_STR=""
+GROUPS_EXPLICIT=0
 TEMPLATE=0
 TEMPLATE_PATH="-"
 
 read -r -d '' HELP <<-'EOF' || true
 	Usage: install-deps.sh [OPTIONS] [DEPS_FILE]
 
-	  Install system packages for the detected OS from a TOML deps file.
-	  Input resolution order: DEPS_FILE arg > jb-deps.toml > jb.toml > stdin.
+	  Install system packages for the detected OS from a declarative TOML file.
+	  Auto-detects the package manager from the OS. By default installs ALL
+	  groups defined in the file.
+	  Input resolution: DEPS_FILE arg > jb-deps.toml > jb.toml > stdin.
 
-	  Sections are grouped by purpose and package manager:
+	  Section format — standard install:
 
-	    [runtime.apt]
-	    packages = ["libzmq3-dev", "libfftw3-dev"]
+	    [GROUP.PACKAGE_MANAGER]
+	    packages = ["pkg1", "pkg2"]
 
-	    [dev.apt]
-	    packages = ["build-essential", "cmake"]
+	  Section format — custom command (escape hatch, overrides packages):
+
+	    [GROUP.PACKAGE_MANAGER]
+	    cmd = ["sudo", "apt-get", "install", "-y", "pkg=1.2.3"]
+
+	  Examples:
 
 	    [runtime.pacman]
 	    packages = ["zeromq", "fftw"]
 
+	    [dev.apt]
+	    packages = ["build-essential", "cmake"]
+
+	    [pinned.apt]
+	    cmd = ["apt-get", "install", "-y", "libzmq3-dev=4.3.4-1"]
+
 	  Supported package managers: apt, pacman, brew, dnf, zypper, apk, msys2.
+
+	  Default groups: all groups found in the file. To restrict defaults,
+	  set groups = [...] under [tools.install-deps] in jb.toml.
 
 	Options:
 	  -h / --help              Show this message and exit.
-	  -n / --dry-run           Print the install command without executing.
-	  -v / --verbose           Print section, groups, and package list before acting.
+	  -n / --dry-run           Print commands without executing them.
+	  -v / --verbose           Print section, groups, and packages before acting.
 	  -s / --section SECTION   Override auto-detected package manager.
-	  -g / --groups  GROUP     Comma-separated groups to install (default: runtime).
-	                           E.g. --groups runtime,dev installs both.
+	  -g / --groups  GROUP     Comma-separated groups to install (overrides all
+	                           defaults; e.g. -g runtime or -g runtime,dev).
 	       --template [PATH]   Write a scaffold deps.toml to PATH (default: stdout).
 
 	Arguments:
-	  DEPS_FILE  Path to TOML deps file. Omit to auto-discover jb-deps.toml or jb.toml.
+	  DEPS_FILE  Path to TOML file. Omit to auto-discover jb-deps.toml or jb.toml.
 EOF
 
 # ---------------------------------------------------------------------------
@@ -69,6 +85,7 @@ while [[ $# -gt 0 ]]; do
 		;;
 	-g | --groups)
 		GROUPS_STR="${2:?Option $1 requires an argument.}"
+		GROUPS_EXPLICIT=1
 		shift 2
 		;;
 	--template)
@@ -274,6 +291,94 @@ _parse_section() {
 }
 
 # ---------------------------------------------------------------------------
+# _parse_cmd: extract cmd=[...] from a [group.section] TOML header (stdin).
+# When present, cmd is executed verbatim instead of the PM install command.
+# ---------------------------------------------------------------------------
+_parse_cmd() {
+	local group="$1" section="$2"
+	local target="[${group}.${section}]"
+	awk -v target="${target}" '
+		/^\[/ { in_s = ($0 == target); in_l = 0; next }
+		in_s && /cmd[[:space:]]*=/ {
+			in_l = 1; s = $0
+			sub(/.*cmd[[:space:]]*=[[:space:]]*\[/, "", s)
+			if (index(s, "]") > 0) { sub(/\].*/, "", s); in_l = 0 }
+			n = split(s, a, "\"")
+			for (i = 2; i <= n; i += 2) if (a[i] != "") print a[i]
+			next
+		}
+		in_l && /\]/ {
+			s = $0; sub(/\].*/, "", s)
+			n = split(s, a, "\"")
+			for (i = 2; i <= n; i += 2) if (a[i] != "") print a[i]
+			in_l = 0; next
+		}
+		in_l {
+			n = split($0, a, "\"")
+			for (i = 2; i <= n; i += 2) if (a[i] != "") print a[i]
+		}
+	'
+}
+
+# ---------------------------------------------------------------------------
+# _toml_tool_groups: extract groups=[...] from [tools.NAME] in a TOML file.
+# Prints comma-separated names (no trailing comma), or nothing if absent.
+# ---------------------------------------------------------------------------
+_toml_tool_groups() {
+	local tool="$1"
+	awk -v target="[tools.${tool}]" '
+		/^\[/ { in_s = ($0 == target); in_l = 0; next }
+		in_s && /groups[[:space:]]*=/ {
+			in_l = 1; s = $0
+			sub(/.*groups[[:space:]]*=[[:space:]]*\[/, "", s)
+			if (index(s, "]") > 0) { sub(/\].*/, "", s); in_l = 0 }
+			n = split(s, a, "\"")
+			for (i = 2; i <= n; i += 2) if (a[i] != "") printf "%s,", a[i]
+			next
+		}
+		in_l && /\]/ {
+			s = $0; sub(/\].*/, "", s)
+			n = split(s, a, "\"")
+			for (i = 2; i <= n; i += 2) if (a[i] != "") printf "%s,", a[i]
+			in_l = 0; next
+		}
+		in_l {
+			n = split($0, a, "\"")
+			for (i = 2; i <= n; i += 2) if (a[i] != "") printf "%s,", a[i]
+		}
+	'
+}
+
+# ---------------------------------------------------------------------------
+# _discover_groups: scan a TOML file (stdin) for all [group.pm] section
+# headers and return the unique group names in file order, comma-separated.
+# Only sections whose second component is a known package manager are counted.
+# ---------------------------------------------------------------------------
+_discover_groups() {
+	awk '
+		/^\[/ {
+			gsub(/^\[|\]/, "")
+			n = split($0, a, ".")
+			if (n == 2) {
+				pm = a[2]
+				if (pm == "apt"   || pm == "pacman" || pm == "brew" ||
+				    pm == "dnf"   || pm == "zypper" || pm == "apk"  ||
+				    pm == "msys2") {
+					if (!(a[1] in seen)) {
+						seen[a[1]] = 1
+						order[++count] = a[1]
+					}
+				}
+			}
+		}
+		END {
+			for (i = 1; i <= count; i++)
+				printf "%s%s", (i > 1 ? "," : ""), order[i]
+		}
+	'
+}
+
+# ---------------------------------------------------------------------------
 # _do_install: run or print the install command for the detected section.
 # ---------------------------------------------------------------------------
 _do_install() {
@@ -378,30 +483,54 @@ else
 	CONTENT=$(cat)
 fi
 
-SECTION="${SECTION_OVERRIDE:-$(_detect_section)}"
-
-# Collect packages across all requested groups (comma-separated).
-PACKAGES=()
-while IFS= read -r _group; do
-	[ -z "${_group}" ] && continue
-	_pkgs=()
-	while IFS= read -r _p; do
-		_pkgs+=("${_p}")
-	done < <(echo "${CONTENT}" | _parse_section "${_group}" "${SECTION}")
-	PACKAGES+=("${_pkgs[@]+"${_pkgs[@]}"}")
-done < <(tr ',' '\n' <<<"${GROUPS_STR}")
-unset _group _pkgs _p
-
-if [ "${#PACKAGES[@]}" -eq 0 ]; then
-	echo "error: no packages found for group(s) '${GROUPS_STR}' section '${SECTION}' in deps file" >&2
-	exit 1
+# Resolve groups: explicit -g > [tools.install-deps].groups in toml > all.
+if [[ ${GROUPS_EXPLICIT} -eq 0 ]]; then
+	_toml_g=$(echo "${CONTENT}" | _toml_tool_groups "install-deps" \
+		| sed 's/,$//')
+	if [[ -n "${_toml_g}" ]]; then
+		GROUPS_STR="${_toml_g}"
+	else
+		GROUPS_STR=$(echo "${CONTENT}" | _discover_groups)
+	fi
 fi
+
+SECTION="${SECTION_OVERRIDE:-$(_detect_section)}"
 
 _log "section:  ${SECTION}"
 _log "groups:   ${GROUPS_STR}"
-(
-	IFS=' '
-	_log "packages: ${PACKAGES[*]}"
-)
 
-_do_install "${SECTION}" "${PACKAGES[@]}"
+# Process each group: cmd wins over packages; each runs independently.
+_any=0
+while IFS= read -r _group; do
+	[ -z "${_group}" ] && continue
+
+	_cmd=()
+	while IFS= read -r _c; do _cmd+=("${_c}"); done \
+		< <(echo "${CONTENT}" | _parse_cmd "${_group}" "${SECTION}")
+
+	if [ "${#_cmd[@]}" -gt 0 ]; then
+		_any=1
+		(IFS=' '; _log "cmd: ${_cmd[*]}")
+		if [ "${DRY_RUN}" -eq 1 ]; then
+			(IFS=' '; echo "${_cmd[*]}")
+		else
+			"${_cmd[@]}"
+		fi
+		continue
+	fi
+
+	_pkgs=()
+	while IFS= read -r _p; do _pkgs+=("${_p}"); done \
+		< <(echo "${CONTENT}" | _parse_section "${_group}" "${SECTION}")
+	[ "${#_pkgs[@]}" -eq 0 ] && continue
+	_any=1
+	(IFS=' '; _log "packages: ${_pkgs[*]}")
+	_do_install "${SECTION}" "${_pkgs[@]}"
+done < <(tr ',' '\n' <<<"${GROUPS_STR}")
+unset _group _cmd _pkgs _p _c
+
+if [ "${_any}" -eq 0 ]; then
+	echo "error: no packages or cmd found for group(s) '${GROUPS_STR}'" \
+		"section '${SECTION}' in deps file" >&2
+	exit 1
+fi
