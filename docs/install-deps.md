@@ -1,14 +1,57 @@
 # install-deps
 
-`install-deps.sh` installs system packages from a declarative TOML file.
+`install-deps` installs system packages from a declarative TOML file.
 It detects the running OS and package manager automatically, supports
-multiple dependency groups (e.g. `runtime` vs `dev`), and is designed to
-be invoked ephemerally via [`just-runit`](just-runit.md) — no local
-installation required.
+multiple dependency groups (e.g. `runtime` vs `dev`), and runs ephemerally
+via [`jbx`](just-runit.md) — no local installation required.
 
 ```bash
-jbx gh:just-buildit/just-bashit/src/install-deps.sh < deps.toml
+jbx install-deps          # auto-discovers jb.toml or jb-deps.toml in CWD
+jbx install-deps -g dev   # dev/build tools only
 ```
+
+---
+
+## File auto-discovery
+
+When no file argument is given, `install-deps` searches the current working
+directory for a deps file in this order:
+
+| Priority | Filename | When to use |
+|---|---|---|
+| 1 | explicit path arg | `jbx install-deps myfile.toml` |
+| 2 | `jb-deps.toml` | standalone deps-only file |
+| 3 | `jb.toml` | combined tool + deps manifest (recommended) |
+| 4 | stdin | piped input, remote URLs |
+
+**Recommended:** put deps directly in `jb.toml` alongside your tool
+declarations — one file covers everything `jb` needs.
+
+```toml
+# jb.toml
+[project]
+name    = "my_project"
+version = "0.1.0"
+
+[tools.install-deps]
+source = "just-bashit:install-deps"
+groups = ["runtime", "dev"]
+
+[runtime.apt]
+packages = ["libzmq3-dev"]
+
+[runtime.pacman]
+packages = ["zeromq"]
+
+[dev.apt]
+packages = ["build-essential", "cmake"]
+
+[dev.pacman]
+packages = ["base-devel", "cmake"]
+```
+
+Use a standalone `jb-deps.toml` only when the project doesn't have a
+`jb.toml` or you need to keep deps separate.
 
 ---
 
@@ -101,38 +144,28 @@ supported section. Delete the sections you don't need, fill in the rest.
 ### Runtime only (default)
 
 ```bash
-install-deps.sh deps.toml
+jbx install-deps
 ```
 
-Auto-detects the OS and installs the `[runtime.<detected>]` section.
+Auto-detects the OS, discovers the deps file, and installs the
+`[runtime.<detected>]` section.
 
 ### Dev / build tools
 
 ```bash
-install-deps.sh -g dev deps.toml
+jbx install-deps -g dev
 ```
 
 ### Runtime + dev together
 
 ```bash
-install-deps.sh -g runtime,dev deps.toml
+jbx install-deps -g runtime,dev
 ```
 
 ### From stdin
 
 ```bash
-cat deps.toml | install-deps.sh
-install-deps.sh < deps.toml
-
-# From a remote URL via curl
-curl -fsSL https://example.com/deps.toml | install-deps.sh -g runtime,dev
-```
-
-### Via just-runit (no local install)
-
-```bash
-jbx gh:just-buildit/just-bashit/src/install-deps.sh < deps.toml
-jbx gh:just-buildit/just-bashit/src/install-deps.sh -g runtime,dev < deps.toml
+curl -fsSL https://example.com/jb.toml | jbx install-deps -g runtime,dev
 ```
 
 ---
@@ -155,17 +188,17 @@ jbx gh:just-buildit/just-bashit/src/install-deps.sh -g runtime,dev < deps.toml
 ### Dry run — see what would be installed
 
 ```bash
-install-deps.sh --dry-run deps.toml
+jbx install-deps --dry-run
 # sudo pacman -Sy --needed --noconfirm zeromq fftw
 
-install-deps.sh --dry-run -g runtime,dev deps.toml
+jbx install-deps --dry-run -g runtime,dev
 # sudo pacman -Sy --needed --noconfirm zeromq fftw base-devel cmake python
 ```
 
 ### Verbose output
 
 ```bash
-install-deps.sh --dry-run --verbose deps.toml
+jbx install-deps --dry-run --verbose
 # section:  pacman
 # groups:   runtime
 # packages: zeromq fftw
@@ -178,45 +211,20 @@ Useful in containers, CI, or cross-platform scripts where auto-detection
 would pick the wrong manager:
 
 ```bash
-install-deps.sh --section apt deps.toml
-install-deps.sh -s dnf -g runtime,dev deps.toml
+jbx install-deps --section apt
+jbx install-deps -s dnf -g runtime,dev
 ```
 
 ### Multiple groups in CI
 
 ```bash
-# Install everything needed to build and test
-install-deps.sh -g runtime,dev,test deps.toml
+jbx install-deps -g runtime,dev,test
 ```
 
 ### Pin to a specific commit for reproducible CI
 
 ```bash
-jbx gh:just-buildit/just-bashit/src/install-deps.sh@abc1234 < deps.toml
-```
-
-### Thin project shim
-
-Projects that want a one-step `./install-deps.sh` without requiring
-`jb` on the caller's `PATH` can include a shim:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-JBS="gh:just-buildit/just-bashit/src/install-deps.sh"
-
-if command -v jbx >/dev/null 2>&1; then
-    jbx "${JBS}" "$@" <"${SCRIPT_DIR}/deps.toml"
-elif command -v just-runit >/dev/null 2>&1; then
-    just-runit "${JBS}" "$@" <"${SCRIPT_DIR}/deps.toml"
-elif [ -f "${SCRIPT_DIR}/../just-bashit/src/install-deps.sh" ]; then
-    bash "${SCRIPT_DIR}/../just-bashit/src/install-deps.sh" "$@" \
-        "${SCRIPT_DIR}/deps.toml"
-else
-    echo "error: just-runit (jb) not found." >&2
-    exit 1
-fi
+jbx gh:just-buildit/just-bashit/src/install-deps.sh@abc1234
 ```
 
 ---
