@@ -5,6 +5,7 @@ all: lint test
 TESTHELPER_PATH = test/test_helper
 REPORT_PATH     = test-results
 ARTIFACT        = just-bashit.tar.gz
+BATS            ?= $(shell command -v bats 2>/dev/null || echo test/bats/bin/bats)
 
 .PHONY: all lint test clean
 
@@ -15,7 +16,7 @@ lint:
 	shellcheck src/*.sh
 
 test: $(REPORT_PATH)
-	bats \
+	$(BATS) \
 		--report-formatter junit \
 		--output $(REPORT_PATH) \
 		--print-output-on-failure \

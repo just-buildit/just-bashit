@@ -108,7 +108,7 @@ jobs:
         with:
           msystem: UCRT64
           update: true
-          install: git make diffutils curl bats
+          install: git make diffutils curl
 
       - uses: actions/checkout@v4
         with:
