@@ -37,15 +37,13 @@ jobs:
           else COLOR="red"
           fi
           printf '{"schemaVersion":1,"label":"coverage","message":"%d%%","color":"%s"}\n' \
-            "${PCT}" "${COLOR}" > test-results/coverage-badge.json
+            "${PCT}" "${COLOR}" > test-results/coverage/coverage-badge.json
 
       - name: Upload coverage HTML report
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          path: |
-            test-results/coverage/
-            test-results/coverage-badge.json
+          path: test-results/coverage/
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
