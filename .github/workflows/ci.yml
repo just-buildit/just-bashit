@@ -89,7 +89,7 @@ jobs:
     steps:
       - name: Install dependencies
         run: |
-          brew install bash coreutils diffutils bats-core
+          brew install bash coreutils diffutils bats-core kcov
 
       - name: Export GNU utilities to PATH
         run: |
@@ -100,11 +100,17 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Run tests (bats only — kcov trace lines contaminate output on macOS)
-        run: make test-bats
+      - name: Run tests with coverage
+        run: make test
+
+      - name: Upload macOS coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-macos
+          path: test-results/coverage/
 
   merge-coverage:
-    needs: [test]
+    needs: [test, test-macos]
     runs-on: ubuntu-22.04
     container:
       image: kcov/kcov:latest
@@ -128,7 +134,8 @@ jobs:
           kcov --merge merged-coverage \
             all-coverage/coverage-debian \
             all-coverage/coverage-arch \
-            all-coverage/coverage-fedora
+            all-coverage/coverage-fedora \
+            all-coverage/coverage-macos
 
       - name: Generate coverage badge JSON
         run: |
