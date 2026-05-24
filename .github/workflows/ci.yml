@@ -97,6 +97,26 @@ jobs:
       - name: Run tests
         run: make test
 
+  test-windows:
+    name: test (windows/ucrt64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: git make diffutils curl bats
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Run tests
+        run: make test
+
   coverage:
     name: coverage
     runs-on: ubuntu-latest
@@ -225,7 +245,7 @@ jobs:
         id: deployment
 
   release:
-    needs: [test, test-macos, lint]
+    needs: [test, test-macos, test-windows, lint]
     runs-on: ubuntu-22.04
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
