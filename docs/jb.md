@@ -75,17 +75,25 @@ Prints the top-level subcommand list and exits.
 
 ---
 
-## `jb install` *(planned)*
+## `jb install`
 
 ```
 jb install
 ```
 
-Read `jb.toml` in the current directory, pre-fetch every declared
-`[tools.NAME]` into the cache. Intended for CI warm-up and project
-on-boarding — run once, subsequent `jbx` calls are cache hits.
+Walk up from the current directory to find `jb.toml`, then pre-fetch every
+`source` declared under `[tools.*]` into the local cache. Subsequent `jbx`
+calls for those tools are instant cache hits.
 
-Not yet implemented. Track progress in the just-bashit issue tracker.
+```
+  reading /path/to/project/jb.toml
+  -> just-bashit:install-deps ok
+  -> just-bashit:just-makeit ok
+  2 fetched
+```
+
+Intended for CI warm-up and first-run onboarding. Run it once after cloning;
+`jbx` will stay offline after that until the TTL expires.
 
 ---
 
