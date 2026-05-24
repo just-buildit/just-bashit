@@ -20,7 +20,7 @@ setup() {
 @test 'add-line unknown option -k' {
 	run add-line -k
 	assert_output --regexp "$(
-		echo "Invalid option: -k" &
+		echo "Invalid option: -k"
 		# shellcheck disable=SC2154
 		echo "${HELP_REGEX}"
 	)"
@@ -69,7 +69,7 @@ setup() {
 @test 'remove-line unknown option -k' {
 	run remove-line -k
 	assert_output --regexp "$(
-		echo "Invalid option: -k" &
+		echo "Invalid option: -k"
 		# shellcheck disable=SC2154
 		echo "${HELP_REGEX}"
 	)"

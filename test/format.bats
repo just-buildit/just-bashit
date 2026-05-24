@@ -40,7 +40,7 @@ echo "${HELP_REGEX}" >/dev/null
 @test 'trim-from unknown option -t' {
 	run trim-from -t
 	assert_output --regexp "$(
-		echo "Invalid option: -t" &
+		echo "Invalid option: -t"
 		# shellcheck disable=SC2154
 		echo "${HELP_REGEX}"
 	)"

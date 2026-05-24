@@ -12,7 +12,7 @@ _common_setup
 @test 'log-wait -g' {
 	run log-wait -g
 	assert_output --regexp "$(
-		echo "Invalid option: -g" &
+		echo "Invalid option: -g"
 		# shellcheck disable=SC2154
 		echo "${HELP_REGEX}"
 	)"
@@ -52,7 +52,7 @@ _common_setup
 @test 'log -g' {
 	run log -g
 	assert_output --regexp "$(
-		echo "Invalid option: -g" &
+		echo "Invalid option: -g"
 		# shellcheck disable=SC2154
 		echo "${HELP_REGEX}"
 	)"

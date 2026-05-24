@@ -11,7 +11,7 @@ _common_setup
 @test 'iso-8601-basic unknown uption -u' {
 	run iso-8601-basic -k
 	assert_output --regexp "$(
-		echo "Invalid option: -k" &
+		echo "Invalid option: -k"
 		# shellcheck disable=SC2154
 		echo "${HELP_REGEX}"
 	)"

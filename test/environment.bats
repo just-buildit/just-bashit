@@ -11,7 +11,7 @@ _common_setup
 @test 'set-bashrc unknown option -k' {
 	run set-bashrc -k
 	assert_output --regexp "$(
-		echo "Invalid option: -k" &
+		echo "Invalid option: -k"
 		# shellcheck disable=SC2154
 		echo "${HELP_REGEX}"
 	)"
@@ -44,7 +44,7 @@ _common_setup
 @test 'unset-bashrc unknown option -k' {
 	run unset-bashrc -k
 	assert_output --regexp "$(
-		echo "Invalid option: -k" &
+		echo "Invalid option: -k"
 		# shellcheck disable=SC2154
 		echo "${HELP_REGEX}"
 	)"
