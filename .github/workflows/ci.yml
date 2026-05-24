@@ -143,7 +143,15 @@ jobs:
             --include-pattern=/src \
             --exclude-pattern=/test \
             test-results/coverage \
-            bats test >/dev/null 2>&1
+            bats \
+              test/datetime.bats \
+              test/environment.bats \
+              test/file.bats \
+              test/format.bats \
+              test/match.bats \
+              test/path.bats \
+              test/toml.bats \
+            >/dev/null 2>&1
 
       - name: Generate coverage badge JSON
         run: |
