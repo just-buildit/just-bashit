@@ -100,15 +100,20 @@ jobs:
   coverage:
     name: coverage
     runs-on: ubuntu-latest
+    container:
+      image: kcov/kcov:latest
+    defaults:
+      run:
+        shell: bash
     steps:
+      - name: Install dependencies
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends \
+            bats curl git make ca-certificates
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
-            bats kcov curl
 
       - name: Run tests with kcov
         run: |
