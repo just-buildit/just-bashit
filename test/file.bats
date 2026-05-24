@@ -98,6 +98,56 @@ setup() {
 	assert_success
 }
 
+@test 'add-line -h shows help' {
+	run add-line -h
+	assert_output --regexp "${HELP_REGEX}"
+}
+
+@test 'add-line idempotency — same entry written only once' {
+	local f="${BATS_TEST_TMPDIR}/idem.txt"
+	add-line "UNIQUE_LINE" "${f}"
+	add-line "UNIQUE_LINE" "${f}"
+	add-line "UNIQUE_LINE" "${f}"
+	assert_equal "$(grep -c "^UNIQUE_LINE$" "${f}")" 1
+}
+
+@test 'add-line creates file if not exists' {
+	local f="${BATS_TEST_TMPDIR}/newfile_$(date +%s%N).txt"
+	[ ! -f "${f}" ]
+	add-line "HELLO" "${f}"
+	assert [ -f "${f}" ]
+	run grep -q "^HELLO$" "${f}"
+	assert_success
+}
+
+@test 'add-contents -h shows help' {
+	run add-contents -h
+	assert_output --regexp "${HELP_REGEX}"
+}
+
+@test 'add-contents -x deduplicates blank lines to at most one' {
+	local f="${BATS_TEST_TMPDIR}/noblank.txt"
+	run add-contents -x "${FROMPATH}" "${f}"
+	# -x routes blank lines through grep-dedup, so at most one blank survives
+	local blank_count
+	blank_count=$(grep -c "^$" "${f}" || true)
+	[ "${blank_count}" -le 1 ]
+}
+
+@test 'add-contents idempotency — non-blank lines not duplicated' {
+	local f="${BATS_TEST_TMPDIR}/idem2.txt"
+	# Use a file with no blank lines to avoid the blank-line deduplicate edge case
+	local src="${BATS_TEST_TMPDIR}/src_noblanks.txt"
+	printf 'LINE_A\nLINE_B\nLINE_C\n' >"${src}"
+	add-contents "${src}" "${f}"
+	local lines_after_first
+	lines_after_first=$(grep -c "." "${f}" || true)
+	add-contents "${src}" "${f}"
+	local lines_after_second
+	lines_after_second=$(grep -c "." "${f}" || true)
+	assert_equal "${lines_after_first}" "${lines_after_second}"
+}
+
 teardown() {
 	rm -f "${TEMPFILE}"
 	rm -f "${FROMPATH}"

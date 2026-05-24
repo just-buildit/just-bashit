@@ -43,3 +43,23 @@ _common_setup
 	run is-number .5
 	assert_success
 }
+
+@test 'is-number 22.5' {
+	run is-number 22.5
+	assert_success
+}
+
+@test 'is-number 0' {
+	run is-number 0
+	assert_success
+}
+
+@test 'is-number -s 0' {
+	run is-number -s 0
+	assert_success
+}
+
+@test 'is-number empty string' {
+	run is-number ""
+	assert_failure
+}

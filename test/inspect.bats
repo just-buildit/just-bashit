@@ -131,3 +131,56 @@ EOF
 	assert_output --partial "[runtime.apt]"
 	refute_output --partial "[dev.apt]"
 }
+
+@test 'reads from stdin when no file in CWD' {
+	local tmpdir="${BATS_TEST_TMPDIR}/stdin_inspect"
+	mkdir -p "${tmpdir}"
+	run bash -c "cd '${tmpdir}' && inspect.sh -s apt <'${DEPS_FILE}'"
+	assert_success
+	assert_output --partial "[runtime.apt]"
+}
+
+@test 'jb-deps.toml takes priority over jb.toml' {
+	local tmpdir="${BATS_TEST_TMPDIR}/inspect_priority"
+	mkdir -p "${tmpdir}"
+	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/jb-deps.toml"
+	printf '[runtime.apt]\npackages = ["wget"]\n' >"${tmpdir}/jb.toml"
+	run bash -c "cd '${tmpdir}' && inspect.sh -s apt"
+	assert_success
+	assert_output --partial "curl"
+	refute_output --partial "wget"
+}
+
+@test '-v verbose output goes to stderr' {
+	run inspect.sh -v -s apt "${DEPS_FILE}"
+	assert_success
+	# bats captures stderr in $output when using run without --separate-stderr
+	assert_output --partial "section:"
+	assert_output --partial "groups:"
+}
+
+@test '-w writes file and also outputs to stdout' {
+	local out="${BATS_TEST_TMPDIR}/tee_test.versions"
+	run inspect.sh -s apt -w "${out}" "${DEPS_FILE}"
+	assert_success
+	assert [ -f "${out}" ]
+	# stdout should also contain the content (tee behavior)
+	assert_output --partial "[system]"
+}
+
+@test 'output contains glibc on linux' {
+	if [[ "$(uname -s)" != "Linux" ]]; then
+		skip "glibc only on Linux"
+	fi
+	run inspect.sh -s apt "${DEPS_FILE}"
+	assert_success
+	assert_output --partial "glibc"
+}
+
+@test 'not-installed packages shown as comments' {
+	local f="${BATS_TEST_TMPDIR}/notinstalled.toml"
+	printf '[runtime.apt]\npackages = ["this-package-does-not-exist-xyzzy"]\n' >"${f}"
+	run inspect.sh -s apt "${f}"
+	assert_success
+	assert_output --partial "# this-package-does-not-exist-xyzzy = not installed"
+}

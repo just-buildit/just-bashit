@@ -5,6 +5,8 @@ setup() {
 	GROUPED_FILE="${BATS_TEST_TMPDIR}/grouped.toml"
 	INLINE_FILE="${BATS_TEST_TMPDIR}/inline.toml"
 	EMPTY_FILE="${BATS_TEST_TMPDIR}/empty.toml"
+	ALL_PM_FILE="${BATS_TEST_TMPDIR}/all_pm.toml"
+	PINNED_FILE="${BATS_TEST_TMPDIR}/pinned.toml"
 
 	cat >"${GROUPED_FILE}" <<'EOF'
 [runtime.apt]
@@ -36,6 +38,37 @@ EOF
 	cat >"${EMPTY_FILE}" <<'EOF'
 [runtime.apt]
 packages = []
+EOF
+
+	cat >"${ALL_PM_FILE}" <<'EOF'
+[runtime.apt]
+packages = ["curl"]
+
+[runtime.pacman]
+packages = ["curl"]
+
+[runtime.brew]
+packages = ["curl"]
+
+[runtime.dnf]
+packages = ["curl"]
+
+[runtime.zypper]
+packages = ["curl"]
+
+[runtime.apk]
+packages = ["curl"]
+
+[runtime.msys2]
+packages = ["curl"]
+EOF
+
+	cat >"${PINNED_FILE}" <<'EOF'
+[runtime.apt]
+packages = ["libzmq3-dev=4.3.4-1"]
+
+[runtime.dnf]
+packages = ["zeromq-devel-4.3.4"]
 EOF
 }
 
@@ -305,4 +338,90 @@ EOF
 	run install-deps.sh -n -s apt -g dev "${f}"
 	assert_failure
 	assert_output --partial "no packages or cmd found"
+}
+
+@test 'dry run dnf section' {
+	run install-deps.sh -n -s dnf "${ALL_PM_FILE}"
+	assert_success
+	assert_output --partial "sudo dnf install -y"
+	assert_output --partial "curl"
+}
+
+@test 'dry run zypper section' {
+	run install-deps.sh -n -s zypper "${ALL_PM_FILE}"
+	assert_success
+	assert_output --partial "sudo zypper install -y"
+	assert_output --partial "curl"
+}
+
+@test 'dry run apk section' {
+	run install-deps.sh -n -s apk "${ALL_PM_FILE}"
+	assert_success
+	assert_output --partial "sudo apk add"
+	assert_output --partial "curl"
+}
+
+@test 'apt dry run includes update step' {
+	run install-deps.sh -n -s apt "${ALL_PM_FILE}"
+	assert_success
+	assert_output --partial "apt-get update"
+}
+
+@test 'version-pinned apt package passes through verbatim' {
+	run install-deps.sh -n -s apt "${PINNED_FILE}"
+	assert_success
+	assert_output --partial "libzmq3-dev=4.3.4-1"
+}
+
+@test 'version-pinned dnf package passes through verbatim' {
+	run install-deps.sh -n -s dnf "${PINNED_FILE}"
+	assert_success
+	assert_output --partial "zeromq-devel-4.3.4"
+}
+
+@test 'verbose shows cmd keyword for cmd groups' {
+	local f="${BATS_TEST_TMPDIR}/cmd_verbose.toml"
+	printf '[runtime.apt]\ncmd = ["echo", "hi"]\n' >"${f}"
+	run install-deps.sh -n -v -s apt "${f}"
+	assert_success
+	assert_output --partial "cmd:"
+}
+
+@test 'unknown section error' {
+	local f="${BATS_TEST_TMPDIR}/bad_section.toml"
+	printf '[runtime.unknownpm]\npackages = ["curl"]\n' >"${f}"
+	run install-deps.sh -g runtime -s unknownpm "${f}"
+	assert_failure
+	assert_output --partial "unknown section"
+}
+
+@test 'template contains placeholder examples' {
+	run install-deps.sh --template
+	assert_success
+	assert_output --partial "e.g."
+	assert_output --partial "libzmq3-dev"
+}
+
+@test 'multiline packages array collects all packages' {
+	run install-deps.sh -n -s apt -g runtime "${GROUPED_FILE}"
+	assert_success
+	assert_output --partial "curl"
+	assert_output --partial "wget"
+}
+
+@test 'groups are discovered in file order' {
+	local f="${BATS_TEST_TMPDIR}/ordered.toml"
+	cat >"${f}" <<'EOF'
+[aaa.apt]
+packages = ["aaa-pkg"]
+
+[zzz.apt]
+packages = ["zzz-pkg"]
+EOF
+	run install-deps.sh -n -s apt "${f}"
+	assert_success
+	local aaa_pos zzz_pos
+	aaa_pos=$(echo "${output}" | grep -n "aaa-pkg" | cut -d: -f1)
+	zzz_pos=$(echo "${output}" | grep -n "zzz-pkg" | cut -d: -f1)
+	[ "${aaa_pos}" -lt "${zzz_pos}" ]
 }

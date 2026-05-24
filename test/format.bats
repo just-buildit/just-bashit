@@ -73,3 +73,28 @@ echo "${HELP_REGEX}" >/dev/null
 	run trim-from -rm MA "HEYMA!"
 	assert_output '!'
 }
+
+@test 'trim-from -k keeps marker (12.45 → 12.)' {
+	run trim-from -k 12.45
+	assert_output '12.'
+}
+
+@test 'trim-from -rk keeps marker reverse (HEYMA! → MA!)' {
+	run trim-from -rm MA -k "HEYMA!"
+	assert_output 'MA!'
+}
+
+@test 'trim-from -rkg greedy reverse keep (12.4.45 → .45)' {
+	run trim-from -rkg 12.4.45
+	assert_output '.45'
+}
+
+@test 'color-echo with no argument prints empty line' {
+	run color-echo
+	assert_success
+}
+
+@test 'color-echo unknown color returns failure' {
+	run color-echo -c ultraviolet "TEXT"
+	assert_failure
+}
