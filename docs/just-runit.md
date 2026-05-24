@@ -169,7 +169,12 @@ jbx -n https://example.com/tool.sh run
 **Purge a single entry**
 
 ```bash
-# Find the hash
+jb cache clear https://raw.githubusercontent.com/just-buildit/just-bashit/main/src/install-deps.sh
+```
+
+Or manually — find the hash with `-v` then remove the pair:
+
+```bash
 jbx -v install-deps 2>&1 | grep 'cache hit'
 # jbx: cache hit: /home/you/.cache/just-runit/1f6227a...sh
 
@@ -179,13 +184,13 @@ rm ~/.cache/just-runit/1f6227a...{sh,meta}
 **Purge the just-bashit bundle** (re-fetched as a unit on next use)
 
 ```bash
-rm -rf ~/.cache/just-runit/jbs/
+jb cache clear jbs
 ```
 
 **Purge everything**
 
 ```bash
-rm -rf ~/.cache/just-runit/
+jb cache clear
 ```
 
 ---

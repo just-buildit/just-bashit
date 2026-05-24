@@ -40,6 +40,28 @@ Alias: `jbx`. Resolve `SPEC` to a script, optionally call `FUNCTION`, then
 discard. See [just-runit.md](just-runit.md) for the full reference:
 SPEC forms, option flags, cache management, recipes.
 
+### `jb version`
+
+```
+jb version
+jb -V
+jb --version
+```
+
+Prints `jb vX.Y.Z` and exits.
+
+### `jb cache` — cache management
+
+```
+jb cache clear           # remove everything under ~/.cache/just-runit/
+jb cache clear jbs       # remove the just-bashit co-fetch bundle only
+jb cache clear <url>     # remove the entry for one specific URL
+jb cache -h              # show cache subcommand help
+```
+
+See [just-runit.md — Cache](just-runit.md#cache) for a full description of
+the cache layout and when to use each form.
+
 ### `jb help`
 
 ```
