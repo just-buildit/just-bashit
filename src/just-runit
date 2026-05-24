@@ -38,12 +38,68 @@ if [[ ${_ME} == "jb" || ${_ME} == "just-buildit" ]]; then
 		shift
 		_ME="${_ME} run"
 		;;
+	cache)
+		shift
+		_CACHE_OP="${1:-}"
+		case "${_CACHE_OP}" in
+		clear)
+			shift
+			_CACHE_TARGET="${1:-all}"
+			case "${_CACHE_TARGET}" in
+			all)
+				rm -rf "${_CACHE_DIR}"
+				echo "cleared ${_CACHE_DIR}"
+				;;
+			jbs)
+				rm -rf "${_CACHE_DIR}/jbs"
+				echo "cleared ${_CACHE_DIR}/jbs"
+				;;
+			*)
+				# Treat arg as a URL — remove its cache entry.
+				_key=$(printf '%s' "${_CACHE_TARGET}" | sha256sum | cut -d' ' -f1)
+				_removed=0
+				for _f in "${_CACHE_DIR}/${_key}".{sh,py} "${_CACHE_DIR}/${_key}".meta; do
+					[[ -f ${_f} ]] && { rm -f "${_f}"; _removed=1; }
+				done
+				if [[ ${_removed} -eq 1 ]]; then
+					echo "cleared cache entry for ${_CACHE_TARGET}"
+				else
+					echo "${_ME}: no cache entry found for ${_CACHE_TARGET}" >&2
+					exit 1
+				fi
+				;;
+			esac
+			;;
+		"" | -h | --help)
+			cat <<-EOF
+				Usage: ${_ME} cache <operation> [TARGET]
+
+				Operations:
+				  clear [all]   Remove all cached scripts and aliases (default)
+				  clear jbs     Remove the just-bashit co-fetch bundle only
+				  clear <url>   Remove the cache entry for a specific URL
+			EOF
+			;;
+		*)
+			echo "${_ME} cache: unknown operation '${_CACHE_OP}'" >&2
+			echo "Run '${_ME} cache -h' for usage." >&2
+			exit 1
+			;;
+		esac
+		exit 0
+		;;
+	version | -V | --version)
+		echo "${_ME} v${_VERSION}"
+		exit 0
+		;;
 	"" | help | -h | --help)
 		cat <<-EOF
 			Usage: ${_ME} <command> [OPTIONS] [ARGS...]
 
 			Commands:
-			  run     Ephemeral script runner (alias: jbx)
+			  run      Ephemeral script runner (alias: jbx)
+			  cache    Manage the local script cache
+			  version  Print version and exit
 
 			Run '${_ME} <command> -h' for details.
 		EOF
