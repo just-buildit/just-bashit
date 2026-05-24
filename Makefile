@@ -19,12 +19,22 @@ test: $(REPORT_PATH)
 		--exclude-pattern=/test \
 		$(REPORT_PATH)/coverage \
 		bats test
-	bats --report-formatter junit --output $(REPORT_PATH) test
+	bats \
+		--report-formatter junit \
+		--output $(REPORT_PATH) \
+		--print-output-on-failure \
+		--show-output-of-passing-tests \
+		test
 	tar -czf $(ARTIFACT) src $(REPORT_PATH)
 	rm -f $(TESTHELPER_PATH)/bats-*/*.json
 
 test-bats: $(REPORT_PATH)
-	bats --report-formatter junit --output $(REPORT_PATH) test
+	bats \
+		--report-formatter junit \
+		--output $(REPORT_PATH) \
+		--print-output-on-failure \
+		--show-output-of-passing-tests \
+		test
 
 clean:
 	rm -rf $(ARTIFACT) $(REPORT_PATH)
