@@ -121,6 +121,9 @@ jobs:
     runs-on: ubuntu-22.04
     container:
       image: kcov/kcov:latest
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Install git
