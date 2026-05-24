@@ -17,7 +17,7 @@ read -r -d '' HELP <<-'EOF' || true
 	Usage: install-deps.sh [OPTIONS] [DEPS_FILE]
 
 	  Install system packages for the detected OS from a TOML deps file.
-	  Input resolution order: DEPS_FILE arg > jbs-deps.toml in CWD > stdin.
+	  Input resolution order: DEPS_FILE arg > jb-deps.toml in CWD > stdin.
 
 	  Sections are grouped by purpose and package manager:
 
@@ -42,7 +42,7 @@ read -r -d '' HELP <<-'EOF' || true
 	       --template [PATH]   Write a scaffold deps.toml to PATH (default: stdout).
 
 	Arguments:
-	  DEPS_FILE  Path to TOML deps file. Omit to read from stdin or auto-discover jbs-deps.toml.
+	  DEPS_FILE  Path to TOML deps file. Omit to read from stdin or auto-discover jb-deps.toml.
 EOF
 
 # ---------------------------------------------------------------------------
@@ -115,7 +115,7 @@ _template() {
 #   install-deps.sh -g runtime,dev deps.toml
 #
 # Remove sections for package managers you don't support.
-# Use jx install-deps < deps.toml
+# Use jbx install-deps
 
 [runtime.apt]
 packages = [
@@ -367,11 +367,11 @@ if [[ ${TEMPLATE} -eq 1 ]]; then
 	exit 0
 fi
 
-# Slurp deps content: explicit file > jbs-deps.toml in CWD > stdin.
+# Slurp deps content: explicit file > jb-deps.toml in CWD > stdin.
 if [ -n "${DEPS_FILE}" ]; then
 	CONTENT=$(cat "${DEPS_FILE}")
-elif [ -f "jbs-deps.toml" ]; then
-	CONTENT=$(cat "jbs-deps.toml")
+elif [ -f "jb-deps.toml" ]; then
+	CONTENT=$(cat "jb-deps.toml")
 else
 	CONTENT=$(cat)
 fi
