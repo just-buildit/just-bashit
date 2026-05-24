@@ -21,6 +21,7 @@ nav = [
     {"path" = "libraries/path.md"},
   ]},
   {"Templates" = "templates.md"},
+  {"jb" = "jb.md"},
   {"just-runit" = "just-runit.md"},
   {"install-deps" = "install-deps.md"},
   {"Release" = "release.md"},

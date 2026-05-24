@@ -59,7 +59,10 @@ if [[ ${_ME} == "jb" || ${_ME} == "just-buildit" ]]; then
 				_key=$(printf '%s' "${_CACHE_TARGET}" | sha256sum | cut -d' ' -f1)
 				_removed=0
 				for _f in "${_CACHE_DIR}/${_key}".{sh,py} "${_CACHE_DIR}/${_key}".meta; do
-					[[ -f ${_f} ]] && { rm -f "${_f}"; _removed=1; }
+					[[ -f ${_f} ]] && {
+						rm -f "${_f}"
+						_removed=1
+					}
 				done
 				if [[ ${_removed} -eq 1 ]]; then
 					echo "cleared cache entry for ${_CACHE_TARGET}"
@@ -117,13 +120,16 @@ if [[ ${_ME} == "jb" || ${_ME} == "just-buildit" ]]; then
 			exit 0
 		fi
 		_runner="$(readlink -f "${BASH_SOURCE[0]}")"
-		_ok=0; _fail=0
+		_ok=0
+		_fail=0
 		for _src in "${_sources[@]}"; do
 			printf '  -> %s ' "${_src}"
 			if "${_runner}" -l "${_src}" >/dev/null 2>&1; then
-				printf 'ok\n'; ((_ok++)) || true
+				printf 'ok\n'
+				((_ok++)) || true
 			else
-				printf 'failed\n' >&2; ((_fail++)) || true
+				printf 'failed\n' >&2
+				((_fail++)) || true
 			fi
 		done
 		printf '  %d fetched' "${_ok}"
