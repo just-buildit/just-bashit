@@ -446,6 +446,9 @@ packages = ["bash"]
 
 [runtime.apk]
 packages = ["bash"]
+
+[runtime.msys2]
+packages = ["bash"]
 EOF
 	# Run without -s so _detect_section is actually called
 	run install-deps.sh -n -g runtime "${f}"

@@ -20,7 +20,8 @@ _common_setup
 @test 'set-bashrc no input' {
 	run set-bashrc
 	# shellcheck disable=SC2154
-	assert_output --regexp "Not enough arguments.*\n*${HELP_REGEX:1}"
+	assert_output --partial "Not enough arguments"
+	assert_output --regexp "${HELP_REGEX}"
 }
 
 @test 'set-bashrc entry' {
@@ -53,7 +54,8 @@ _common_setup
 @test 'unset-bashrc no input' {
 	run unset-bashrc
 	# shellcheck disable=SC2154
-	assert_output --regexp "Not enough arguments.*\n*${HELP_REGEX:1}"
+	assert_output --partial "Not enough arguments"
+	assert_output --regexp "${HELP_REGEX}"
 }
 
 @test 'unset-bashrc entry' {

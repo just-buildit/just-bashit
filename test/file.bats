@@ -29,7 +29,8 @@ setup() {
 @test 'add-line no input' {
 	run add-line
 	# shellcheck disable=SC2154
-	assert_output --regexp "Not enough arguments.*\n*${HELP_REGEX:1}"
+	assert_output --partial "Not enough arguments"
+	assert_output --regexp "${HELP_REGEX}"
 }
 
 @test 'add-line path' {
@@ -78,7 +79,8 @@ setup() {
 @test 'remove-line no input' {
 	run remove-line
 	# shellcheck disable=SC2154
-	assert_output --regexp "Not enough arguments.*\n*${HELP_REGEX:1}"
+	assert_output --partial "Not enough arguments"
+	assert_output --regexp "${HELP_REGEX}"
 }
 
 @test 'remove-line entry' {
