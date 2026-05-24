@@ -8,7 +8,7 @@
 [![bats](https://img.shields.io/badge/tested%20with-bats-brightgreen)](https://github.com/bats-core/bats-core)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
 
-[Coverage Report](https://just-buildit.github.io/just-bashit/coverage/) · [Test Report](https://github.com/just-buildit/just-bashit/actions/workflows/ci.yml)
+[Coverage Report](https://just-buildit.github.io/just-bashit/coverage/) · [Test Report](https://just-buildit.github.io/just-bashit/test-report/)
 
 [comment]: # (END FRONMATTER - BEGIN USER CONTENT)
 

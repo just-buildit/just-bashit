@@ -73,6 +73,13 @@ jobs:
           name: coverage-${{ matrix.distro }}
           path: test-results/coverage/
 
+      - name: Upload test report XML
+        if: matrix.primary == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-xml
+          path: test-results/*.xml
+
       - name: Upload release artifact
         if: matrix.primary == 'true'
         uses: actions/upload-artifact@v4
@@ -197,9 +204,28 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install zensical
+      - run: pip install zensical junit2html junitparser
 
       - run: zensical build --clean
+
+      - name: Download test report XML
+        uses: actions/download-artifact@v4
+        with:
+          name: test-report-xml
+          path: test-report-xml
+
+      - name: Generate test report HTML
+        run: |
+          python3 - <<'PYEOF'
+          import glob
+          from junitparser import JUnitXml
+          xml = JUnitXml()
+          for f in sorted(glob.glob('test-report-xml/*.xml')):
+              xml += JUnitXml.fromfile(f)
+          xml.write('test-report-xml/merged.xml')
+          PYEOF
+          mkdir -p site/test-report
+          junit2html test-report-xml/merged.xml site/test-report/index.html
 
       - name: Download merged coverage report
         uses: actions/download-artifact@v4
