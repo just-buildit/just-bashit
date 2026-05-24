@@ -120,6 +120,7 @@ jobs:
   coverage:
     name: coverage
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container:
       image: kcov/kcov:latest
     defaults:
@@ -141,9 +142,8 @@ jobs:
           kcov \
             --include-pattern=/src \
             --exclude-pattern=/test \
-            --dump-summary \
             test-results/coverage \
-            bats test 2>/dev/null
+            bats test >/dev/null 2>&1
 
       - name: Generate coverage badge JSON
         run: |
