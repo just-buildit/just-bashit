@@ -25,17 +25,11 @@ test: $(REPORT_PATH)
 	rm -f $(TESTHELPER_PATH)/bats-*/*.json
 
 coverage: $(REPORT_PATH)
-	for f in test/*.bats; do \
-		kcov --collect-only \
-			--include-pattern=/src \
-			--exclude-pattern=/test \
-			$(REPORT_PATH)/coverage \
-			$(BATS) "$$f" >/dev/null 2>&1 || true; \
-	done
-	kcov --report-only \
+	kcov \
 		--include-pattern=/src \
 		--exclude-pattern=/test \
-		$(REPORT_PATH)/coverage
+		$(REPORT_PATH)/coverage \
+		$(BATS) test
 
 clean:
 	rm -rf $(ARTIFACT) $(REPORT_PATH)

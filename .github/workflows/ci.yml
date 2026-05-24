@@ -37,7 +37,7 @@ jobs:
         if: matrix.distro == 'debian'
         run: |
           apt-get update && apt-get install -y --no-install-recommends \
-            ca-certificates make git bats curl kcov
+            ca-certificates make git bats curl
 
       - name: Install dependencies (arch)
         if: matrix.distro == 'arch'
@@ -60,32 +60,6 @@ jobs:
 
       - name: Run tests
         run: make test
-
-      - name: Run coverage
-        if: matrix.primary == 'true'
-        run: make coverage
-
-      - name: Generate coverage badge JSON
-        if: matrix.primary == 'true'
-        run: |
-          XML=$(find test-results/coverage -name cobertura.xml | head -1)
-          RATE=$(grep -oP 'line-rate="\K[^"]+' "${XML}" | head -1)
-          PCT=$(awk "BEGIN { printf \"%d\", ${RATE} * 100 }")
-          if   [ "${PCT}" -ge 90 ]; then COLOR="brightgreen"
-          elif [ "${PCT}" -ge 75 ]; then COLOR="green"
-          elif [ "${PCT}" -ge 60 ]; then COLOR="yellowgreen"
-          elif [ "${PCT}" -ge 40 ]; then COLOR="yellow"
-          else COLOR="red"
-          fi
-          printf '{"schemaVersion":1,"label":"coverage","message":"%d%%","color":"%s"}\n' \
-            "${PCT}" "${COLOR}" > test-results/coverage/coverage-badge.json
-
-      - name: Upload coverage report
-        if: matrix.primary == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: test-results/coverage/
 
       - name: Upload test report XML
         if: matrix.primary == 'true'
@@ -143,6 +117,47 @@ jobs:
       - name: Run tests
         run: make test
 
+  coverage:
+    name: coverage
+    runs-on: ubuntu-22.04
+    container:
+      image: kcov/kcov:latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends \
+            ca-certificates make git bats curl
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Run tests with coverage
+        run: make coverage
+
+      - name: Generate coverage badge JSON
+        run: |
+          XML=$(find test-results/coverage -name cobertura.xml | head -1)
+          RATE=$(grep -oP 'line-rate="\K[^"]+' "${XML}" | head -1)
+          PCT=$(awk "BEGIN { printf \"%d\", ${RATE} * 100 }")
+          if   [ "${PCT}" -ge 90 ]; then COLOR="brightgreen"
+          elif [ "${PCT}" -ge 75 ]; then COLOR="green"
+          elif [ "${PCT}" -ge 60 ]; then COLOR="yellowgreen"
+          elif [ "${PCT}" -ge 40 ]; then COLOR="yellow"
+          else COLOR="red"
+          fi
+          printf '{"schemaVersion":1,"label":"coverage","message":"%d%%","color":"%s"}\n' \
+            "${PCT}" "${COLOR}" > test-results/coverage/coverage-badge.json
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: test-results/coverage/
+
   lint:
     runs-on: ubuntu-latest
     permissions:
@@ -165,7 +180,7 @@ jobs:
           sarif_file: shellcheck.sarif
 
   deploy-docs:
-    needs: [test, lint]
+    needs: [coverage, lint]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:

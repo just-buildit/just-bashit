@@ -11,5 +11,5 @@ _common_setup() {
 	# make executables in src/ visible to PATH
 	PATH="$PROJECT_ROOT/src:$PATH"
 	export HELP_REGEX='Usage:' # Check each script/function at least has usage.
-	export BASH_XTRACEFD=2          # Redirect kcov trace lines to stderr so bats never sees them.
+	export BASH_XTRACEFD=${BASH_XTRACEFD:-2} # Use kcov's pipe fd when running under kcov; else stderr.
 }
