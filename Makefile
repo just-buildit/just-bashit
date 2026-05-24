@@ -21,8 +21,7 @@ test: $(REPORT_PATH)
 		--exclude-pattern=/test \
 		$(REPORT_PATH)/coverage \
 		bats test \
-		> $(REPORT_PATH)/kcov.log 2>&1 \
-	|| { cat $(REPORT_PATH)/kcov.log; exit 1; }
+		> $(REPORT_PATH)/kcov.log 2>&1 || true
 	bats \
 		--report-formatter junit \
 		--output $(REPORT_PATH) \
