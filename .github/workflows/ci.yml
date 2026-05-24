@@ -53,6 +53,7 @@ jobs:
 
       - name: Install dependencies (alpine)
         if: matrix.distro == 'alpine'
+        shell: sh
         run: |
           apk add --update --no-cache \
             bash git make bats build-base cmake python3 \
@@ -100,34 +101,20 @@ jobs:
     steps:
       - name: Install dependencies
         run: |
-          brew install zlib bash cmake pkgconfig dwarfutils openssl ninja bats-core
+          brew install coreutils diffutils bats-core
 
-      - name: Build kcov from source
-        run: |
-          git clone --depth=1 https://github.com/SimonKagstrom/kcov /tmp/kcov
-          mkdir /tmp/kcov/build
-          cd /tmp/kcov/build
-          cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DOPENSSL_ROOT_DIR="$(brew --prefix openssl)" \
-            /tmp/kcov
-          ninja
-          sudo ninja install
+      - name: Export GNU coreutils to PATH
+        run: echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
 
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Run tests with coverage
-        run: make test
-
-      - name: Upload per-distro coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-macos
-          path: test-results/coverage/
+      - name: Run tests (bats only — kcov trace lines contaminate output on macOS)
+        run: make test-bats
 
   merge-coverage:
-    needs: [test, test-macos]
+    needs: [test]
     runs-on: ubuntu-22.04
     container:
       image: kcov/kcov:latest
@@ -152,8 +139,7 @@ jobs:
             all-coverage/coverage-debian \
             all-coverage/coverage-arch \
             all-coverage/coverage-fedora \
-            all-coverage/coverage-alpine \
-            all-coverage/coverage-macos
+            all-coverage/coverage-alpine
 
       - name: Generate coverage badge JSON
         run: |
