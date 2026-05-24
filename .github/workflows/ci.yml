@@ -25,19 +25,27 @@ jobs:
       - name: Run tests with coverage
         run: make test
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: test-results/coverage/bats.*/cobertura.xml
-          fail_ci_if_error: false
-          verbose: true
+      - name: Generate coverage badge JSON
+        run: |
+          XML=$(ls test-results/coverage/bats.*/cobertura.xml | head -1)
+          RATE=$(grep -oP 'line-rate="\K[^"]+' "${XML}" | head -1)
+          PCT=$(awk "BEGIN { printf \"%d\", ${RATE} * 100 }")
+          if   [ "${PCT}" -ge 90 ]; then COLOR="brightgreen"
+          elif [ "${PCT}" -ge 75 ]; then COLOR="green"
+          elif [ "${PCT}" -ge 60 ]; then COLOR="yellowgreen"
+          elif [ "${PCT}" -ge 40 ]; then COLOR="yellow"
+          else COLOR="red"
+          fi
+          printf '{"schemaVersion":1,"label":"coverage","message":"%d%%","color":"%s"}\n' \
+            "${PCT}" "${COLOR}" > test-results/coverage-badge.json
 
       - name: Upload coverage HTML report
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          path: test-results/coverage/
+          path: |
+            test-results/coverage/
+            test-results/coverage-badge.json
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
@@ -94,6 +102,8 @@ jobs:
         with:
           name: coverage-report
           path: site/coverage
+      - name: Move badge JSON to site root
+        run: mv site/coverage/coverage-badge.json site/coverage-badge.json || true
 
       - uses: actions/upload-pages-artifact@v3
         with:

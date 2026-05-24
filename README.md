@@ -2,8 +2,7 @@
 [comment]: # (START FRONTMATTER - USER CONTENT BELOW)
 
 [![CI](https://github.com/just-buildit/just-bashit/actions/workflows/ci.yml/badge.svg)](https://github.com/just-buildit/just-bashit/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/just-buildit/just-bashit/branch/main/graph/badge.svg)](https://codecov.io/gh/just-buildit/just-bashit)
-[![Coverage Report](https://img.shields.io/badge/coverage-report-blue)](https://just-buildit.github.io/just-bashit/coverage/)
+[![Coverage](https://img.shields.io/endpoint?url=https://just-buildit.github.io/just-bashit/coverage-badge.json)](https://just-buildit.github.io/just-bashit/coverage/)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
 
 [comment]: # (END FRONMATTER - BEGIN USER CONTENT)
