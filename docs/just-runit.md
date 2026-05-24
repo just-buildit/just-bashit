@@ -118,6 +118,78 @@ jbx https://example.com/tools/setup.sh configure
 
 ---
 
+## Cache
+
+Scripts are cached at `${XDG_CACHE_HOME:-$HOME/.cache}/just-runit/` and shared
+across all projects on the machine.
+
+**Layout**
+
+```
+~/.cache/just-runit/
+  <sha256>.sh          # cached script (key = SHA-256 of URL)
+  <sha256>.meta        # sidecar: ts=<unix epoch>  url=<original URL>
+  aliases-<sha256>.toml  # cached aliases.toml per namespace
+  jbs/                 # just-bashit co-fetch bundle
+    logging.sh
+    network.sh
+    ...
+```
+
+The key is a SHA-256 of the full URL, so two different URLs that happen to
+return the same content get separate entries.
+
+**TTL**
+
+Default TTL is 3600 s (1 hour). Override per-invocation with `-t SECONDS`.
+`-t 0` disables expiry — the entry is kept until manually removed or `-r` is
+used.
+
+**Inspect a cached entry**
+
+```bash
+# See which URL a cache file came from and when it was fetched
+cat ~/.cache/just-runit/<sha256>.meta
+# ts=1779583354
+# url=https://raw.githubusercontent.com/just-buildit/just-bashit/main/src/install-deps.sh
+```
+
+**Force a fresh fetch (keep the entry, overwrite it)**
+
+```bash
+jbx -r just-bashit:install-deps --dry-run
+```
+
+**Fetch once, write nothing to disk**
+
+```bash
+jbx -n https://example.com/tool.sh run
+```
+
+**Purge a single entry**
+
+```bash
+# Find the hash
+jbx -v install-deps 2>&1 | grep 'cache hit'
+# jbx: cache hit: /home/you/.cache/just-runit/1f6227a...sh
+
+rm ~/.cache/just-runit/1f6227a...{sh,meta}
+```
+
+**Purge the just-bashit bundle** (re-fetched as a unit on next use)
+
+```bash
+rm -rf ~/.cache/just-runit/jbs/
+```
+
+**Purge everything**
+
+```bash
+rm -rf ~/.cache/just-runit/
+```
+
+---
+
 ## Recipes
 
 **Discover what a script exposes before calling it:**
