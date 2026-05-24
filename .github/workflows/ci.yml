@@ -31,6 +31,12 @@ jobs:
           files: test-results/coverage/bats.*/cobertura.xml
         continue-on-error: true
 
+      - name: Upload coverage HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: test-results/coverage/
+
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
@@ -57,6 +63,42 @@ jobs:
       - uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: shellcheck.sarif
+
+  deploy-docs:
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install zensical
+
+      - run: zensical build --clean
+
+      - name: Download coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: site/coverage
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - uses: actions/deploy-pages@v4
+        id: deployment
 
   release:
     needs: [test, lint]
