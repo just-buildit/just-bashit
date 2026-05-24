@@ -166,7 +166,9 @@ EOF
 }
 
 @test 'reads from stdin when no file argument' {
-	run bash -c "install-deps.sh -n -s apt <'${GROUPED_FILE}'"
+	local tmpdir="${BATS_TEST_TMPDIR}/stdin_nofile"
+	mkdir -p "${tmpdir}"
+	run bash -c "cd '${tmpdir}' && install-deps.sh -n -s apt <'${GROUPED_FILE}'"
 	assert_success
 	assert_output --partial "curl"
 }
@@ -203,7 +205,7 @@ EOF
 @test 'falls back to stdin when no file present' {
 	local tmpdir="${BATS_TEST_TMPDIR}/nofile"
 	mkdir -p "${tmpdir}"
-	run bash -c "install-deps.sh -n -s apt <'${INLINE_FILE}'"
+	run bash -c "cd '${tmpdir}' && install-deps.sh -n -s apt <'${INLINE_FILE}'"
 	assert_success
 	assert_output --partial "curl"
 }
