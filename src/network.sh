@@ -142,7 +142,7 @@ test-internet-access() {
 		for COMMAND in "${AVAILABLE_COMMANDS[@]}"; do
 
 			local REM="${TIME_REMAINING}"
-			ARGS=(--preserve-status "${REM}s")
+			ARGS=("${REM}s")
 			case "${COMMAND}" in
 			ping) ARGS+=(ping -W "${REM}" "${PING_ARGS[@]}") ;;
 			wget) ARGS+=(wget --timeout "${REM}" "${WGET_ARGS[@]}") ;;
@@ -166,5 +166,7 @@ test-internet-access() {
 		done
 
 	done
+
+	return 1
 
 }

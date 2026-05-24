@@ -33,7 +33,7 @@ jobs:
             primary: 'false'
           - distro: alpine
             image: alpine:latest
-            coverage: 'true'
+            coverage: 'false'
             primary: 'false'
 
     steps:
@@ -56,19 +56,7 @@ jobs:
         shell: sh
         run: |
           apk add --update --no-cache \
-            bash git make bats build-base cmake python3 \
-            curl-dev curl-static libdw openssl-dev zlib-dev \
-            elfutils-dev libstdc++-dev
-
-      - name: Build kcov from source (alpine)
-        if: matrix.distro == 'alpine'
-        run: |
-          git clone --depth=1 https://github.com/SimonKagstrom/kcov /tmp/kcov
-          mkdir /tmp/kcov/build
-          cd /tmp/kcov/build
-          cmake ..
-          make -j$(nproc)
-          make install
+            bash git make bats coreutils curl diffutils
 
       - uses: actions/checkout@v4
         with:
@@ -101,10 +89,12 @@ jobs:
     steps:
       - name: Install dependencies
         run: |
-          brew install coreutils diffutils bats-core
+          brew install bash coreutils diffutils bats-core
 
-      - name: Export GNU coreutils to PATH
-        run: echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
+      - name: Export GNU utilities to PATH
+        run: |
+          echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix bash)/bin" >> "$GITHUB_PATH"
 
       - uses: actions/checkout@v4
         with:
@@ -138,8 +128,7 @@ jobs:
           kcov --merge merged-coverage \
             all-coverage/coverage-debian \
             all-coverage/coverage-arch \
-            all-coverage/coverage-fedora \
-            all-coverage/coverage-alpine
+            all-coverage/coverage-fedora
 
       - name: Generate coverage badge JSON
         run: |

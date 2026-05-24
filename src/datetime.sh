@@ -99,7 +99,10 @@ iso-8601-basic() {
 	shift "$((OPTIND - 1))"
 
 	# Compute the full precision timestamp
-	TIMESTAMP=$(date --utc --date="${DATE}" +"%Y%m%dT%H%M%S.%N")
+	# Use gdate (GNU date) on macOS where system date is BSD date.
+	local _date_cmd
+	_date_cmd=$(command -v gdate 2>/dev/null || command -v date)
+	TIMESTAMP=$("${_date_cmd}" --utc --date="${DATE}" +"%Y%m%dT%H%M%S.%N")
 
 	# Separate and truncate the seconds if needed
 	FRACTION="${TIMESTAMP##*.}"

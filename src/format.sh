@@ -168,7 +168,10 @@ color-echo() {
 			;;
 
 		c)
-			case "${OPTARG,,}" in
+			# ${var,,} requires bash 4+; tr works on bash 3.2 (macOS default).
+			local _color_lc
+			_color_lc="$(printf '%s' "${OPTARG}" | tr '[:upper:]' '[:lower:]')"
+			case "${_color_lc}" in
 
 			black)
 				FOREGROUND=30
