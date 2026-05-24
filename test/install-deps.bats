@@ -409,6 +409,76 @@ EOF
 	assert_output --partial "wget"
 }
 
+@test 'long form --section overrides detected PM' {
+	run install-deps.sh -n --section apt "${GROUPED_FILE}"
+	assert_success
+	assert_output --partial "apt-get install"
+}
+
+@test 'long form --groups restricts groups' {
+	run install-deps.sh -n --section apt --groups runtime "${GROUPED_FILE}"
+	assert_success
+	assert_output --partial "curl"
+	refute_output --partial "git"
+}
+
+@test 'auto-detects package manager from OS' {
+	local f="${BATS_TEST_TMPDIR}/autodetect.toml"
+	# Use a pacman section since CI runs on CachyOS/Arch
+	printf '[runtime.pacman]\npackages = ["bash"]\n' >"${f}"
+	run install-deps.sh -n "${f}"
+	assert_success
+	assert_output --partial "bash"
+}
+
+@test '[tools.install-deps].groups multiline toml array' {
+	local f="${BATS_TEST_TMPDIR}/multiline_tool_groups.toml"
+	cat >"${f}" <<'EOF'
+[tools.install-deps]
+groups = [
+    "runtime",
+]
+
+[runtime.apt]
+packages = ["curl"]
+
+[dev.apt]
+packages = ["git"]
+EOF
+	run install-deps.sh -n -s apt "${f}"
+	assert_success
+	assert_output --partial "curl"
+	refute_output --partial "git"
+}
+
+@test 'msys2 exits with success' {
+	local f="${BATS_TEST_TMPDIR}/msys2_exit.toml"
+	printf '[runtime.msys2]\npackages = ["cmake"]\n' >"${f}"
+	run install-deps.sh -s msys2 "${f}"
+	assert_success
+}
+
+@test 'error message includes section name' {
+	run install-deps.sh -n -s apt -g test "${GROUPED_FILE}"
+	assert_failure
+	assert_output --partial "apt"
+}
+
+@test 'non-pm sections ignored in group discovery' {
+	local f="${BATS_TEST_TMPDIR}/mixed.toml"
+	cat >"${f}" <<'EOF'
+[tools.install-deps]
+source = "just-bashit:install-deps"
+
+[runtime.apt]
+packages = ["curl"]
+EOF
+	run install-deps.sh -n -s apt "${f}"
+	assert_success
+	assert_output --partial "curl"
+	refute_output --partial "tools"
+}
+
 @test 'groups are discovered in file order' {
 	local f="${BATS_TEST_TMPDIR}/ordered.toml"
 	cat >"${f}" <<'EOF'

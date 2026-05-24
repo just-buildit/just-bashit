@@ -184,3 +184,93 @@ EOF
 	assert_success
 	assert_output --partial "# this-package-does-not-exist-xyzzy = not installed"
 }
+
+@test '-g with comma-separated groups reports both' {
+	run inspect.sh -s apt -g runtime,dev "${DEPS_FILE}"
+	assert_success
+	assert_output --partial "[runtime.apt]"
+	assert_output --partial "[dev.apt]"
+}
+
+@test 'long form --section works' {
+	run inspect.sh --section apt "${DEPS_FILE}"
+	assert_success
+	assert_output --partial "[runtime.apt]"
+}
+
+@test 'long form --groups restricts output' {
+	run inspect.sh --section apt --groups runtime "${DEPS_FILE}"
+	assert_success
+	assert_output --partial "[runtime.apt]"
+	refute_output --partial "[dev.apt]"
+}
+
+@test 'long form --verbose emits section and groups to stderr' {
+	run inspect.sh --verbose --section apt "${DEPS_FILE}"
+	assert_success
+	assert_output --partial "section:"
+}
+
+@test 'long form --write with explicit path' {
+	local out="${BATS_TEST_TMPDIR}/longform.versions"
+	run inspect.sh --section apt --write "${out}" "${DEPS_FILE}"
+	assert_success
+	assert [ -f "${out}" ]
+}
+
+@test '-w without filename defaults to jb.versions in CWD' {
+	local tmpdir="${BATS_TEST_TMPDIR}/default_write"
+	mkdir -p "${tmpdir}"
+	cp "${DEPS_FILE}" "${tmpdir}/jb-deps.toml"
+	run bash -c "cd '${tmpdir}' && inspect.sh -s apt -w"
+	assert_success
+	assert [ -f "${tmpdir}/jb.versions" ]
+}
+
+@test '-w prints wrote message to stderr' {
+	local out="${BATS_TEST_TMPDIR}/wrote_msg.versions"
+	run inspect.sh -s apt -w "${out}" "${DEPS_FILE}"
+	assert_success
+	assert_output --partial "wrote"
+}
+
+@test 'file with no matching PM sections outputs system and compiler only' {
+	local f="${BATS_TEST_TMPDIR}/nopm.toml"
+	printf '[project]\nname = "test"\n' >"${f}"
+	run inspect.sh -s apt "${f}"
+	assert_success
+	assert_output --partial "[system]"
+	assert_output --partial "[compiler]"
+	refute_output --partial "[runtime"
+	refute_output --partial "[dev"
+}
+
+@test '-s pacman queries pacman packages' {
+	if ! command -v pacman >/dev/null 2>&1; then
+		skip "pacman not available"
+	fi
+	local f="${BATS_TEST_TMPDIR}/pacman.toml"
+	printf '[runtime.pacman]\npackages = ["bash"]\n' >"${f}"
+	run inspect.sh -s pacman "${f}"
+	assert_success
+	assert_output --partial "[runtime.pacman]"
+	assert_output --regexp '(bash = "[^"]+|# bash = not installed)'
+}
+
+@test 'explicit -g overrides [tools.inspect].groups' {
+	local f="${BATS_TEST_TMPDIR}/override_inspect.toml"
+	cat >"${f}" <<'EOF'
+[tools.inspect]
+groups = ["runtime"]
+
+[runtime.apt]
+packages = ["curl"]
+
+[dev.apt]
+packages = ["git"]
+EOF
+	run inspect.sh -s apt -g dev "${f}"
+	assert_success
+	assert_output --partial "[dev.apt]"
+	refute_output --partial "[runtime.apt]"
+}
