@@ -120,6 +120,8 @@ test-internet-access() {
 
 	done
 
+	[[ ${#AVAILABLE_COMMANDS[@]} -eq 0 ]] && return 1
+
 	# Select arguments
 	local ARGS=()
 	local -i TIME_REMAINING="${TIMEOUT}"
