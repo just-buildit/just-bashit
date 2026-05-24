@@ -20,7 +20,6 @@ test: $(REPORT_PATH)
 		--report-formatter junit \
 		--output $(REPORT_PATH) \
 		--print-output-on-failure \
-		--show-output-of-passing-tests \
 		test
 	tar -czf $(ARTIFACT) src $(REPORT_PATH)
 	rm -f $(TESTHELPER_PATH)/bats-*/*.json
