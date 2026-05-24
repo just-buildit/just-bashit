@@ -131,7 +131,7 @@ setup() {
 	# -x routes blank lines through grep-dedup, so at most one blank survives
 	local blank_count
 	blank_count=$(grep -c "^$" "${f}" || true)
-	[ "${blank_count}" -le 1 ]
+	assert [ "${blank_count}" -le 1 ]
 }
 
 @test 'add-contents idempotency — non-blank lines not duplicated' {

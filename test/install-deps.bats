@@ -424,8 +424,20 @@ EOF
 
 @test 'auto-detects package manager from OS' {
 	local f="${BATS_TEST_TMPDIR}/autodetect.toml"
-	# Use a pacman section since CI runs on CachyOS/Arch
-	printf '[runtime.pacman]\npackages = ["bash"]\n' >"${f}"
+	# Include sections for common PMs so the test works on any platform
+	cat >"${f}" <<'EOF'
+[runtime.apt]
+packages = ["bash"]
+
+[runtime.pacman]
+packages = ["bash"]
+
+[runtime.brew]
+packages = ["bash"]
+
+[runtime.dnf]
+packages = ["bash"]
+EOF
 	run install-deps.sh -n "${f}"
 	assert_success
 	assert_output --partial "bash"
@@ -493,5 +505,5 @@ EOF
 	local aaa_pos zzz_pos
 	aaa_pos=$(echo "${output}" | grep -n "aaa-pkg" | cut -d: -f1)
 	zzz_pos=$(echo "${output}" | grep -n "zzz-pkg" | cut -d: -f1)
-	[ "${aaa_pos}" -lt "${zzz_pos}" ]
+	assert [ "${aaa_pos}" -lt "${zzz_pos}" ]
 }

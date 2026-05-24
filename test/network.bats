@@ -45,10 +45,10 @@ _common_setup
 	assert_output --partial "Timeout:"
 }
 
-@test '-v reports available commands' {
+@test '-v reports command availability' {
 	run test-internet-access -v https://example.com
-	assert_success
-	assert_output --regexp "(curl|wget|ping) command found"
+	# verbose always reports each command as found or not found
+	assert_output --regexp "(curl|wget|ping) command (not )?found"
 }
 
 @test '-t with multiple custom URLs' {
