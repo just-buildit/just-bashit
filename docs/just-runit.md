@@ -24,7 +24,7 @@ Source the install script — it downloads `just-runit`, creates `jb`, `jbx`, an
 current shell immediately (no new terminal needed):
 
 ```bash
-. <(curl -sSL https://just-buildit.github.io/get-just-runit.sh)
+. <(curl -sSL https://just-buildit.github.io/get-jb.sh)
 ```
 
 That's it. `jb` and `jbx` are live in the shell you ran that in.
@@ -34,7 +34,7 @@ That's it. `jb` and `jbx` are live in the shell you ran that in.
     to `~/.local/bin` and may modify `~/.bashrc`. The tool it installs
     runs arbitrary remote code with no safety guarantees — you are solely
     responsible for what you choose to run with it. Review the source before
-    running: [get-just-runit.sh](https://just-buildit.github.io/get-just-runit.sh)
+    running: [get-jb.sh](https://just-buildit.github.io/get-jb.sh)
 
 !!! note "Why source instead of pipe to bash?"
     `. <(...)` runs the script in the current shell process, so
@@ -44,7 +44,7 @@ That's it. `jb` and `jbx` are live in the shell you ran that in.
 To force reinstall even when already at the current version:
 
 ```bash
-JB_REINSTALL=1 . <(curl -sSL https://just-buildit.github.io/get-just-runit.sh)
+JB_REINSTALL=1 . <(curl -sSL https://just-buildit.github.io/get-jb.sh)
 ```
 
 ---
