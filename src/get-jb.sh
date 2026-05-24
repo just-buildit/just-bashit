@@ -60,9 +60,9 @@ _jbs_install() {
 	# shellcheck disable=SC2064
 	trap "rm -f '${tmp_runit}'" RETURN
 
-	_jbs_say "fetching just-runit from ${RUNIT_URL}"
+	_jbs_say "fetching jb from ${RUNIT_URL}"
 	if ! curl -sSL --proto '=https' --tlsv1.2 -o "${tmp_runit}" "${RUNIT_URL}"; then
-		printf "\033[1;31m  !!  \033[0mfailed to download just-runit\n" >&2
+		printf "\033[1;31m  !!  \033[0mfailed to download jb\n" >&2
 		return 1
 	fi
 
@@ -86,13 +86,13 @@ _jbs_install() {
 			fi
 			cp "${tmp_runit}" "${installed}"
 			chmod +x "${installed}"
-			_jbs_ok "just-runit v${new_ver} installed"
+			_jbs_ok "jb v${new_ver} installed"
 		fi
 	else
 		_jbs_say "installing v${new_ver}"
 		cp "${tmp_runit}" "${installed}"
 		chmod +x "${installed}"
-		_jbs_ok "just-runit v${new_ver} installed"
+		_jbs_ok "jb v${new_ver} installed"
 	fi
 
 	# -- remove stale aliases from prior naming schemes -----------------------
