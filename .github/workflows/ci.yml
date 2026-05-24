@@ -45,11 +45,11 @@ jobs:
 
       - name: Install dependencies (arch)
         if: matrix.distro == 'arch'
-        run: pacman -Sy --noconfirm --needed git make bats curl kcov
+        run: pacman -Sy --noconfirm --needed git make diffutils bats curl kcov
 
       - name: Install dependencies (fedora)
         if: matrix.distro == 'fedora'
-        run: dnf install -y git make bats curl kcov
+        run: dnf install -y git make diffutils bats curl kcov
 
       - name: Install dependencies (alpine)
         if: matrix.distro == 'alpine'

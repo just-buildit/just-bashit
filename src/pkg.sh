@@ -134,13 +134,16 @@ get-pkg-version() {
 		if [[ -n "${out}" ]]; then printf '%s\n' "${out#* }"; fi
 		;;
 	dnf | zypper)
-		rpm -q --queryformat '%{VERSION}-%{RELEASE}' "${pkg}" 2>/dev/null || true
+		if rpm -q "${pkg}" &>/dev/null; then
+			out=$(rpm -q --queryformat '%{VERSION}-%{RELEASE}' "${pkg}" 2>/dev/null) || true
+			[[ -n "${out}" ]] && printf '%s\n' "${out}"
+		fi
 		;;
 	apk)
 		out=$(apk info "${pkg}" 2>/dev/null | head -1) || true
 		if [[ -n "${out}" ]]; then
 			local name="${out%% *}"
-			printf '%s\n' "${name#${pkg}-}"
+			printf '%s\n' "${name#"${pkg}"-}"
 		fi
 		;;
 	*)
