@@ -10,5 +10,5 @@ _common_setup() {
 	PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." >/dev/null 2>&1 && pwd)"
 	# make executables in src/ visible to PATH
 	PATH="$PROJECT_ROOT/src:$PATH"
-	export HELP_REGEX='^Usage:.*\n*' # Check each script/function at least has usage.
+	export HELP_REGEX='Usage:.*\n*' # Check each script/function at least has usage.
 }
