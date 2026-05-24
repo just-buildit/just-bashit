@@ -382,12 +382,15 @@ SECTION="${SECTION_OVERRIDE:-$(_detect_section)}"
 
 # Collect packages across all requested groups (comma-separated).
 PACKAGES=()
-mapfile -t _GROUPS < <(tr ',' '\n' <<<"${GROUPS_STR}")
-for _group in "${_GROUPS[@]}"; do
-	mapfile -t _pkgs < <(echo "${CONTENT}" | _parse_section "${_group}" "${SECTION}")
+while IFS= read -r _group; do
+	[ -z "${_group}" ] && continue
+	_pkgs=()
+	while IFS= read -r _p; do
+		_pkgs+=("${_p}")
+	done < <(echo "${CONTENT}" | _parse_section "${_group}" "${SECTION}")
 	PACKAGES+=("${_pkgs[@]+"${_pkgs[@]}"}")
-done
-unset _GROUPS _pkgs _group
+done < <(tr ',' '\n' <<<"${GROUPS_STR}")
+unset _group _pkgs _p
 
 if [ "${#PACKAGES[@]}" -eq 0 ]; then
 	echo "error: no packages found for group(s) '${GROUPS_STR}' section '${SECTION}' in deps file" >&2
