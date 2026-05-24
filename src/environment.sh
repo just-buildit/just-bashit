@@ -171,6 +171,7 @@ unset-bashrc() {
 	# Remove entry if present using built in editor
 	# ---------------------------------------------
 	# Delete the exact line in-place; -i'' works on both GNU and BSD sed.
+	# shellcheck disable=SC2016
 	sed -i'' "/^$(printf '%s' "${BASHRC_ENTRY}" | sed 's/[[\.*^$()+?{}|]/\\&/g')$/d" "${BASHRC}"
 
 }

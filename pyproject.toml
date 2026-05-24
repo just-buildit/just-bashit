@@ -91,3 +91,18 @@ replace = "# PACKAGE: just-bashit version {new_version}                         
 filename = "src/script-template"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+[[tool.bumpversion.files]]
+filename = "src/inspect.sh"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+[[tool.bumpversion.files]]
+filename = "src/pkg.sh"
+search = "# PACKAGE: just-bashit version {current_version}                                        #"
+replace = "# PACKAGE: just-bashit version {new_version}                                        #"
+
+[[tool.bumpversion.files]]
+filename = "src/toml.sh"
+search = "# PACKAGE: just-bashit version {current_version}                                        #"
+replace = "# PACKAGE: just-bashit version {new_version}                                        #"

@@ -9,6 +9,12 @@
 set -euo pipefail
 IFS=$'\n\t'
 
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${_SCRIPT_DIR}/toml.sh"
+# shellcheck source=/dev/null
+source "${_SCRIPT_DIR}/pkg.sh"
+
 VERBOSE=0
 WRITE_LOCK=0
 LOCK_FILE="jb.versions"
@@ -92,181 +98,11 @@ done
 _log() { [[ ${VERBOSE} -eq 1 ]] && echo "$*" >&2 || true; }
 
 # ---------------------------------------------------------------------------
-# _detect_section: infer package manager from the running OS.
-# ---------------------------------------------------------------------------
-_detect_section() {
-	local os
-	os="$(uname -s)"
-	case "${os}" in
-	Darwin) echo "brew"; return ;;
-	Linux)
-		local ID="" ID_LIKE=""
-		[ -f /etc/os-release ] && . /etc/os-release
-		case "${ID_LIKE:-} ${ID:-}" in
-		*debian* | *ubuntu*) echo "apt" ;;
-		*arch* | *cachyos* | *manjaro*) echo "pacman" ;;
-		*fedora* | *rhel* | *centos* | *rocky* | *alma*) echo "dnf" ;;
-		*suse*) echo "zypper" ;;
-		*alpine*) echo "apk" ;;
-		*)
-			echo "error: unrecognized distro (ID='${ID}')" >&2
-			exit 1
-			;;
-		esac
-		;;
-	MINGW* | MSYS* | CYGWIN*) echo "msys2" ;;
-	*) echo "error: unsupported OS '${os}'" >&2; exit 1 ;;
-	esac
-}
-
-# ---------------------------------------------------------------------------
-# _parse_section: extract packages from [group.section] in TOML (stdin).
-# ---------------------------------------------------------------------------
-_parse_section() {
-	local group="$1" section="$2"
-	local target="[${group}.${section}]"
-	awk -v target="${target}" '
-		/^\[/ { in_s = ($0 == target); in_l = 0; next }
-		in_s && /packages[[:space:]]*=/ {
-			in_l = 1; s = $0
-			sub(/.*packages[[:space:]]*=[[:space:]]*\[/, "", s)
-			if (index(s, "]") > 0) { sub(/\].*/, "", s); in_l = 0 }
-			n = split(s, a, "\"")
-			for (i = 2; i <= n; i += 2) if (a[i] != "") print a[i]
-			next
-		}
-		in_l && /\]/ {
-			s = $0; sub(/\].*/, "", s)
-			n = split(s, a, "\"")
-			for (i = 2; i <= n; i += 2) if (a[i] != "") print a[i]
-			in_l = 0; next
-		}
-		in_l {
-			n = split($0, a, "\"")
-			for (i = 2; i <= n; i += 2) if (a[i] != "") print a[i]
-		}
-	'
-}
-
-# ---------------------------------------------------------------------------
-# _parse_cmd: extract cmd=[...] from [group.section] in TOML (stdin).
-# ---------------------------------------------------------------------------
-_parse_cmd() {
-	local group="$1" section="$2"
-	local target="[${group}.${section}]"
-	awk -v target="${target}" '
-		/^\[/ { in_s = ($0 == target); in_l = 0; next }
-		in_s && /cmd[[:space:]]*=/ {
-			in_l = 1; s = $0
-			sub(/.*cmd[[:space:]]*=[[:space:]]*\[/, "", s)
-			if (index(s, "]") > 0) { sub(/\].*/, "", s); in_l = 0 }
-			n = split(s, a, "\"")
-			for (i = 2; i <= n; i += 2) if (a[i] != "") print a[i]
-			next
-		}
-		in_l && /\]/ {
-			s = $0; sub(/\].*/, "", s)
-			n = split(s, a, "\"")
-			for (i = 2; i <= n; i += 2) if (a[i] != "") print a[i]
-			in_l = 0; next
-		}
-		in_l {
-			n = split($0, a, "\"")
-			for (i = 2; i <= n; i += 2) if (a[i] != "") print a[i]
-		}
-	'
-}
-
-# ---------------------------------------------------------------------------
-# _toml_tool_groups: extract groups=[...] from [tools.NAME] (stdin).
-# ---------------------------------------------------------------------------
-_toml_tool_groups() {
-	local tool="$1"
-	awk -v target="[tools.${tool}]" '
-		/^\[/ { in_s = ($0 == target); in_l = 0; next }
-		in_s && /groups[[:space:]]*=/ {
-			in_l = 1; s = $0
-			sub(/.*groups[[:space:]]*=[[:space:]]*\[/, "", s)
-			if (index(s, "]") > 0) { sub(/\].*/, "", s); in_l = 0 }
-			n = split(s, a, "\"")
-			for (i = 2; i <= n; i += 2) if (a[i] != "") printf "%s,", a[i]
-			next
-		}
-		in_l && /\]/ {
-			s = $0; sub(/\].*/, "", s)
-			n = split(s, a, "\"")
-			for (i = 2; i <= n; i += 2) if (a[i] != "") printf "%s,", a[i]
-			in_l = 0; next
-		}
-		in_l {
-			n = split($0, a, "\"")
-			for (i = 2; i <= n; i += 2) if (a[i] != "") printf "%s,", a[i]
-		}
-	'
-}
-
-# ---------------------------------------------------------------------------
-# _discover_groups: find all group names with known-PM sections (stdin).
-# Preserves file order; prints comma-separated names.
-# ---------------------------------------------------------------------------
-_discover_groups() {
-	awk '
-		/^\[/ {
-			gsub(/^\[|\]/, "")
-			n = split($0, a, ".")
-			if (n == 2) {
-				pm = a[2]
-				if (pm == "apt"   || pm == "pacman" || pm == "brew" ||
-				    pm == "dnf"   || pm == "zypper" || pm == "apk"  ||
-				    pm == "msys2") {
-					if (!(a[1] in seen)) {
-						seen[a[1]] = 1
-						order[++count] = a[1]
-					}
-				}
-			}
-		}
-		END {
-			for (i = 1; i <= count; i++)
-				printf "%s%s", (i > 1 ? "," : ""), order[i]
-		}
-	'
-}
-
-# ---------------------------------------------------------------------------
-# _pkg_version_<pm>: query one package's installed version.
-# Prints the version string, or nothing if not installed.
-# ---------------------------------------------------------------------------
-_pkg_version_pacman() {
-	pacman -Q "$1" 2>/dev/null | awk '{print $2}' || true
-}
-_pkg_version_apt() {
-	dpkg-query -W -f='${Version}' "$1" 2>/dev/null || true
-}
-_pkg_version_brew() {
-	brew list --versions "$1" 2>/dev/null | awk '{print $2}' || true
-}
-_pkg_version_dnf() {
-	rpm -q --queryformat '%{VERSION}-%{RELEASE}' "$1" 2>/dev/null || true
-}
-_pkg_version_zypper() {
-	rpm -q --queryformat '%{VERSION}-%{RELEASE}' "$1" 2>/dev/null || true
-}
-_pkg_version_apk() {
-	# "apk info pkg" first line: "pkg-version description"
-	local line
-	line=$(apk info "$1" 2>/dev/null | head -1) || true
-	[ -n "${line}" ] && printf '%s' "${line%% *}" | sed "s/^${1}-//" || true
-}
-_pkg_version_msys2() {
-	pacman -Q "$1" 2>/dev/null | awk '{print $2}' || true
-}
-
-# ---------------------------------------------------------------------------
 # _tool_version: first line of a tool's --version output; empty if missing.
 # ---------------------------------------------------------------------------
 _tool_version() {
-	local cmd="$1"; shift
+	local cmd="$1"
+	shift
 	command -v "${cmd}" >/dev/null 2>&1 || return 0
 	"${cmd}" "$@" 2>/dev/null | head -1 || true
 }
@@ -286,14 +122,14 @@ _do_inspect() {
 	if [ -f /etc/os-release ]; then
 		# shellcheck source=/dev/null
 		_os_name=$(. /etc/os-release && printf '%s' "${NAME:-}")
-		_os_version=$(. /etc/os-release \
-			&& printf '%s' "${VERSION_ID:-${BUILD_ID:-rolling}}")
+		_os_version=$(. /etc/os-release &&
+			printf '%s' "${VERSION_ID:-${BUILD_ID:-rolling}}")
 	fi
 	printf 'os = "%s (%s)"\n' "${_os_name:-unknown}" "${_os_version:-unknown}"
 	printf 'kernel = "%s"\n' "$(uname -r)"
 	printf 'arch = "%s"\n' "$(uname -m)"
-	_glibc=$(getconf GNU_LIBC_VERSION 2>/dev/null \
-		|| ldd --version 2>/dev/null | head -1 || true)
+	_glibc=$(getconf GNU_LIBC_VERSION 2>/dev/null ||
+		ldd --version 2>/dev/null | head -1 || true)
 	[ -n "${_glibc}" ] && printf 'glibc = "%s"\n' "${_glibc}"
 	printf '\n'
 
@@ -313,30 +149,33 @@ _do_inspect() {
 	printf '\n'
 
 	# [group.section] for each group ------------------------------------------
-	local _group _cmd _pkgs _pkg _ver
+	local _group _pkg _ver
 	while IFS= read -r _group; do
 		[ -z "${_group}" ] && continue
 
 		# cmd sections: note the command; no versions to query.
-		_cmd=()
+		local _cmd=()
 		while IFS= read -r _c; do _cmd+=("${_c}"); done \
-			< <(printf '%s' "${CONTENT}" | _parse_cmd "${_group}" "${SECTION}")
+			< <(printf '%s\n' "${CONTENT}" | toml_get_cmd "${_group}" "${SECTION}")
 		if [ "${#_cmd[@]}" -gt 0 ]; then
 			printf '[%s.%s]\n' "${_group}" "${SECTION}"
-			(IFS=' '; printf '# cmd = %s\n' "${_cmd[*]}")
+			(
+				IFS=' '
+				printf '# cmd = %s\n' "${_cmd[*]}"
+			)
 			printf '# versions not queried for custom cmd sections\n'
 			printf '\n'
 			continue
 		fi
 
-		_pkgs=()
+		local _pkgs=()
 		while IFS= read -r _p; do _pkgs+=("${_p}"); done \
-			< <(printf '%s' "${CONTENT}" | _parse_section "${_group}" "${SECTION}")
+			< <(printf '%s\n' "${CONTENT}" | toml_get_packages "${_group}" "${SECTION}")
 		[ "${#_pkgs[@]}" -eq 0 ] && continue
 
 		printf '[%s.%s]\n' "${_group}" "${SECTION}"
 		for _pkg in "${_pkgs[@]}"; do
-			_ver=$("_pkg_version_${SECTION}" "${_pkg}")
+			_ver=$(get-pkg-version "${SECTION}" "${_pkg}")
 			if [ -n "${_ver}" ]; then
 				printf '%s = "%s"\n' "${_pkg}" "${_ver}"
 			else
@@ -361,16 +200,15 @@ else
 fi
 
 if [[ ${GROUPS_EXPLICIT} -eq 0 ]]; then
-	_toml_g=$(printf '%s' "${CONTENT}" | _toml_tool_groups "inspect" \
-		| sed 's/,$//')
+	_toml_g=$(printf '%s\n' "${CONTENT}" | toml_get_tool_groups "inspect")
 	if [[ -n "${_toml_g}" ]]; then
 		GROUPS_STR="${_toml_g}"
 	else
-		GROUPS_STR=$(printf '%s' "${CONTENT}" | _discover_groups)
+		GROUPS_STR=$(printf '%s\n' "${CONTENT}" | toml_discover_groups)
 	fi
 fi
 
-SECTION="${SECTION_OVERRIDE:-$(_detect_section)}"
+SECTION="${SECTION_OVERRIDE:-$(get-pkg-mgr)}"
 _log "section: ${SECTION}"
 _log "groups:  ${GROUPS_STR}"
 

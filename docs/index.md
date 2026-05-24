@@ -21,6 +21,8 @@ more.
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
 [![GitHub release](https://img.shields.io/github/v/release/just-buildit/just-bashit)](https://github.com/just-buildit/just-bashit/releases)
 
+[Coverage Report](https://just-buildit.github.io/just-bashit/coverage/) · [Test Report](https://github.com/just-buildit/just-bashit/actions/workflows/ci.yml)
+
 ## Quick Start
 
 Download the latest release, extract it, and source whatever you need:

@@ -1,3 +1,4 @@
+# shellcheck disable=SC2154  # BATS_TEST_TMPDIR, HELP_REGEX set by bats/common-setup
 load 'test_helper/common-setup'
 _common_setup
 
@@ -108,7 +109,8 @@ EOF
 	local tmpdir="${BATS_TEST_TMPDIR}/autodiscover"
 	mkdir -p "${tmpdir}"
 	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/jb.toml"
-	run bash -c "cd '${tmpdir}' && inspect.sh -s apt"
+	cd "${tmpdir}"
+	run inspect.sh -s apt
 	assert_success
 	assert_output --partial "[runtime.apt]"
 }
@@ -135,7 +137,8 @@ EOF
 @test 'reads from stdin when no file in CWD' {
 	local tmpdir="${BATS_TEST_TMPDIR}/stdin_inspect"
 	mkdir -p "${tmpdir}"
-	run bash -c "cd '${tmpdir}' && inspect.sh -s apt <'${DEPS_FILE}'"
+	cd "${tmpdir}"
+	run inspect.sh -s apt <"${DEPS_FILE}"
 	assert_success
 	assert_output --partial "[runtime.apt]"
 }
@@ -145,7 +148,8 @@ EOF
 	mkdir -p "${tmpdir}"
 	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/jb-deps.toml"
 	printf '[runtime.apt]\npackages = ["wget"]\n' >"${tmpdir}/jb.toml"
-	run bash -c "cd '${tmpdir}' && inspect.sh -s apt"
+	cd "${tmpdir}"
+	run inspect.sh -s apt
 	assert_success
 	assert_output --partial "curl"
 	refute_output --partial "wget"
@@ -219,12 +223,11 @@ EOF
 }
 
 @test '-w without filename defaults to jb.versions in CWD' {
-	local tmpdir="${BATS_TEST_TMPDIR}/default_write"
-	mkdir -p "${tmpdir}"
-	cp "${DEPS_FILE}" "${tmpdir}/jb-deps.toml"
-	run bash -c "cd '${tmpdir}' && inspect.sh -s apt -w"
+	cp "${DEPS_FILE}" "${BATS_TEST_TMPDIR}/jb-deps.toml"
+	cd "${BATS_TEST_TMPDIR}"
+	run inspect.sh -s apt -w
 	assert_success
-	assert [ -f "${tmpdir}/jb.versions" ]
+	assert [ -f "${BATS_TEST_TMPDIR}/jb.versions" ]
 }
 
 @test '-w prints wrote message to stderr' {
@@ -255,6 +258,26 @@ EOF
 	assert_success
 	assert_output --partial "[runtime.pacman]"
 	assert_output --regexp '(bash = "[^"]+|# bash = not installed)'
+}
+
+@test 'auto-detects package manager when no -s given' {
+	local f="${BATS_TEST_TMPDIR}/autodetect.toml"
+	cat >"${f}" <<'EOF'
+[runtime.apt]
+packages = ["bash"]
+
+[runtime.pacman]
+packages = ["bash"]
+
+[runtime.brew]
+packages = ["bash"]
+
+[runtime.dnf]
+packages = ["bash"]
+EOF
+	run inspect.sh "${f}"
+	assert_success
+	assert_output --partial "[system]"
 }
 
 @test 'explicit -g overrides [tools.inspect].groups' {

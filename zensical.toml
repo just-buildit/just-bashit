@@ -19,6 +19,8 @@ nav = [
     {"match" = "libraries/match.md"},
     {"network" = "libraries/network.md"},
     {"path" = "libraries/path.md"},
+    {"pkg" = "libraries/pkg.md"},
+    {"toml" = "libraries/toml.md"},
   ]},
   {"Templates" = "templates.md"},
   {"jb" = "jb.md"},

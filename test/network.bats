@@ -55,3 +55,9 @@ _common_setup
 	run test-internet-access -t 30 https://example.com https://google.com
 	assert_success
 }
+
+@test 'times out and fails when host is unreachable' {
+	# 192.0.2.1 is TEST-NET (RFC 5737) — reserved, never routes
+	run test-internet-access -t 2 http://192.0.2.1
+	assert_failure
+}

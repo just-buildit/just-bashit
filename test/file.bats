@@ -1,3 +1,4 @@
+# shellcheck disable=SC2154  # BATS_TEST_TMPDIR, HELP_REGEX set by bats/common-setup
 load 'test_helper/common-setup'
 source 'src/file.sh'
 _common_setup
@@ -112,7 +113,8 @@ setup() {
 }
 
 @test 'add-line creates file if not exists' {
-	local f="${BATS_TEST_TMPDIR}/newfile_$(date +%s%N).txt"
+	local f
+	f="${BATS_TEST_TMPDIR}/newfile_$(date +%s%N).txt"
 	[ ! -f "${f}" ]
 	add-line "HELLO" "${f}"
 	assert [ -f "${f}" ]

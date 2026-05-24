@@ -1,3 +1,4 @@
+# shellcheck disable=SC2154  # BATS_TEST_TMPDIR, HELP_REGEX set by bats/common-setup
 load 'test_helper/common-setup'
 _common_setup
 
@@ -201,7 +202,8 @@ EOF
 @test 'reads from stdin when no file argument' {
 	local tmpdir="${BATS_TEST_TMPDIR}/stdin_nofile"
 	mkdir -p "${tmpdir}"
-	run bash -c "cd '${tmpdir}' && install-deps.sh -n -s apt <'${GROUPED_FILE}'"
+	cd "${tmpdir}"
+	run install-deps.sh -n -s apt <"${GROUPED_FILE}"
 	assert_success
 	assert_output --partial "curl"
 }
@@ -210,7 +212,8 @@ EOF
 	local tmpdir="${BATS_TEST_TMPDIR}/autodiscover"
 	mkdir -p "${tmpdir}"
 	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/jb-deps.toml"
-	run bash -c "cd '${tmpdir}' && install-deps.sh -n -s apt"
+	cd "${tmpdir}"
+	run install-deps.sh -n -s apt
 	assert_success
 	assert_output --partial "curl"
 }
@@ -219,7 +222,8 @@ EOF
 	local tmpdir="${BATS_TEST_TMPDIR}/autodiscover_jbtoml"
 	mkdir -p "${tmpdir}"
 	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/jb.toml"
-	run bash -c "cd '${tmpdir}' && install-deps.sh -n -s apt"
+	cd "${tmpdir}"
+	run install-deps.sh -n -s apt
 	assert_success
 	assert_output --partial "curl"
 }
@@ -229,7 +233,8 @@ EOF
 	mkdir -p "${tmpdir}"
 	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/jb-deps.toml"
 	printf '[runtime.apt]\npackages = ["wget"]\n' >"${tmpdir}/jb.toml"
-	run bash -c "cd '${tmpdir}' && install-deps.sh -n -s apt"
+	cd "${tmpdir}"
+	run install-deps.sh -n -s apt
 	assert_success
 	assert_output --partial "curl"
 	refute_output --partial "wget"
@@ -238,7 +243,8 @@ EOF
 @test 'falls back to stdin when no file present' {
 	local tmpdir="${BATS_TEST_TMPDIR}/nofile"
 	mkdir -p "${tmpdir}"
-	run bash -c "cd '${tmpdir}' && install-deps.sh -n -s apt <'${INLINE_FILE}'"
+	cd "${tmpdir}"
+	run install-deps.sh -n -s apt <"${INLINE_FILE}"
 	assert_success
 	assert_output --partial "curl"
 }
@@ -438,7 +444,8 @@ packages = ["bash"]
 [runtime.dnf]
 packages = ["bash"]
 EOF
-	run install-deps.sh -n "${f}"
+	# Run without -s so _detect_section is actually called
+	run install-deps.sh -n -g runtime "${f}"
 	assert_success
 	assert_output --partial "bash"
 }

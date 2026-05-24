@@ -37,15 +37,11 @@ checklist on your branch before merging.
 
 ## 3. Lint
 
-- [ ] `shfmt` reports no diff across all `src/` files:
+- [ ] Update pre-commit hooks to latest versions:
   ```bash
-  shfmt -d src/*.sh src/just-runit src/script-template
+  pre-commit autoupdate
   ```
-- [ ] `shellcheck` is clean:
-  ```bash
-  shellcheck src/*.sh
-  ```
-- [ ] `pre-commit` passes on all staged files:
+- [ ] All pre-commit hooks pass (includes shfmt, shellcheck, and other linters):
   ```bash
   pre-commit run --all-files
   ```
