@@ -8,26 +8,109 @@ on:
 
 jobs:
   test:
+    name: test (${{ matrix.distro }})
     runs-on: ubuntu-22.04
     container:
-      image: kcov/kcov:latest
+      image: ${{ matrix.image }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: debian
+            image: kcov/kcov:latest
+            coverage: 'true'
+            primary: 'true'
+          - distro: arch
+            image: archlinux:latest
+            coverage: 'true'
+            primary: 'false'
+          - distro: fedora
+            image: fedora:latest
+            coverage: 'true'
+            primary: 'false'
+          - distro: alpine
+            image: alpine:latest
+            coverage: 'false'
+            primary: 'false'
 
     steps:
-      - name: Install dependencies
+      - name: Install dependencies (debian)
+        if: matrix.distro == 'debian'
         run: |
           apt-get update && apt-get install -y --no-install-recommends \
-            ca-certificates make git shellcheck bats
+            ca-certificates make git bats
+
+      - name: Install dependencies (arch)
+        if: matrix.distro == 'arch'
+        run: pacman -Sy --noconfirm --needed git make bats kcov
+
+      - name: Install dependencies (fedora)
+        if: matrix.distro == 'fedora'
+        run: dnf install -y git make bats kcov
+
+      - name: Install dependencies (alpine)
+        if: matrix.distro == 'alpine'
+        run: apk add --no-cache bash git make bats
 
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
       - name: Run tests with coverage
+        if: matrix.coverage == 'true'
         run: make test
+
+      - name: Run tests (bats only)
+        if: matrix.coverage != 'true'
+        run: make test-bats
+
+      - name: Upload per-distro coverage
+        if: matrix.coverage == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.distro }}
+          path: test-results/coverage/
+
+      - name: Upload release artifact
+        if: matrix.primary == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: just-bashit
+          path: just-bashit.tar.gz
+
+  merge-coverage:
+    needs: test
+    runs-on: ubuntu-22.04
+    container:
+      image: kcov/kcov:latest
+
+    steps:
+      - name: Install git
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends \
+            ca-certificates git
+
+      - uses: actions/checkout@v4
+
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: all-coverage
+
+      - name: Merge coverage
+        run: |
+          kcov --merge merged-coverage \
+            all-coverage/coverage-debian \
+            all-coverage/coverage-arch \
+            all-coverage/coverage-fedora
 
       - name: Generate coverage badge JSON
         run: |
-          XML=$(ls test-results/coverage/bats.*/cobertura.xml | head -1)
+          XML=$(find merged-coverage -name cobertura.xml | head -1)
           RATE=$(grep -oP 'line-rate="\K[^"]+' "${XML}" | head -1)
           PCT=$(awk "BEGIN { printf \"%d\", ${RATE} * 100 }")
           if   [ "${PCT}" -ge 90 ]; then COLOR="brightgreen"
@@ -37,19 +120,13 @@ jobs:
           else COLOR="red"
           fi
           printf '{"schemaVersion":1,"label":"coverage","message":"%d%%","color":"%s"}\n' \
-            "${PCT}" "${COLOR}" > test-results/coverage/coverage-badge.json
+            "${PCT}" "${COLOR}" > merged-coverage/coverage-badge.json
 
-      - name: Upload coverage HTML report
+      - name: Upload merged coverage report
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          path: test-results/coverage/
-
-      - name: Upload release artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: just-bashit
-          path: just-bashit.tar.gz
+          path: merged-coverage/
 
   lint:
     runs-on: ubuntu-latest
@@ -73,7 +150,7 @@ jobs:
           sarif_file: shellcheck.sarif
 
   deploy-docs:
-    needs: [test, lint]
+    needs: [merge-coverage, lint]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
@@ -95,11 +172,12 @@ jobs:
 
       - run: zensical build --clean
 
-      - name: Download coverage report
+      - name: Download merged coverage report
         uses: actions/download-artifact@v4
         with:
           name: coverage-report
           path: site/coverage
+
       - name: Move badge JSON to site root
         run: mv site/coverage/coverage-badge.json site/coverage-badge.json || true
 

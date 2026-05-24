@@ -22,6 +22,9 @@ test: $(REPORT_PATH)
 	tar -czf $(ARTIFACT) src $(REPORT_PATH)
 	rm -f $(TESTHELPER_PATH)/bats-*/*.json
 
+test-bats: $(REPORT_PATH)
+	bats test
+
 clean:
 	rm -rf $(ARTIFACT) $(REPORT_PATH)
 	git -C $(TESTHELPER_PATH)/bats-assert restore .
