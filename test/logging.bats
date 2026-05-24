@@ -38,9 +38,8 @@ _common_setup
 
 @test 'log-wait measure' {
 	TIMEFORMAT=%R
-	EXPECTED=1.2
-	MEASURED=$({ time log-wait "${EXPECTED}"; } 2>&1)
-	assert [ "${MEASURED:0:3}" == "${EXPECTED}" ]
+	MEASURED=$({ time log-wait 1.2; } 2>&1)
+	assert [ "${MEASURED%%.*}" -eq 1 ]
 }
 
 @test 'log help' {

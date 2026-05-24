@@ -105,19 +105,19 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install bats
+      - name: Install dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends \
-            bats curl
+            bats kcov curl
 
       - name: Run tests with kcov
-        uses: sudo-bot/action-kcov@latest
-        with:
-          cli-args: >-
-            --include-pattern=/src
-            --exclude-pattern=/test
-            --dump-summary
-            test-results/coverage
+        run: |
+          mkdir -p test-results/coverage
+          kcov \
+            --include-pattern=/src \
+            --exclude-pattern=/test \
+            --dump-summary \
+            test-results/coverage \
             bats test
 
       - name: Generate coverage badge JSON
