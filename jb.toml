@@ -1,0 +1,12 @@
+[project]
+name    = "just-bashit"
+version = "0.1.4"
+
+[tools.install-deps]
+source = "src/install-deps.sh"
+
+[tools.just-runit]
+source = "src/just-runit"
+
+[tools.get-jb]
+source = "src/get-jb.sh"
