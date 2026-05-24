@@ -117,7 +117,7 @@ jobs:
           path: test-results/coverage/
 
   merge-coverage:
-    needs: [test, test-macos]
+    needs: [test]
     runs-on: ubuntu-22.04
     container:
       image: kcov/kcov:latest
@@ -138,11 +138,12 @@ jobs:
 
       - name: Merge coverage
         run: |
-          kcov --merge merged-coverage \
-            all-coverage/coverage-debian \
-            all-coverage/coverage-arch \
-            all-coverage/coverage-fedora \
-            all-coverage/coverage-macos
+          dirs=()
+          for d in all-coverage/coverage-debian all-coverage/coverage-arch \
+                   all-coverage/coverage-fedora all-coverage/coverage-macos; do
+            [ -d "$d" ] && dirs+=("$d")
+          done
+          kcov --merge merged-coverage "${dirs[@]}"
 
       - name: Generate coverage badge JSON
         run: |

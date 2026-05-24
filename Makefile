@@ -18,8 +18,7 @@ test: $(REPORT_PATH)
 		--include-pattern=/src \
 		--exclude-pattern=/test \
 		$(REPORT_PATH)/coverage \
-		bats test
-	bats --report-formatter junit --output $(REPORT_PATH) test
+		bats --formatter tap --report-formatter junit --output $(REPORT_PATH) test
 	tar -czf $(ARTIFACT) src $(REPORT_PATH)
 	rm -f $(TESTHELPER_PATH)/bats-*/*.json
 
