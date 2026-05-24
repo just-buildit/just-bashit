@@ -33,7 +33,7 @@ jobs:
             primary: 'false'
           - distro: alpine
             image: alpine:latest
-            coverage: 'false'
+            coverage: 'true'
             primary: 'false'
 
     steps:
@@ -56,7 +56,13 @@ jobs:
         shell: sh
         run: |
           apk add --update --no-cache \
-            bash git make bats coreutils curl diffutils
+            bash git make bats coreutils curl diffutils \
+            cmake g++ \
+            curl-dev curl-static libdw openssl-dev zlib-dev elfutils-dev libstdc++-dev
+          git clone --depth 1 https://github.com/SimonKagstrom/kcov.git /tmp/kcov
+          cmake -S /tmp/kcov -B /tmp/kcov/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/kcov/build -j$(nproc)
+          cmake --install /tmp/kcov/build
 
       - uses: actions/checkout@v4
         with:
