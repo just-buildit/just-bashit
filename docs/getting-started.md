@@ -67,13 +67,24 @@ Options:
 ...
 ```
 
+## Platform Support
+
+Every release is tested on:
+
+- **Debian** (latest) · **Arch Linux** (latest) · **Fedora** (latest) · **Alpine** (latest)
+- **macOS** (latest, with GNU coreutils via Homebrew)
+- **Windows** — MSYS2 UCRT64
+
+All libraries target bash 4.0+ on Linux. macOS ships bash 3.2; the libraries
+that run on macOS avoid bash-4-only features (e.g. `${var,,}`, `mapfile`).
+
 ## Quality Guarantees
 
 Every library in a release:
 
 - Passes `shellcheck` static analysis
 - Is formatted with `shfmt`
-- Has a corresponding `bats` test suite
-- Includes `kcov` coverage data in `test-results/`
+- Has a corresponding `bats` test suite with kcov coverage
+- Is tested on all six supported platforms in CI
 
 Pre-commit hooks enforce the same checks locally when contributing.

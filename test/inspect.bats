@@ -173,9 +173,9 @@ EOF
 }
 
 @test 'output contains glibc on linux' {
-	if [[ "$(uname -s)" != "Linux" ]] \
-		|| grep -qi musl /proc/version 2>/dev/null \
-		|| grep -qi alpine /etc/os-release 2>/dev/null; then
+	if [[ "$(uname -s)" != "Linux" ]] ||
+		grep -qi musl /proc/version 2>/dev/null ||
+		grep -qi alpine /etc/os-release 2>/dev/null; then
 		skip "glibc only on glibc Linux"
 	fi
 	run inspect.sh -s apt "${DEPS_FILE}"

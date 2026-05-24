@@ -1,3 +1,4 @@
+# shellcheck disable=SC2154  # BATS_TEST_TMPDIR, HELP_REGEX set by bats/common-setup
 load 'test_helper/common-setup'
 source 'src/pkg.sh'
 _common_setup
@@ -63,14 +64,14 @@ _common_setup
 	# Package name differs by PM.
 	local pkg
 	case "${pm}" in
-	apt)     pkg="bash" ;;
-	pacman)  pkg="bash" ;;
-	brew)    pkg="bash" ;;
-	dnf)     pkg="bash" ;;
-	zypper)  pkg="bash" ;;
-	apk)     pkg="bash" ;;
-	msys2)   pkg="bash" ;;
-	*)       skip "unknown PM ${pm}" ;;
+	apt) pkg="bash" ;;
+	pacman) pkg="bash" ;;
+	brew) pkg="bash" ;;
+	dnf) pkg="bash" ;;
+	zypper) pkg="bash" ;;
+	apk) pkg="bash" ;;
+	msys2) pkg="bash" ;;
+	*) skip "unknown PM ${pm}" ;;
 	esac
 	run get-pkg-version "${pm}" "${pkg}"
 	assert_success

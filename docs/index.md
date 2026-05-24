@@ -37,6 +37,15 @@ iso-8601-basic
 Because libraries depend on each other, it's simplest to unpack the whole
 package and source individual files from it.
 
+## CLI Tools
+
+| Tool | Purpose |
+|---|---|
+| [jb](jb.md) | Top-level CLI — dispatches `run`, `install`, `cache`, `version` |
+| [just-runit](just-runit.md) | Ephemeral runner — fetch a script, call a function, discard |
+| [install-deps](install-deps.md) | Install packages declared in a `jb.toml` / `jb-deps.toml` |
+| [inspect](inspect.md) | Snapshot installed package versions into a `.versions` file |
+
 ## Libraries
 
 | Library | Functions |
@@ -49,6 +58,21 @@ package and source individual files from it.
 | [match](libraries/match.md) | `is-number` |
 | [network](libraries/network.md) | `test-internet-access` |
 | [path](libraries/path.md) | `get-scriptpath` `set-scriptpath` |
+| [pkg](libraries/pkg.md) | `get-pkg-mgr` `get-pkg-version` |
+| [toml](libraries/toml.md) | `toml_get` `toml_discover_groups` `toml_discover_tools` |
+
+## Platform Support
+
+Tested on every release across six platforms:
+
+| Platform | Package manager |
+|---|---|
+| Debian (latest) | apt |
+| Arch Linux (latest) | pacman |
+| Fedora (latest) | dnf |
+| Alpine Linux (latest) | apk |
+| macOS (latest) | brew |
+| Windows — MSYS2 UCRT64 | pacman (MSYS2) |
 
 ## Templates
 

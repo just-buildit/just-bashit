@@ -10,6 +10,12 @@ extra_css = ["stylesheets/extra.css"]
 nav = [
   {"Home" = "index.md"},
   {"Getting Started" = "getting-started.md"},
+  {"CLI" = [
+    {"jb" = "jb.md"},
+    {"just-runit" = "just-runit.md"},
+    {"install-deps" = "install-deps.md"},
+    {"inspect" = "inspect.md"},
+  ]},
   {"Libraries" = [
     {"datetime" = "libraries/datetime.md"},
     {"environment" = "libraries/environment.md"},
@@ -23,11 +29,10 @@ nav = [
     {"toml" = "libraries/toml.md"},
   ]},
   {"Templates" = "templates.md"},
-  {"jb" = "jb.md"},
-  {"just-runit" = "just-runit.md"},
-  {"install-deps" = "install-deps.md"},
-  {"inspect" = "inspect.md"},
-  {"Release" = "release.md"},
+  {"Developers" = [
+    {"Changelog" = "changelog.md"},
+    {"Release checklist" = "release.md"},
+  ]},
 ]
 
 [project.theme]
