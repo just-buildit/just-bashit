@@ -271,3 +271,31 @@ The package manager is inferred from `/etc/os-release` on Linux and
 | MINGW / MSYS / CYGWIN (`uname`) | `msys2` |
 
 If detection fails, use `--section` to specify the package manager explicitly.
+
+---
+
+## Shell compatibility
+
+`install-deps.sh` requires **bash 3.2 or later** — compatible with the
+system bash shipped on macOS (bash 3.2.57, GPL-2). No bash 4+ features are
+used: no `mapfile`/`readarray`, no associative arrays (`declare -A`), no
+`[[ =~ ]]` capture groups.
+
+| Shell | Minimum version | Notes |
+|---|---|---|
+| bash | 3.2+ | macOS default `/bin/bash` works |
+| zsh | not supported | run via `bash install-deps.sh` explicitly |
+| dash / sh | not supported | arrays and process substitution required |
+
+If your environment ships an older bash or a non-bash shell as `/bin/sh`,
+invoke the script directly:
+
+```bash
+bash install-deps.sh -g runtime,dev
+```
+
+or via `jbx`, which always runs scripts under `bash`:
+
+```bash
+jbx install-deps -g runtime,dev
+```
