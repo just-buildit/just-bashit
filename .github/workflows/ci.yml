@@ -20,20 +20,16 @@ jobs:
       matrix:
         include:
           - distro: debian
-            image: kcov/kcov:latest
-            coverage: 'true'
+            image: debian:latest
             primary: 'true'
           - distro: arch
             image: archlinux:latest
-            coverage: 'true'
             primary: 'false'
           - distro: fedora
             image: fedora:latest
-            coverage: 'true'
             primary: 'false'
           - distro: alpine
             image: alpine:latest
-            coverage: 'true'
             primary: 'false'
 
     steps:
@@ -45,39 +41,25 @@ jobs:
 
       - name: Install dependencies (arch)
         if: matrix.distro == 'arch'
-        run: pacman -Sy --noconfirm --needed git make diffutils bats curl kcov
+        run: pacman -Sy --noconfirm --needed git make diffutils bats curl
 
       - name: Install dependencies (fedora)
         if: matrix.distro == 'fedora'
-        run: dnf install -y git make diffutils bats curl kcov
+        run: dnf install -y git make diffutils bats curl
 
       - name: Install dependencies (alpine)
         if: matrix.distro == 'alpine'
         shell: sh
         run: |
           apk add --update --no-cache \
-            bash git make bats coreutils curl diffutils \
-            cmake g++ python3 \
-            curl-dev curl-static libdw openssl-dev zlib-dev elfutils-dev libstdc++-dev
-          git clone --depth 1 https://github.com/SimonKagstrom/kcov.git /tmp/kcov
-          cmake -S /tmp/kcov -B /tmp/kcov/build -DCMAKE_BUILD_TYPE=Release
-          cmake --build /tmp/kcov/build -j$(nproc)
-          cmake --install /tmp/kcov/build
+            bash git make bats coreutils curl diffutils
 
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Run tests with coverage
-        if: matrix.coverage == 'true'
+      - name: Run tests
         run: make test
-
-      - name: Upload per-distro coverage
-        if: matrix.coverage == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-${{ matrix.distro }}
-          path: test-results/coverage/
 
       - name: Upload test report XML
         if: matrix.primary == 'true'
@@ -101,8 +83,7 @@ jobs:
         shell: bash
     steps:
       - name: Install dependencies
-        run: |
-          brew install bash coreutils diffutils bats-core kcov
+        run: brew install bash coreutils diffutils bats-core
 
       - name: Export GNU utilities to PATH
         run: |
@@ -113,50 +94,35 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Run tests with coverage
+      - name: Run tests
         run: make test
 
-      - name: Upload macOS coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-macos
-          path: test-results/coverage/
-
-  merge-coverage:
-    needs: [test]
-    runs-on: ubuntu-22.04
-    container:
-      image: kcov/kcov:latest
-    defaults:
-      run:
-        shell: bash
-
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
     steps:
-      - name: Install git
-        run: |
-          apt-get update && apt-get install -y --no-install-recommends \
-            ca-certificates git
-
       - uses: actions/checkout@v4
-
-      - name: Download coverage artifacts
-        uses: actions/download-artifact@v4
         with:
-          pattern: coverage-*
-          path: all-coverage
+          submodules: recursive
 
-      - name: Merge coverage
+      - name: Install bats
         run: |
-          dirs=()
-          for d in all-coverage/coverage-debian all-coverage/coverage-arch \
-                   all-coverage/coverage-fedora all-coverage/coverage-macos; do
-            [ -d "$d" ] && dirs+=("$d")
-          done
-          kcov --merge merged-coverage "${dirs[@]}"
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            bats curl
+
+      - name: Run tests with kcov
+        uses: sudo-bot/action-kcov@latest
+        with:
+          cli-args: >-
+            --include-pattern=/src
+            --exclude-pattern=/test
+            --dump-summary
+            test-results/coverage
+            bats test
 
       - name: Generate coverage badge JSON
         run: |
-          XML=$(find merged-coverage -name cobertura.xml | head -1)
+          XML=$(find test-results/coverage -name cobertura.xml | head -1)
           RATE=$(grep -oP 'line-rate="\K[^"]+' "${XML}" | head -1)
           PCT=$(awk "BEGIN { printf \"%d\", ${RATE} * 100 }")
           if   [ "${PCT}" -ge 90 ]; then COLOR="brightgreen"
@@ -166,13 +132,13 @@ jobs:
           else COLOR="red"
           fi
           printf '{"schemaVersion":1,"label":"coverage","message":"%d%%","color":"%s"}\n' \
-            "${PCT}" "${COLOR}" > merged-coverage/coverage-badge.json
+            "${PCT}" "${COLOR}" > test-results/coverage/coverage-badge.json
 
-      - name: Upload merged coverage report
+      - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          path: merged-coverage/
+          path: test-results/coverage/
 
   lint:
     runs-on: ubuntu-latest
@@ -196,7 +162,7 @@ jobs:
           sarif_file: shellcheck.sarif
 
   deploy-docs:
-    needs: [merge-coverage, lint]
+    needs: [coverage, lint]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
@@ -237,7 +203,7 @@ jobs:
           mkdir -p site/test-report
           junit2html test-report-xml/merged.xml site/test-report/index.html
 
-      - name: Download merged coverage report
+      - name: Download coverage report
         uses: actions/download-artifact@v4
         with:
           name: coverage-report
