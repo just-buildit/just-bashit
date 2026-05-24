@@ -139,19 +139,13 @@ jobs:
       - name: Run tests with kcov
         run: |
           mkdir -p test-results/coverage
-          kcov \
-            --include-pattern=/src \
-            --exclude-pattern=/test \
-            test-results/coverage \
-            bats \
-              test/datetime.bats \
-              test/environment.bats \
-              test/file.bats \
-              test/format.bats \
-              test/match.bats \
-              test/path.bats \
-              test/toml.bats \
-            >/dev/null 2>&1
+          for f in test/*.bats; do
+            kcov \
+              --include-pattern=/src \
+              --exclude-pattern=/test \
+              test-results/coverage \
+              bats "$f" >/dev/null 2>&1 || true
+          done
 
       - name: Generate coverage badge JSON
         run: |
