@@ -33,7 +33,7 @@ jobs:
             primary: 'false'
           - distro: alpine
             image: alpine:latest
-            coverage: 'false'
+            coverage: 'true'
             primary: 'false'
 
     steps:
@@ -41,19 +41,33 @@ jobs:
         if: matrix.distro == 'debian'
         run: |
           apt-get update && apt-get install -y --no-install-recommends \
-            ca-certificates make git bats
+            ca-certificates make git bats curl
 
       - name: Install dependencies (arch)
         if: matrix.distro == 'arch'
-        run: pacman -Sy --noconfirm --needed git make bats kcov
+        run: pacman -Sy --noconfirm --needed git make bats curl kcov
 
       - name: Install dependencies (fedora)
         if: matrix.distro == 'fedora'
-        run: dnf install -y git make bats kcov
+        run: dnf install -y git make bats curl kcov
 
       - name: Install dependencies (alpine)
         if: matrix.distro == 'alpine'
-        run: apk add --no-cache bash git make bats
+        run: |
+          apk add --update --no-cache \
+            bash git make bats build-base cmake python3 \
+            curl-dev curl-static libdw openssl-dev zlib-dev \
+            elfutils-dev libstdc++-dev
+
+      - name: Build kcov from source (alpine)
+        if: matrix.distro == 'alpine'
+        run: |
+          git clone --depth=1 https://github.com/SimonKagstrom/kcov /tmp/kcov
+          mkdir /tmp/kcov/build
+          cd /tmp/kcov/build
+          cmake ..
+          make -j$(nproc)
+          make install
 
       - uses: actions/checkout@v4
         with:
@@ -62,10 +76,6 @@ jobs:
       - name: Run tests with coverage
         if: matrix.coverage == 'true'
         run: make test
-
-      - name: Run tests (bats only)
-        if: matrix.coverage != 'true'
-        run: make test-bats
 
       - name: Upload per-distro coverage
         if: matrix.coverage == 'true'
@@ -81,8 +91,43 @@ jobs:
           name: just-bashit
           path: just-bashit.tar.gz
 
+  test-macos:
+    name: test (macos)
+    runs-on: macos-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install dependencies
+        run: |
+          brew install zlib bash cmake pkgconfig dwarfutils openssl ninja bats-core
+
+      - name: Build kcov from source
+        run: |
+          git clone --depth=1 https://github.com/SimonKagstrom/kcov /tmp/kcov
+          mkdir /tmp/kcov/build
+          cd /tmp/kcov/build
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DOPENSSL_ROOT_DIR="$(brew --prefix openssl)" \
+            /tmp/kcov
+          ninja
+          sudo ninja install
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Run tests with coverage
+        run: make test
+
+      - name: Upload per-distro coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-macos
+          path: test-results/coverage/
+
   merge-coverage:
-    needs: test
+    needs: [test, test-macos]
     runs-on: ubuntu-22.04
     container:
       image: kcov/kcov:latest
@@ -106,7 +151,9 @@ jobs:
           kcov --merge merged-coverage \
             all-coverage/coverage-debian \
             all-coverage/coverage-arch \
-            all-coverage/coverage-fedora
+            all-coverage/coverage-fedora \
+            all-coverage/coverage-alpine \
+            all-coverage/coverage-macos
 
       - name: Generate coverage badge JSON
         run: |
@@ -189,7 +236,7 @@ jobs:
         id: deployment
 
   release:
-    needs: [test, lint]
+    needs: [test, test-macos, lint]
     runs-on: ubuntu-22.04
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
