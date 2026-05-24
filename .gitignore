@@ -1,4 +1,4 @@
 coverage
 gcovr/
-git-bash-ed.tar.gz
+*.tar.gz
 test-results/
