@@ -15,12 +15,14 @@ lint:
 	shellcheck src/*.sh
 
 test: $(REPORT_PATH)
-	{ kcov \
+	kcov \
 		--dump-summary \
 		--include-pattern=/src \
 		--exclude-pattern=/test \
 		$(REPORT_PATH)/coverage \
-		bats test; } 2> >(grep --line-buffered -v 'kcov@' >&2)
+		bats test \
+		> $(REPORT_PATH)/kcov.log 2>&1 \
+	|| { cat $(REPORT_PATH)/kcov.log; exit 1; }
 	bats \
 		--report-formatter junit \
 		--output $(REPORT_PATH) \
