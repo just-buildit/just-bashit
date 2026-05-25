@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.8 — 2026-05-25
+
+### Fixed
+
+- **`toml.sh` / `pkg.sh` missing from cache** — `install-deps.sh` sources
+  `${_SCRIPT_DIR}/toml.sh` and `${_SCRIPT_DIR}/pkg.sh` at startup, but only
+  the libs listed in `_JBS_LIBS` were co-fetched by `just-runit`.  Adding
+  `pkg` and `toml` to `_JBS_LIBS` ensures they are always present in the
+  cache alongside the other libs.
+
+---
+
 ## v0.1.7 — 2026-05-24
 
 ### Cross-platform CI

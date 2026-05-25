@@ -1,7 +1,7 @@
 #!/bin/bash
 # ############################################################################
 # LIBRARY: toml.sh                                                           #
-# PACKAGE: just-bashit version 0.1.7                                        #
+# PACKAGE: just-bashit version 0.1.8                                        #
 # ############################################################################
 # Pure-bash parser for the TOML subset used by just-bashit dependency files:#
 #   [group.pm] sections with packages = [...] and cmd = [...] arrays.       #
