@@ -1,7 +1,7 @@
 #!/bin/bash
 # ############################################################################
 # LIBRARY: environment.sh                                                    #
-# PACKAGE: just-bashit version 0.1.8                                         #
+# PACKAGE: just-bashit version 0.1.9                                         #
 # ############################################################################
 
 # Enforce sourcing of the script by taking advantage of the fact that return

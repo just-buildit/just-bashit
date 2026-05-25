@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ############################################################################
 # EXECUTABLE: just-runit (aliases: jb run, jbx)                              #
-# PACKAGE: just-bashit version 0.1.8                                         #
+# PACKAGE: just-bashit version 0.1.9                                         #
 # ############################################################################
 # Ephemeral bash tool runner. Fetch a script from a URL or namespace, call   #
 # an optional function, then discard — no installation, no env pollution.    #
@@ -483,6 +483,15 @@ _acquire() {
 
 	if [[ ${url} == jbs:* ]]; then
 		_acquire_jbs "${url#jbs:}"
+		return
+	fi
+
+	# Scripts fetched directly from _JBS_BASE need their sibling libs available
+	# at ${_SCRIPT_DIR}/ (where _SCRIPT_DIR = dirname of the cached file).
+	# Route through _acquire_jbs so all libs land together in cache/jbs/.
+	if [[ ${url} == "${_JBS_BASE}/"* ]]; then
+		local _lib="${url#${_JBS_BASE}/}"
+		_acquire_jbs "${_lib%.sh}"
 		return
 	fi
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 # ############################################################################
 # EXECUTABLE: inspect.sh                                                      #
-# PACKAGE: just-bashit version 0.1.8                                         #
+# PACKAGE: just-bashit version 0.1.9                                         #
 # ############################################################################
 # Query installed versions of system deps from a TOML deps file, plus system #
 # and compiler info. Output is valid TOML (suitable as a lock file).         #

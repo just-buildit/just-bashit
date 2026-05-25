@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.1.9 — 2026-05-25
+
+### Fixed
+
+- **`toml.sh` / `pkg.sh` still missing when `install-deps` resolves via the
+  `just-buildit` namespace** — 0.1.8 added `pkg` and `toml` to `_JBS_LIBS`
+  so the `jbs:` co-fetch path works, but `jbx install-deps` (bare name) goes
+  through the `just-buildit` namespace and resolves to a raw GitHub URL, which
+  `_acquire` cached at a hash-based path in `~/.cache/just-runit/` — not in
+  `~/.cache/just-runit/jbs/`.  When `install-deps.sh` then sources
+  `${_SCRIPT_DIR}/toml.sh` it looks in the hash dir, where siblings never
+  land.  Fix: detect URLs that originate from `_JBS_BASE` in `_acquire` and
+  redirect them through `_acquire_jbs`, so the script and all its siblings end
+  up in `cache/jbs/` regardless of how the name was originally spelled.
+
 ## v0.1.8 — 2026-05-25
 
 ### Fixed
