@@ -1,0 +1,18 @@
+# just-bashit
+
+> just-bashit is an evolving set of shfmt-conformant, bats-tested,
+> shellcheck-linted shell libraries, tools, and templates — building blocks for
+> writing your own robust bash tools, plus a script and function templates to
+> start from.
+
+## Documentation
+
+- Documentation home: https://just-buildit.github.io/just-bashit/
+
+## Source
+
+- GitHub: https://github.com/just-buildit/just-bashit
+
+## Related
+
+- The just-buildit toolchain: https://github.com/just-buildit
