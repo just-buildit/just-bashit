@@ -1,5 +1,5 @@
 load 'test_helper/common-setup'
-source 'src/path.sh'
+source 'src/just_bashit/path.sh'
 _common_setup
 
 @test 'get-scriptpath help' {

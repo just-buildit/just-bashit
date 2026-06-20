@@ -14,6 +14,28 @@ requires-python = ">=3.9"
 authors = [
     { name = "Matthew T Hunter", email = "matthew.t.hunter@aero.org" },
 ]
+keywords = ["bash", "shell", "scripting", "cli", "tools"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX",
+    "Programming Language :: Other Scripting Engines",
+    "Topic :: System :: Shells",
+    "Topic :: Utilities",
+]
+
+[project.scripts]
+jb     = "just_bashit._launcher:jb"
+jbx    = "just_bashit._launcher:jbx"
+jb-inspect = "just_bashit._launcher:jb_inspect"
+
+[project.urls]
+Homepage      = "https://just-buildit.github.io/just-bashit/"
+Repository    = "https://github.com/just-buildit/just-bashit"
+Documentation = "https://just-buildit.github.io/just-bashit/"
+Changelog     = "https://github.com/just-buildit/just-bashit/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
@@ -29,81 +51,81 @@ tag_name = "v{new_version}"
 message = "chore: release v{new_version}"
 
 [[tool.bumpversion.files]]
-filename = "src/datetime.sh"
+filename = "src/just_bashit/datetime.sh"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
 
 [[tool.bumpversion.files]]
-filename = "src/environment.sh"
+filename = "src/just_bashit/environment.sh"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
 
 [[tool.bumpversion.files]]
-filename = "src/file.sh"
+filename = "src/just_bashit/file.sh"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
 
 [[tool.bumpversion.files]]
-filename = "src/format.sh"
+filename = "src/just_bashit/format.sh"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
 
 [[tool.bumpversion.files]]
-filename = "src/function-template.sh"
+filename = "src/just_bashit/function-template.sh"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
 
 [[tool.bumpversion.files]]
-filename = "src/install-deps.sh"
+filename = "src/just_bashit/install-deps.sh"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
 
 [[tool.bumpversion.files]]
-filename = "src/just-runit"
+filename = "src/just_bashit/just-runit"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
 
 [[tool.bumpversion.files]]
-filename = "src/logging.sh"
+filename = "src/just_bashit/logging.sh"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
 
 [[tool.bumpversion.files]]
-filename = "src/match.sh"
+filename = "src/just_bashit/match.sh"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
 
 [[tool.bumpversion.files]]
-filename = "src/network.sh"
+filename = "src/just_bashit/network.sh"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
 
 [[tool.bumpversion.files]]
-filename = "src/path.sh"
+filename = "src/just_bashit/path.sh"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
 
 [[tool.bumpversion.files]]
-filename = "src/get-jb.sh"
+filename = "src/just_bashit/get-jb.sh"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
 
 [[tool.bumpversion.files]]
-filename = "src/script-template"
+filename = "src/just_bashit/script-template"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
 
 [[tool.bumpversion.files]]
-filename = "src/inspect.sh"
+filename = "src/just_bashit/inspect.sh"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
 
 [[tool.bumpversion.files]]
-filename = "src/pkg.sh"
+filename = "src/just_bashit/pkg.sh"
 search = "# PACKAGE: just-bashit version {current_version}                                        #"
 replace = "# PACKAGE: just-bashit version {new_version}                                        #"
 
 [[tool.bumpversion.files]]
-filename = "src/toml.sh"
+filename = "src/just_bashit/toml.sh"
 search = "# PACKAGE: just-bashit version {current_version}                                        #"
 replace = "# PACKAGE: just-bashit version {new_version}                                        #"

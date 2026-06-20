@@ -1,5 +1,5 @@
 load 'test_helper/common-setup'
-source 'src/network.sh'
+source 'src/just_bashit/network.sh'
 _common_setup
 
 @test 'test-internet-access help' {

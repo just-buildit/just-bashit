@@ -169,7 +169,7 @@ jobs:
 
       - name: shellcheck (SARIF → Code Scanning)
         run: |
-          shellcheck --format=sarif src/*.sh > shellcheck.sarif || true
+          shellcheck --format=sarif src/just_bashit/*.sh > shellcheck.sarif || true
           python3 -c "import json; json.load(open('shellcheck.sarif'))" \
             2>/dev/null || printf '%s\n' \
             '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"shellcheck","rules":[]}},"results":[]}]}' \
@@ -178,6 +178,20 @@ jobs:
       - uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: shellcheck.sarif
+
+  ci-passed:
+    name: CI passed
+    needs: [test, test-macos, test-windows, lint]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check required jobs
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" || \
+                "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "A required job failed or was cancelled"; exit 1
+          fi
+          echo "All required jobs passed"
 
   deploy-docs:
     needs: [coverage, lint]
@@ -237,39 +251,3 @@ jobs:
       - uses: actions/deploy-pages@v4
         id: deployment
 
-  release:
-    needs: [test, test-macos, test-windows, lint]
-    runs-on: ubuntu-22.04
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: just-bashit
-
-      - name: Read version
-        id: ver
-        run: |
-          VER=$(grep 'PACKAGE: just-bashit version' src/datetime.sh \
-                | grep -oP '\d+\.\d+\.\d+')
-          echo "version=${VER}" >> "$GITHUB_OUTPUT"
-
-      - name: Publish GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VER="v${{ steps.ver.outputs.version }}"
-          SHORT="${{ github.sha }}"
-          SHORT="${SHORT:0:7}"
-          if gh release view "${VER}" >/dev/null 2>&1; then
-            TAG="${VER}-${SHORT}"
-          else
-            TAG="${VER}"
-          fi
-          gh release create "${TAG}" just-bashit.tar.gz \
-            --title "just-bashit ${TAG}" \
-            --notes "Automated release from commit ${{ github.sha }}."

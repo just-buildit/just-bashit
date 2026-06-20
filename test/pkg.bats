@@ -1,6 +1,6 @@
 # shellcheck disable=SC2154  # BATS_TEST_TMPDIR, HELP_REGEX set by bats/common-setup
 load 'test_helper/common-setup'
-source 'src/pkg.sh'
+source 'src/just_bashit/pkg.sh'
 _common_setup
 
 # ---------------------------------------------------------------------------

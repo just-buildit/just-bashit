@@ -1,6 +1,6 @@
 load 'test_helper/common-setup'
-source 'src/logging.sh'
-source 'src/format.sh'
+source 'src/just_bashit/logging.sh'
+source 'src/just_bashit/format.sh'
 _common_setup
 
 @test 'log-wait help' {
