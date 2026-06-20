@@ -57,7 +57,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install just-buildit build backend
-        run: uv pip install "just-buildit @ git+https://github.com/just-buildit/just-buildit.git"
+        run: uv pip install --system "just-buildit @ git+https://github.com/just-buildit/just-buildit.git"
 
       - name: Build wheel + tarball
         run: |
