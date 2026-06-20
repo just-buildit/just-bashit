@@ -1,19 +1,30 @@
 repos:
-- repo: https://github.com/astral-sh/ruff-pre-commit
-  # Ruff version.
-  rev: v0.15.14
-  hooks:
-    # Run the linter.
-    - id: ruff
-      args: [ --fix , --unsafe-fixes]
-    # Run the formatter.
-    - id: ruff-format
--   repo: https://github.com/shellcheck-py/shellcheck-py
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.11.0.1
     hooks:
-    -   id: shellcheck
-- repo: https://github.com/scop/pre-commit-shfmt
-  rev: v3.13.1-1
-  hooks:
-    # Choose one of:
-    - id: shfmt-src     # build from source (requires/installs Go to build)
+      - id: shellcheck
+
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.13.1-1
+    hooks:
+      - id: shfmt
+
+  - repo: https://github.com/hukkin/mdformat
+    rev: 1.0.0
+    hooks:
+      - id: mdformat
+        additional_dependencies:
+          - mdformat-gfm
+          - mdformat-gfm-alerts
+          - mdformat-mkdocs
