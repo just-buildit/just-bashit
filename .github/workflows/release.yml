@@ -56,8 +56,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install just-buildit build backend
-        run: uv pip install --system "just-buildit @ git+https://github.com/just-buildit/just-buildit.git"
+      - name: Make just-buildit build backend available
+        run: |
+          git clone --depth 1 https://github.com/just-buildit/just-buildit.git /tmp/just-buildit
+          echo "PYTHONPATH=/tmp/just-buildit/src" >> "$GITHUB_ENV"
 
       - name: Build wheel + tarball
         run: |
