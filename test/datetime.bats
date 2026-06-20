@@ -1,5 +1,5 @@
 load 'test_helper/common-setup'
-source 'src/datetime.sh'
+source 'src/just_bashit/datetime.sh'
 _common_setup
 
 @test 'iso-8601-basic help' {

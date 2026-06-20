@@ -1,4 +1,4 @@
-source 'src/function-template.sh'
+source 'src/just_bashit/function-template.sh'
 load 'test_helper/common-setup'
 _common_setup
 

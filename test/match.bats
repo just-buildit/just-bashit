@@ -1,5 +1,5 @@
 load 'test_helper/common-setup'
-source 'src/match.sh'
+source 'src/just_bashit/match.sh'
 _common_setup
 
 @test 'is-number help' {

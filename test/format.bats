@@ -1,5 +1,5 @@
 load 'test_helper/common-setup'
-source 'src/format.sh'
+source 'src/just_bashit/format.sh'
 _common_setup
 # shellcheck disable=SC2154
 echo "${HELP_REGEX}" >/dev/null

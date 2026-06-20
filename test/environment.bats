@@ -1,5 +1,5 @@
 load 'test_helper/common-setup'
-source 'src/environment.sh'
+source 'src/just_bashit/environment.sh'
 _common_setup
 
 @test 'set-bashrc help' {
