@@ -44,18 +44,66 @@ jobs:
           echo "::error::Timed out waiting for 'CI passed' on $SHA."
           exit 1
 
-  release:
+  build:
     needs: verify-ci
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Build release tarball
-        run: tar -czf just-bashit.tar.gz src/
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Build wheel + tarball
+        run: |
+          PYTHONPATH=src uv build --wheel --no-build-isolation
+          tar -czf just-bashit.tar.gz src/just_bashit/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball
+          path: just-bashit.tar.gz
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tarball
+
+      - name: Extract changelog section
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          awk -v ver="$VER" \
+            'index($0, "## [" ver "]") == 1 {found=1; next}
+             found && /^## / {exit}
+             found {print}' CHANGELOG.md > release-notes.md
+          cat release-notes.md
 
       - name: Create GitHub Release
         env:
@@ -63,5 +111,5 @@ jobs:
         run: |
           gh release create "${GITHUB_REF_NAME}" just-bashit.tar.gz \
             --title "just-bashit ${GITHUB_REF_NAME}" \
-            --generate-notes \
-            --latest
+            --latest \
+            --notes-file release-notes.md
