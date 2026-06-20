@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-06-20
+
+### Added
+
+- PyPI packaging: scripts are now installable via `pip install just-bashit` or
+  `uv tool install just-bashit`, exposing `jb`, `jbx`, and `jb-inspect` as
+  console entry points.
+- `CHANGELOG.md` tracking releases in keep-a-changelog format.
+- Standardized release process: `make setup`, `make bump-version`,
+  `make release-branch`, `make tag-release` Makefile targets.
+- Tag-triggered `release.yml` with CI gate, PyPI publish, and GitHub release
+  with CHANGELOG notes.
+
 ## [0.1.9] — 2026-05-25
 
 ### Fixed

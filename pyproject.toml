@@ -7,7 +7,7 @@ pure = true
 
 [project]
 name = "just-bashit"
-version = "0.1.9"
+version = "0.2.0"
 description = "Evolving set of auto-formatted, bats-tested, shellcheck-linted tools, templates, and more."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -44,7 +44,7 @@ dev = [
 ]
 
 [tool.bumpversion]
-current_version = "0.1.9"
+current_version = "0.2.0"
 commit = true
 tag = true
 tag_name = "v{new_version}"

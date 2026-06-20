@@ -1,7 +1,7 @@
 #!/bin/bash
 # ############################################################################
 # LIBRARY: function-template.sh                                              #
-# PACKAGE: just-bashit version 0.1.9                                         #
+# PACKAGE: just-bashit version 0.2.0                                         #
 # ############################################################################
 
 # Enforce sourcing of the script by taking advantage of the fact that return
