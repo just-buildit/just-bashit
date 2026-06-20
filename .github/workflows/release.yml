@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  # Gate: wait for the CI run on this tagged commit to turn green.
+  # Tags should only be pushed via `make tag-release` which verifies HEAD
+  # is at origin/main — so CI has already run, we just wait for it to finish.
+  verify-ci:
+    name: Verify CI already passed for this commit
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+      contents: read
+    steps:
+      - name: Require green CI for the tagged SHA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          for i in $(seq 1 60); do
+            runs="$(gh api "repos/$REPO/commits/$SHA/check-runs" --paginate \
+              --jq '.check_runs[] | select(.name == "CI passed")
+                    | "\(.status) \(.conclusion)"' | head -n1)"
+            status="${runs%% *}"
+            conclusion="${runs#* }"
+            if [[ -z "$status" ]]; then
+              echo "No 'CI passed' check yet ($i/60); waiting..."
+            elif [[ "$status" != "completed" ]]; then
+              echo "'CI passed' is $status ($i/60); waiting..."
+            elif [[ "$conclusion" == "success" ]]; then
+              echo "'CI passed' is green — proceeding to release."
+              exit 0
+            else
+              echo "::error::'CI passed' concluded '$conclusion' — refusing release."
+              exit 1
+            fi
+            sleep 20
+          done
+          echo "::error::Timed out waiting for 'CI passed' on $SHA."
+          exit 1
+
+  release:
+    needs: verify-ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build release tarball
+        run: tar -czf just-bashit.tar.gz src/
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" just-bashit.tar.gz \
+            --title "just-bashit ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --latest
