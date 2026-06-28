@@ -442,7 +442,17 @@ _cache_valid() {
 _fetch_to() {
 	local url="${1}" dest="${2}"
 	_log "fetching ${url}"
-	curl -sSL -o "${dest}" "${url}"
+	# Fail closed. Without --fail, curl writes an HTTP error body — a 404 page,
+	# or a rate-limit response from raw.githubusercontent on the shared CI
+	# runner IPs — into ${dest} and exits 0; jbx then executes the error page
+	# as the script ("line 1: 400: command not found"). --fail emits no body
+	# and returns non-zero on >=400, and the retries ride out transient
+	# throttling so a blip retries instead of reddening the build.
+	if ! curl -sSL --fail --retry 3 --retry-all-errors --retry-connrefused \
+		--connect-timeout 30 -o "${dest}" "${url}"; then
+		rm -f "${dest}"
+		_err "fetch failed (no usable response from ${url})"
+	fi
 	printf 'ts=%s\nurl=%s\n' "$(date +%s)" "${url}" >"$(_meta_path "${dest}")"
 }
 
