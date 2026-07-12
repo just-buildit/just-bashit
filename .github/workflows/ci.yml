@@ -253,6 +253,55 @@ jobs:
           fi
           echo "All required jobs passed"
 
+  trigger-mirror:
+    name: Trigger docs mirror refresh
+    # Nudges just-buildit.github.io's mirror.yml (repository_dispatch:
+    # mirror) to pull the fresh get-jb.sh/just-runit immediately instead of
+    # waiting for its daily cron. Never blocks anything else in this repo —
+    # not a required check, doesn't gate merges.
+    needs: ci-passed
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci-passed.result == 'success'
+    steps:
+      # The credential is a GitHub App, not a PAT. An App token is minted per
+      # run and expires in an hour, so there is no long-lived secret to rotate
+      # or leak, and the same pattern already authenticates notify-adopters.yml
+      # in just-buildit.github.io -- one way of doing this across the org.
+      - name: Check the App credentials are visible here
+        env:
+          APP_ID: ${{ secrets.ADOPTER_APP_ID }}
+          APP_KEY: ${{ secrets.ADOPTER_APP_PRIVATE_KEY }}
+        run: |
+          # These are organisation secrets. A repo they are not shared with
+          # sees them as empty strings rather than an error, and
+          # create-github-app-token would then fail with something about a
+          # malformed key -- true, unhelpful, and nothing to do with the key.
+          # Say which name is missing instead.
+          missing=""
+          [ -n "$APP_ID" ]  || missing="ADOPTER_APP_ID"
+          [ -n "$APP_KEY" ] || missing="${missing:+$missing and }ADOPTER_APP_PRIVATE_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::$missing is not visible to this repository." \
+                 "Share the organisation secret with just-bashit."
+            exit 1
+          fi
+
+      - name: Mint an App token
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          app-id: ${{ secrets.ADOPTER_APP_ID }}
+          private-key: ${{ secrets.ADOPTER_APP_PRIVATE_KEY }}
+          owner: just-buildit
+          repositories: just-buildit.github.io
+
+      - name: Dispatch mirror refresh
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh api repos/just-buildit/just-buildit.github.io/dispatches \
+            -f event_type=mirror
+
   deploy-docs:
     # `test` is here because this job DOWNLOADS test-report-xml, which the
     # primary test job uploads as its last step. Listing only coverage and
