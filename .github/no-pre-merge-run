@@ -7,3 +7,14 @@
 # Its fallible half -- building the site -- could move to a PR-visible job;
 # until it does, a broken deploy is found on main or not at all.
 deploy-docs
+
+# trigger-mirror tells just-buildit.github.io to re-mirror the scripts it
+# serves. A pull request must not do that: it would publish an unmerged
+# branch's script to every jbx user on the CDN. So the dispatch itself can
+# only ever run after a merge.
+#
+# Its fallible half is not the dispatch but the CREDENTIAL -- this job sat
+# unmerged for two months because it named a secret that does not exist. That
+# half is now a separate step that fails by name, and it could move to a
+# PR-visible job; until it does, a misnamed secret is found on main.
+trigger-mirror
