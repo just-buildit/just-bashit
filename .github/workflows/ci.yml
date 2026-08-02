@@ -37,22 +37,22 @@ jobs:
         if: matrix.distro == 'debian'
         run: |
           apt-get update && apt-get install -y --no-install-recommends \
-            ca-certificates make git bats curl
+            ca-certificates make git bats curl openssh-client
 
       - name: Install dependencies (arch)
         if: matrix.distro == 'arch'
-        run: pacman -Sy --noconfirm --needed git make diffutils bats curl
+        run: pacman -Sy --noconfirm --needed git make diffutils bats curl openssh
 
       - name: Install dependencies (fedora)
         if: matrix.distro == 'fedora'
-        run: dnf install -y git make diffutils bats curl
+        run: dnf install -y git make diffutils bats curl openssh-clients
 
       - name: Install dependencies (alpine)
         if: matrix.distro == 'alpine'
         shell: sh
         run: |
           apk add --update --no-cache \
-            bash git make bats coreutils curl diffutils
+            bash git make bats coreutils curl diffutils openssh-keygen
 
       - uses: actions/checkout@v4
         with:
@@ -108,7 +108,7 @@ jobs:
         with:
           msystem: UCRT64
           update: true
-          install: git make diffutils curl
+          install: git make diffutils curl openssh
 
       - uses: actions/checkout@v4
         with:
@@ -129,7 +129,7 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update && apt-get install -y --no-install-recommends \
-            ca-certificates make git bats curl
+            ca-certificates make git bats curl openssh-client
 
       - uses: actions/checkout@v4
         with:
