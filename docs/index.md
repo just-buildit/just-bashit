@@ -47,6 +47,11 @@ package and source individual files from it.
 | [setup-system](setup-system.md) | Take a fresh machine to a working one — packages, shell, ssh, git |
 | [inspect](inspect.md)           | Snapshot installed package versions into a `.versions` file       |
 
+## Guides
+
+- [Setting up a new machine](guides/new-machine.md) — bare OS to a working
+    shell, what lands on disk, and how to check it worked
+
 ## Libraries
 
 | Library                                 | Functions                                               |

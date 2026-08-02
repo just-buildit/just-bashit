@@ -14,11 +14,18 @@
 #                                                                            #
 #       case $- in *i*) ;; *) return;; esac                                  #
 #                                                                            #
-#   so anything exported there is invisible to non-interactive shells —      #
-#   `ssh host git push`, cron, CI, and editor/agent subprocesses. Exports    #
-#   therefore live HERE, and bashrc.sh sources this file when a login shell  #
-#   has not already done so. Interactive-only settings (readline binds,      #
-#   aliases, prompt) live in bashrc.sh and must not be added here.           #
+#   so anything exported there reaches interactive terminals and nothing     #
+#   else. ~/.profile runs once per LOGIN session instead, and everything     #
+#   descended from that session inherits its exports — scripts, language     #
+#   servers, agents, GUI apps — whether or not a terminal was involved.      #
+#   Exports therefore live HERE, and bashrc.sh sources this file when a      #
+#   login shell has not already done so, because terminal emulators start    #
+#   non-login shells. Interactive-only settings (readline binds, aliases,    #
+#   prompt) live in bashrc.sh and must not be added here.                    #
+#                                                                            #
+#   Not covered by either file: `ssh host CMD`, which runs a non-login,      #
+#   non-interactive shell that reads no rc file at all. That needs           #
+#   `ssh host -t bash -lc '...'` or ~/.ssh/environment.                      #
 #                                                                            #
 # Written in POSIX sh, not bash: ~/.profile is also read by dash and by      #
 # desktop session managers. No arrays, no [[ ]], no local-only builtins.     #

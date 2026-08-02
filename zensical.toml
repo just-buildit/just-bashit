@@ -10,6 +10,9 @@ extra_css = ["stylesheets/extra.css"]
 nav = [
   {"Home" = "index.md"},
   {"Getting Started" = "getting-started.md"},
+  {"Guides" = [
+    {"Setting up a new machine" = "guides/new-machine.md"},
+  ]},
   {"CLI" = [
     {"jb" = "jb.md"},
     {"just-runit" = "just-runit.md"},
