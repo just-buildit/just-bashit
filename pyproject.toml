@@ -39,9 +39,19 @@ Documentation = "https://just-buildit.github.io/just-bashit/"
 Changelog     = "https://github.com/just-buildit/just-bashit/blob/main/CHANGELOG.md"
 
 [dependency-groups]
+# WHICH tools, at WHAT versions; uv.lock pins them. The Makefile owns HOW they
+# run, .pre-commit-config.yaml owns WHEN. mdformat's plugins live here rather
+# than as pre-commit additional_dependencies, where they were unpinned and
+# drifted while the config still read as pinned.
 dev = [
     "pre-commit",
+    "bump-my-version",
     "zensical>=0.0.29; python_version >= '3.10'",
+    "mdformat>=1.0; python_version >= '3.10'",
+    "mdformat-gfm; python_version >= '3.10'",
+    "mdformat-gfm-alerts; python_version >= '3.10'",
+    "mdformat-mkdocs; python_version >= '3.10'",
+    "mdformat-frontmatter; python_version >= '3.10'",
 ]
 
 [tool.bumpversion]
@@ -85,6 +95,18 @@ replace = "# PACKAGE: just-bashit version {new_version}                         
 filename = "src/just_bashit/just-runit"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+# The version `jb version` prints. Missing from this list until 0.2.0, which is
+# how it sat at 0.1.4 through two releases; `make version-check` gates it now.
+[[tool.bumpversion.files]]
+filename = "src/just_bashit/just-runit"
+search = "_VERSION=\"{current_version}\""
+replace = "_VERSION=\"{new_version}\""
+
+[[tool.bumpversion.files]]
+filename = "jb.toml"
+search = "version = \"{current_version}\""
+replace = "version = \"{new_version}\""
 
 [[tool.bumpversion.files]]
 filename = "src/just_bashit/logging.sh"

@@ -20,11 +20,14 @@ repos:
     hooks:
       - id: shfmt
 
-  - repo: https://github.com/hukkin/mdformat
-    rev: 1.0.0
+  # Dispatches inward so the hook cannot format differently from `make format`.
+  # Versions — mdformat and every plugin — come from pyproject.toml's dev group
+  # via uv.lock, so there is no additional_dependencies list to drift.
+  - repo: local
     hooks:
       - id: mdformat
-        additional_dependencies:
-          - mdformat-gfm
-          - mdformat-gfm-alerts
-          - mdformat-mkdocs
+        name: mdformat
+        entry: make -s lint-mdformat
+        language: system
+        pass_filenames: false
+        types: [markdown]

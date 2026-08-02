@@ -49,8 +49,10 @@ is-number() {
 		;;
 
 	-s)
-		[[ 
-			${ARG2} =~ $IS_ONLY_NUMBER ||
+		# First operand stays on the `[[` line: shfmt writes a trailing
+		# space after a bare `[[`, which trim-trailing-whitespace then
+		# strips, and the two hooks rewrote each other forever.
+		[[ ${ARG2} =~ $IS_ONLY_NUMBER ||
 			${ARG2} =~ $IS_ONLY_SIGNED_NUMBER ]] &&
 			return 0 || return 1
 		;;

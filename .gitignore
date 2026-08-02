@@ -2,3 +2,4 @@ coverage
 gcovr/
 *.tar.gz
 test-results/
+site/
