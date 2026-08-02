@@ -167,6 +167,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.12"
+
+      # The gate. Everything it runs — the standard.mk drift check, help and
+      # ghost gates, shellcheck, shfmt, mdformat — is defined in the Makefile
+      # and the hook config, so local and CI cannot disagree.
+      - name: make lint
+        run: make lint
+
       - name: shellcheck (SARIF → Code Scanning)
         run: |
           shellcheck --format=sarif src/just_bashit/*.sh > shellcheck.sarif || true
@@ -250,4 +260,3 @@ jobs:
 
       - uses: actions/deploy-pages@v4
         id: deployment
-

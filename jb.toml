@@ -1,6 +1,6 @@
 [project]
 name    = "just-bashit"
-version = "0.1.4"
+version = "0.2.0"
 
 [tools.install-deps]
 source = "src/install-deps.sh"
@@ -10,3 +10,29 @@ source = "src/just-runit"
 
 [tools.get-jb]
 source = "src/get-jb.sh"
+
+[tools.setup-system]
+source = "just-bashit:setup-system"
+
+# System packages this repo needs to build and test itself — what `make
+# install-deps` installs, and what CI installs inline per container image.
+[dev.apt]
+packages = ["ca-certificates", "make", "git", "bats", "curl"]
+
+[dev.pacman]
+packages = ["git", "make", "diffutils", "bats", "curl"]
+
+[dev.dnf]
+packages = ["git", "make", "diffutils", "bats", "curl"]
+
+[dev.zypper]
+packages = ["git", "make", "diffutils", "bats", "curl"]
+
+[dev.apk]
+packages = ["bash", "git", "make", "bats", "coreutils", "curl", "diffutils"]
+
+[dev.brew]
+packages = ["bash", "coreutils", "diffutils", "bats-core"]
+
+[dev.msys2]
+packages = ["git", "make", "diffutils", "curl"]
