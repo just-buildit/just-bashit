@@ -304,7 +304,9 @@ _write_deps_toml() {
 	setup-system.sh -s shell >/dev/null
 	run bash --norc -ic ". '${HOME}/.config/just-bashit/bashrc.sh'; bind -q history-search-backward"
 	assert_success
-	assert_output --partial "\\e[A"
+	# Readline renders ESC as \e on some builds and \M- on others (Debian's
+	# prints "\M-[A"), so match the rendering-independent tail.
+	assert_output --regexp '\\(e|M-)\[A'
 }
 
 @test 'installed bashrc sources profile when no login shell has' {
@@ -341,10 +343,11 @@ _write_deps_toml() {
 
 @test 'ssh step skips cleanly when ssh-keygen is unavailable' {
 	# A PATH containing only what the script needs to reach the ssh step,
-	# which is everything except ssh-keygen itself.
+	# which is everything except ssh-keygen itself: the step still fixes
+	# permissions, and only generation needs the binary.
 	local stub="${BATS_TEST_TMPDIR}/stub" cmd
 	mkdir -p "${stub}"
-	for cmd in bash dirname tr; do
+	for cmd in bash dirname tr mkdir chmod; do
 		ln -sf "$(command -v "${cmd}")" "${stub}/${cmd}"
 	done
 	run env PATH="${stub}" \

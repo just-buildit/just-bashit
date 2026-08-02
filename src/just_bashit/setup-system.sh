@@ -341,12 +341,10 @@ step_shell() {
 step_ssh() {
 	_head "ssh — agent keys"
 
-	if ! _have ssh-keygen; then
-		_info "ssh-keygen not installed — skipping"
-		_result "ssh:     skipped (no ssh-keygen)"
-		return 0
-	fi
-
+	# Permissions and the existing-key check come first because neither needs
+	# ssh-keygen: a machine with openssh-client absent but keys already synced
+	# into place still wants its 0700, and still must not be told it is being
+	# skipped. Only generation requires the binary.
 	local dir="${HOME}/.ssh"
 	_run mkdir -p "${dir}"
 	_run chmod 700 "${dir}"
@@ -364,6 +362,12 @@ step_ssh() {
 	if [[ ${existing} -eq 1 ]]; then
 		_info "existing key(s) found in ${dir} — not generating another"
 		_result "ssh:     ok (existing key)"
+		return 0
+	fi
+
+	if ! _have ssh-keygen; then
+		_info "ssh-keygen not installed — skipping key generation"
+		_result "ssh:     skipped (no ssh-keygen)"
 		return 0
 	fi
 
