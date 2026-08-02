@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Added
+
+- `setup-system` tool: takes a fresh machine to a working one in one command —
+    system packages (via `install-deps`), bash configuration, ssh key and agent,
+    git defaults, `uv` + pre-commit, and Claude Code. Every step is idempotent
+    and individually selectable with `-s` / `--skip`; `--dry-run` prints the
+    whole plan without touching anything.
+- `bashrc-template.sh` and `profile-template.sh`: an opinionated, cross-distro
+    bash configuration. Up/down arrow history search, history hygiene, an
+    ssh-agent that adopts an inherited one before starting its own, a git-aware
+    prompt, probed colour aliases, and a bash-completion loader. Installed to
+    `~/.config/just-bashit/` and sourced by a single line, so `~/.bashrc` stays
+    the user's own file. Exports live in the POSIX-sh profile half so
+    non-interactive shells see them too.
+- `jb-setup-system` console entry point.
+
+### Fixed
+
+- `add-line` no longer prints "Not enough arguments" and its help text on the
+    normal two-argument call — the else branch fired whenever both `ENTRY` and
+    `FILEPATH` were given.
+
 ## [0.2.0] — 2026-06-20
 
 ### Added

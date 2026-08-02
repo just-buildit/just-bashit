@@ -14,6 +14,7 @@ nav = [
     {"jb" = "jb.md"},
     {"just-runit" = "just-runit.md"},
     {"install-deps" = "install-deps.md"},
+    {"setup-system" = "setup-system.md"},
     {"inspect" = "inspect.md"},
   ]},
   {"Libraries" = [

@@ -21,3 +21,7 @@ def jbx() -> None:
 
 def jb_inspect() -> None:
     _exec("inspect.sh")
+
+
+def jb_setup_system() -> None:
+    _exec("setup-system.sh")
