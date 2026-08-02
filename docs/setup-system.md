@@ -79,10 +79,12 @@ Every distro's stock `~/.bashrc` opens with an interactive-only guard:
 case $- in *i*) ;; *) return;; esac
 ```
 
-Anything exported below that line is invisible to non-interactive shells —
-`ssh host git push`, cron, CI, and the subprocesses your editor and agents
-spawn. A `PATH` or `SSH_AUTH_SOCK` set in `.bashrc` therefore works when you
-type it and fails when a script does.
+Anything exported below that line reaches interactive terminals and nothing
+else. `~/.profile` runs once per **login session**, and everything descended
+from that session inherits its exports — scripts, language servers, agents,
+GUI apps — whether or not a terminal was involved. A `PATH` or
+`SSH_AUTH_SOCK` set only in `.bashrc` therefore works when you type it and is
+missing from anything that did not come from a terminal.
 
 So environment lives in `profile.sh`, read by login shells, and interactive
 settings live in `bashrc.sh`. Because terminal emulators start *non-login*

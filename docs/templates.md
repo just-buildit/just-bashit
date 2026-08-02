@@ -95,5 +95,5 @@ POSIX sh, because `~/.profile` is also read by dash.
 jbx setup-system --template-profile
 ```
 
-Exports live here rather than in `bashrc-template.sh` so that
-non-interactive shells — `ssh host git push`, cron, CI — see them too.
+Exports live here rather than in `bashrc-template.sh` so that the whole login
+session inherits them, not just interactive terminals.
