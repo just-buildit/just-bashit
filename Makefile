@@ -92,10 +92,20 @@ done
 endef
 
 # ── coverage ──────────────────────────────────────────────────────────────────
-COVERAGE_MIN = 40
+# Measured 69% on the kcov job. Set near the floor rather than far below it:
+# a threshold of 40 would have let a 29-point regression through in silence,
+# which is the difference between a gate and a decoration.
+COVERAGE_MIN = 60
 
-COVERAGE_CMD = kcov --include-pattern=/src --exclude-pattern=/test \
+# kcov creates its own output directory but not the parent, and says so as
+# three cascading errors ("Can't write helper", "Can't start/attach", "Can't
+# open directory") that name everything except the missing mkdir. The old
+# `coverage: $(REPORT_PATH)` order-only prerequisite is what used to do this.
+define COVERAGE_CMD
+mkdir -p $(REPORT_PATH)
+kcov --include-pattern=/src --exclude-pattern=/test \
     $(REPORT_PATH)/coverage $(BATS) test
+endef
 
 # A report is not a gate; this is the gate. sed rather than `grep -oP`, which
 # is GNU-only and would fail on the macOS runner.
