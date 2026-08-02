@@ -5,7 +5,7 @@ Source: `src/path.sh`
 Resolve the directory containing the calling script, regardless of how it was
 invoked (executed or sourced, symlinked or direct).
 
----
+______________________________________________________________________
 
 ## get-scriptpath
 
@@ -32,11 +32,12 @@ Options:
 ```
 
 !!! note
+
     Copy this function verbatim into your own script rather than sourcing it
     from an external library — that way `BASH_SOURCE[0]` resolves to your
     script's path, not the library's.
 
----
+______________________________________________________________________
 
 ## set-scriptpath
 
@@ -62,5 +63,6 @@ Options:
 ```
 
 !!! warning
+
     You **must** use `eval $(set-scriptpath)` — calling it without `eval`
     prints the export statement but does not apply it to the current shell.

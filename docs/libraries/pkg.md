@@ -4,7 +4,7 @@ Source: `src/pkg.sh`
 
 Package manager detection and installed-version querying.
 
----
+______________________________________________________________________
 
 ## get-pkg-mgr
 
@@ -34,17 +34,17 @@ Output:
 
 ### OS mapping
 
-| OS / distro family | Output |
-|---|---|
-| macOS | `brew` |
-| Debian, Ubuntu | `apt` |
-| Arch, CachyOS, Manjaro | `pacman` |
-| Fedora, RHEL, CentOS, Rocky, AlmaLinux | `dnf` |
-| openSUSE | `zypper` |
-| Alpine | `apk` |
-| MSYS2 / Cygwin / MinGW | `msys2` |
+| OS / distro family                     | Output   |
+| -------------------------------------- | -------- |
+| macOS                                  | `brew`   |
+| Debian, Ubuntu                         | `apt`    |
+| Arch, CachyOS, Manjaro                 | `pacman` |
+| Fedora, RHEL, CentOS, Rocky, AlmaLinux | `dnf`    |
+| openSUSE                               | `zypper` |
+| Alpine                                 | `apk`    |
+| MSYS2 / Cygwin / MinGW                 | `msys2`  |
 
----
+______________________________________________________________________
 
 ## get-pkg-version
 

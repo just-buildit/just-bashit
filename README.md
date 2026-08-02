@@ -1,5 +1,4 @@
-
-[comment]: # (START FRONTMATTER - USER CONTENT BELOW)
+<!-- START FRONTMATTER - USER CONTENT BELOW -->
 
 [![CI](https://github.com/just-buildit/just-bashit/actions/workflows/ci.yml/badge.svg)](https://github.com/just-buildit/just-bashit/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/endpoint?url=https://just-buildit.github.io/just-bashit/coverage-badge.json)](https://just-buildit.github.io/just-bashit/coverage/)
@@ -10,7 +9,7 @@
 
 [Coverage Report](https://just-buildit.github.io/just-bashit/coverage/) · [Test Report](https://just-buildit.github.io/just-bashit/test-report/)
 
-[comment]: # (END FRONMATTER - BEGIN USER CONTENT)
+<!-- END FRONMATTER - BEGIN USER CONTENT -->
 
 # just-bashit
 

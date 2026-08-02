@@ -4,7 +4,7 @@ Source: `src/file.sh`
 
 Idempotent line-level file content management.
 
----
+______________________________________________________________________
 
 ## add-line
 
@@ -41,7 +41,7 @@ Arguments:
   FILEPATH  Path to file for writing.
 ```
 
----
+______________________________________________________________________
 
 ## remove-line
 
@@ -75,7 +75,7 @@ Arguments:
   FILEPATH  Path to file for line removal.
 ```
 
----
+______________________________________________________________________
 
 ## add-contents
 

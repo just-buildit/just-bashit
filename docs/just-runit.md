@@ -5,6 +5,7 @@ URL or namespace, call a function it defines, then discard — no installation, 
 environment pollution. The bash equivalent of `uvx`, for anything reachable over HTTPS.
 
 !!! danger "You are responsible for what you run"
+
     `jbx` fetches and executes arbitrary code from any URL you provide.
     It performs no review, scanning, or sandboxing of remote scripts.
     There is no safety guarantee of any kind — that responsibility
@@ -15,7 +16,7 @@ jbx just-bashit:datetime iso-8601-basic -m
 # 20260522T174523.841Z
 ```
 
----
+______________________________________________________________________
 
 ## Getting just-runit
 
@@ -30,6 +31,7 @@ current shell immediately (no new terminal needed):
 That's it. `jb` and `jbx` are live in the shell you ran that in.
 
 !!! warning "Use at your own risk"
+
     This script is provided as-is, without warranty of any kind. It writes
     to `~/.local/bin` and may modify `~/.bashrc`. The tool it installs
     runs arbitrary remote code with no safety guarantees — you are solely
@@ -37,6 +39,7 @@ That's it. `jb` and `jbx` are live in the shell you ran that in.
     running: [get-jb.sh](https://just-buildit.github.io/get-jb.sh)
 
 !!! note "Why source instead of pipe to bash?"
+
     `. <(...)` runs the script in the current shell process, so
     `export PATH=...` reaches you directly. `bash <(...)` or
     `curl ... | bash` spawn a subshell — PATH changes die with it.
@@ -47,7 +50,7 @@ To force reinstall even when already at the current version:
 JB_REINSTALL=1 . <(curl -sSL https://just-buildit.github.io/get-jb.sh)
 ```
 
----
+______________________________________________________________________
 
 ## How it works
 
@@ -63,23 +66,23 @@ the isolation — nothing leaks back to the calling shell.
 Fetched scripts are cached at `${XDG_CACHE_HOME:-$HOME/.cache}/just-runit/` and
 reused on subsequent calls until the TTL expires (default 1 hour).
 
----
+______________________________________________________________________
 
 ## SPEC forms
 
-| Form | Example | Resolves to |
-|---|---|---|
-| `NAME` | `install-deps` | default namespace (`just-buildit.github.io`) via `aliases.toml` then direct probe |
-| `NS:NAME` | `just-bashit:logging` | namespace `NS` — built-in: `just-buildit`, `just-bashit` |
-| `gh:USER/REPO/PATH` | `gh:user/repo/tool.sh` | GitHub raw content, default branch `main` |
-| `gh:USER/REPO/PATH@REF` | `gh:user/repo/tool.sh@v2.1.0` | GitHub raw content at a specific ref/tag/SHA |
-| `https://...` | `https://example.com/tool.sh` | Any HTTPS URL |
+| Form                    | Example                       | Resolves to                                                                       |
+| ----------------------- | ----------------------------- | --------------------------------------------------------------------------------- |
+| `NAME`                  | `install-deps`                | default namespace (`just-buildit.github.io`) via `aliases.toml` then direct probe |
+| `NS:NAME`               | `just-bashit:logging`         | namespace `NS` — built-in: `just-buildit`, `just-bashit`                          |
+| `gh:USER/REPO/PATH`     | `gh:user/repo/tool.sh`        | GitHub raw content, default branch `main`                                         |
+| `gh:USER/REPO/PATH@REF` | `gh:user/repo/tool.sh@v2.1.0` | GitHub raw content at a specific ref/tag/SHA                                      |
+| `https://...`           | `https://example.com/tool.sh` | Any HTTPS URL                                                                     |
 
 **Resolution order for `NAME` / `NS:NAME`:**
 
 1. Look up `NAME` in the namespace's `aliases.toml` (cached)
-2. Probe `NS_BASE/NAME.sh` then `NS_BASE/NAME.py`
-3. Error if neither resolves
+1. Probe `NS_BASE/NAME.sh` then `NS_BASE/NAME.py`
+1. Error if neither resolves
 
 ```bash
 # Default namespace (just-buildit.github.io)
@@ -96,27 +99,28 @@ jbx https://example.com/tools/setup.sh configure
 ```
 
 !!! note "just-bashit namespace co-fetch"
+
     Libraries like `logging` and `network` depend on other just-bashit
     libraries. When you use `just-bashit:NAME`, `jbx` co-fetches the entire `src/`
     directory into a single cache folder so relative inter-source calls
     resolve correctly — you don't have to manage this yourself.
 
----
+______________________________________________________________________
 
 ## Options
 
-| Flag | Description |
-|---|---|
-| `-l` | List functions the script defines, then exit |
-| `-r` | Refresh — re-fetch even if the cache is fresh |
-| `-n` | No-cache — fetch once and discard (nothing written to disk) |
-| `-c` | Clean environment (minimal env, like `sudo` without `-E`) |
-| `-p VARS` | Comma-separated vars to pass through when using `-c` |
-| `-t TTL` | Cache TTL in seconds. Default `3600`. `0` = keep forever |
-| `-k HASH` | Verify before running: `sha256:HASH` or `md5:HASH` |
-| `-v` | Verbose — prints fetch/cache activity to stderr |
+| Flag      | Description                                                 |
+| --------- | ----------------------------------------------------------- |
+| `-l`      | List functions the script defines, then exit                |
+| `-r`      | Refresh — re-fetch even if the cache is fresh               |
+| `-n`      | No-cache — fetch once and discard (nothing written to disk) |
+| `-c`      | Clean environment (minimal env, like `sudo` without `-E`)   |
+| `-p VARS` | Comma-separated vars to pass through when using `-c`        |
+| `-t TTL`  | Cache TTL in seconds. Default `3600`. `0` = keep forever    |
+| `-k HASH` | Verify before running: `sha256:HASH` or `md5:HASH`          |
+| `-v`      | Verbose — prints fetch/cache activity to stderr             |
 
----
+______________________________________________________________________
 
 ## Cache
 
@@ -193,7 +197,7 @@ jb cache clear jbs
 jb cache clear
 ```
 
----
+______________________________________________________________________
 
 ## Recipes
 

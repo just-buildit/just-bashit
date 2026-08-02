@@ -4,7 +4,7 @@ Source: `src/environment.sh`
 
 Idempotent management of `~/.bashrc` entries and command existence checks.
 
----
+______________________________________________________________________
 
 ## set-bashrc
 
@@ -38,7 +38,7 @@ Arguments:
   VALUE         The value associated with the provided KEY.
 ```
 
----
+______________________________________________________________________
 
 ## unset-bashrc
 
@@ -72,7 +72,7 @@ Arguments:
   VALUE         The value associated with the provided KEY.
 ```
 
----
+______________________________________________________________________
 
 ## check-command-exists
 

@@ -7,17 +7,17 @@ subcommands; the first and most-used is `run`.
 jb <command> [OPTIONS] [ARGS...]
 ```
 
----
+______________________________________________________________________
 
 ## Names and aliases
 
 The installer creates three names in `~/.local/bin`:
 
-| Name | Type | Purpose |
-|---|---|---|
-| `just-buildit` | binary | canonical name — always installed, never conflicts |
-| `jb` | symlink | short alias — skipped if already taken by another tool |
-| `jbx` | symlink | shorthand for `jb run` — always installed |
+| Name           | Type    | Purpose                                                |
+| -------------- | ------- | ------------------------------------------------------ |
+| `just-buildit` | binary  | canonical name — always installed, never conflicts     |
+| `jb`           | symlink | short alias — skipped if already taken by another tool |
+| `jbx`          | symlink | shorthand for `jb run` — always installed              |
 
 `jbx SPEC …` and `jb run SPEC …` are identical. Use whichever fits the
 context: `jbx` for one-liners, `jb run` in scripts for clarity.
@@ -26,7 +26,7 @@ If `jb` is already installed by a different tool on your system, the installer
 warns and skips the symlink. Use `just-buildit` in that case — it is always
 available and unique.
 
----
+______________________________________________________________________
 
 ## Subcommands
 
@@ -73,7 +73,7 @@ jb            # bare invocation also prints help
 
 Prints the top-level subcommand list and exits.
 
----
+______________________________________________________________________
 
 ## `jb install`
 
@@ -95,7 +95,7 @@ calls for those tools are instant cache hits.
 Intended for CI warm-up and first-run onboarding. Run it once after cloning;
 `jbx` will stay offline after that until the TTL expires.
 
----
+______________________________________________________________________
 
 ## `jb.toml` — project tool declarations
 
@@ -118,7 +118,7 @@ source = "just-bashit:just-makeit"
 config = "just-makeit.toml"
 ```
 
----
+______________________________________________________________________
 
 ## Upgrade
 
