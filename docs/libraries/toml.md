@@ -6,7 +6,7 @@ Pure-bash parser for the TOML subset used by just-bashit dependency files:
 `[group.pm]` sections with `packages = [...]` and `cmd = [...]` arrays.
 All parse functions read from stdin.
 
----
+______________________________________________________________________
 
 ## toml_strings
 
@@ -34,7 +34,7 @@ Arguments:
   TEXT  Raw TOML fragment containing one or more double-quoted strings.
 ```
 
----
+______________________________________________________________________
 
 ## toml_get_array
 
@@ -63,7 +63,7 @@ Arguments:
   KEY      The array key to extract (e.g. "packages", "cmd").
 ```
 
----
+______________________________________________________________________
 
 ## toml_get_packages
 
@@ -87,7 +87,7 @@ Arguments:
   SECTION  The package manager name (e.g. "apt", "pacman").
 ```
 
----
+______________________________________________________________________
 
 ## toml_get_cmd
 
@@ -111,7 +111,7 @@ Arguments:
   SECTION  The package manager name (e.g. "apt", "pacman").
 ```
 
----
+______________________________________________________________________
 
 ## toml_get_tool_groups
 
@@ -135,7 +135,7 @@ Arguments:
   TOOL  The tool name as it appears in [tools.TOOL] (e.g. "install-deps").
 ```
 
----
+______________________________________________________________________
 
 ## toml_discover_groups
 

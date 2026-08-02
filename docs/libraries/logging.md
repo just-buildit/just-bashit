@@ -5,7 +5,7 @@ Source: `src/logging.sh`
 Structured, colorized logging with timestamps. Depends on `format.sh`,
 `match.sh`, and `datetime.sh` — all resolved automatically from relative paths.
 
----
+______________________________________________________________________
 
 ## log
 
@@ -44,13 +44,13 @@ Options:
 
 ### Log Types and Colors
 
-| Type | Color |
-|---|---|
-| `INFO` | White |
+| Type      | Color  |
+| --------- | ------ |
+| `INFO`    | White  |
 | `WARNING` | Yellow |
-| `DEBUG` | Yellow |
-| `ERROR` | Red |
-| `SUCCESS` | Green |
+| `DEBUG`   | Yellow |
+| `ERROR`   | Red    |
+| `SUCCESS` | Green  |
 
 ### Examples
 
@@ -67,7 +67,7 @@ log -s 'DEPLOY blue' "Pushing image"
 log -c OFF -t WARNING "Disk usage above 90%"
 ```
 
----
+______________________________________________________________________
 
 ## log-wait
 

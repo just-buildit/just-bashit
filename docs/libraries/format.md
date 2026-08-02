@@ -4,7 +4,7 @@ Source: `src/format.sh`
 
 String trimming and colorized output.
 
----
+______________________________________________________________________
 
 ## trim-from
 
@@ -46,7 +46,7 @@ trim-from -m MA "HEYMA!"   # HEY
 trim-from -rm MA "HEYMA!"  # !
 ```
 
----
+______________________________________________________________________
 
 ## color-echo
 
@@ -75,15 +75,15 @@ Options:
 
 ### Colors
 
-| Flag | Color |
-|---|---|
-| `-c black` | Black |
-| `-c red` | Red |
-| `-c green` | Green |
-| `-c yellow` | Yellow |
-| `-c blue` | Blue |
-| `-c magenta` | Magenta |
-| `-c cyan` | Cyan |
-| `-c white` | White (default) |
+| Flag         | Color           |
+| ------------ | --------------- |
+| `-c black`   | Black           |
+| `-c red`     | Red             |
+| `-c green`   | Green           |
+| `-c yellow`  | Yellow          |
+| `-c blue`    | Blue            |
+| `-c magenta` | Magenta         |
+| `-c cyan`    | Cyan            |
+| `-c white`   | White (default) |
 
 Add `-b` to any color for the bright/bold variant.

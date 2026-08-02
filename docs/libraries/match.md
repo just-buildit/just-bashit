@@ -4,18 +4,18 @@ Source: `src/match.sh`
 
 Regex pattern constants and numeric validation.
 
----
+______________________________________________________________________
 
 ## Pattern Constants
 
 Exported variables for use in `[[ =~ ]]` expressions:
 
-| Variable | Matches |
-|---|---|
-| `IS_NUMBER` | Unsigned integer or decimal (`5`, `5.`, `.5`, `22.5`) |
-| `IS_SIGNED_NUMBER` | Signed integer or decimal (`-5`, `+5.3`) |
-| `IS_ONLY_NUMBER` | `IS_NUMBER` anchored to full string |
-| `IS_ONLY_SIGNED_NUMBER` | `IS_SIGNED_NUMBER` anchored to full string |
+| Variable                | Matches                                               |
+| ----------------------- | ----------------------------------------------------- |
+| `IS_NUMBER`             | Unsigned integer or decimal (`5`, `5.`, `.5`, `22.5`) |
+| `IS_SIGNED_NUMBER`      | Signed integer or decimal (`-5`, `+5.3`)              |
+| `IS_ONLY_NUMBER`        | `IS_NUMBER` anchored to full string                   |
+| `IS_ONLY_SIGNED_NUMBER` | `IS_SIGNED_NUMBER` anchored to full string            |
 
 ```bash
 . just-bashit/src/match.sh
@@ -24,7 +24,7 @@ Exported variables for use in `[[ =~ ]]` expressions:
 [[ "-7"   =~ $IS_ONLY_SIGNED_NUMBER ]] && echo "signed numeric"
 ```
 
----
+______________________________________________________________________
 
 ## is-number
 

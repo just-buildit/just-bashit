@@ -4,7 +4,7 @@ Source: `src/network.sh`
 
 Network connectivity testing. Depends on `format.sh` and `environment.sh`.
 
----
+______________________________________________________________________
 
 ## test-internet-access
 
@@ -48,10 +48,10 @@ When no URLs are given, the function tests:
 
 ### Exit Codes
 
-| Code | Meaning |
-|---|---|
-| `0` | Connection established |
-| `1` | All probes failed |
+| Code  | Meaning                            |
+| ----- | ---------------------------------- |
+| `0`   | Connection established             |
+| `1`   | All probes failed                  |
 | `124` | Timeout expired before any success |
 
 ### Examples
