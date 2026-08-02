@@ -64,18 +64,14 @@ fi
 endef
 
 # ── all ───────────────────────────────────────────────────────────────────────
-# ALL_DEPS is deliberately left at its default of `test`.
+# Lint first: shellcheck and shfmt are seconds, the bats suite is minutes.
 #
-# The old Makefile's `all: lint test` cannot be expressed here: help-check and
-# ghost-check inspect the make database with `$(MAKE) -rpn`, and GNU make
-# executes recipe lines containing $(MAKE) even under -n. That sub-make builds
-# the default goal, so putting `lint` anywhere in the default goal's chain
-# makes the gates re-enter themselves — unbounded recursion, hundreds of
-# processes deep, on a bare `make`. Neither adopter has hit it because both
-# default to `test` or `build`.
-#
-# Lint-then-test is `make gates` (lint + test-all), which is the pre-push
-# command anyway.
+# This needs standard.mk at or past just-buildit/just-buildit.github.io#14. In
+# earlier copies the gates dumped make's database with a goal-less
+# `$(MAKE) -rpn`, which -n executes, so any default goal reaching `lint` made
+# them re-enter themselves without bound. `standard-check` will tell you if
+# this copy predates the fix.
+ALL_DEPS = lint test
 
 # ── clean ─────────────────────────────────────────────────────────────────────
 CLEAN_PATHS = $(ARTIFACT) $(REPORT_PATH) site
