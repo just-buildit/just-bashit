@@ -3,3 +3,4 @@ gcovr/
 *.tar.gz
 test-results/
 site/
+__pycache__/

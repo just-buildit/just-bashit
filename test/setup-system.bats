@@ -13,8 +13,28 @@ setup() {
 	mkdir -p "${HOME}"
 	cd "${BATS_TEST_TMPDIR}" || return 1
 
+	# Sourcing profile.sh starts a real ssh-agent, and a daemon that
+	# outlives the test holds the output pipe bats reads from — its
+	# formatter then never sees EOF and the whole run hangs until something
+	# kills it (six hours, on a CI runner). Off by default here; the one
+	# test that exercises the bootstrap turns it back on deliberately.
+	export JB_SSH_AGENT=0
+
 	RC_LINE='if [ -r "$HOME/.config/just-bashit/bashrc.sh" ]; then . "$HOME/.config/just-bashit/bashrc.sh"; fi'
 	PF_LINE='if [ -r "$HOME/.config/just-bashit/profile.sh" ]; then . "$HOME/.config/just-bashit/profile.sh"; fi'
+}
+
+# Reap anything this test started that outlives it. `kill` on a recorded pid,
+# not `pkill -f`: minimal images ship no procps at all — fedora:latest has
+# neither pkill nor ps — and a cleanup that silently does not run is how a
+# leaked daemon hangs the whole suite.
+teardown() {
+	local pidfile="${BATS_TEST_TMPDIR}/rt/agent.pid" pid
+	if [ -r "${pidfile}" ]; then
+		pid=$(cat "${pidfile}" 2>/dev/null || true)
+		[ -n "${pid}" ] && kill "${pid}" 2>/dev/null
+	fi
+	return 0
 }
 
 # A jb.toml covering every package manager, so the deps step resolves
@@ -291,6 +311,39 @@ _write_deps_toml() {
 	run bash -c ". '${HOME}/.config/just-bashit/profile.sh'; echo \"\${PATH}\""
 	assert_success
 	assert_output --partial "${HOME}/.local/bin"
+}
+
+@test 'the ssh-agent bootstrap does not hold the caller output pipe' {
+	command -v ssh-agent >/dev/null 2>&1 || skip "ssh-agent not installed"
+	setup-system.sh -s shell >/dev/null
+	local rt="${BATS_TEST_TMPDIR}/rt"
+	mkdir -p "${rt}"
+	chmod 700 "${rt}"
+
+	# The regression: starting the agent through `eval "$(ssh-agent ...)"`
+	# hands the daemon the write end of a pipe, which it never closes, so
+	# anything reading that pipe waits forever. Here the reader is a
+	# `timeout`ed cat, which turns "waits forever" into a failed assertion
+	# instead of a hung suite — the reader must die on its own, because
+	# killing the writer would leave the orphaned agent holding the pipe.
+	# SSH_AUTH_SOCK is unset for the inner shell on purpose: with one
+	# inherited the bootstrap correctly adopts it and starts nothing, which
+	# is the path this test is not about.
+	#
+	# `3>&-` closes bats' own TAP descriptor before the agent can inherit
+	# it. Redirecting the daemon's 0/1/2 is not enough on its own — any fd
+	# above 2 that happens to be open gets inherited too, and bats' fd 3 is
+	# read by its formatter, so an agent holding it hangs the run just as
+	# thoroughly as one holding stdout.
+	run bash -c "env -u SSH_AUTH_SOCK XDG_RUNTIME_DIR='${rt}' JB_SSH_AGENT=1 \
+		bash -c '. \"${HOME}/.config/just-bashit/profile.sh\"; \
+		         printf %s \"\$SSH_AGENT_PID\" > \"${rt}/agent.pid\"; \
+		         echo done' 3>&- \
+		| timeout 15 cat"
+	assert_success
+	assert_output --partial "done"
+	assert [ -S "${rt}/just-bashit-agent.sock" ]
+	assert [ -s "${rt}/agent.pid" ]
 }
 
 @test 'installed bashrc is a no-op for non-interactive shells' {

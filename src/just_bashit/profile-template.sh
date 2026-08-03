@@ -157,6 +157,7 @@ _jb_ssh_agent() {
 
 	SSH_AUTH_SOCK="${_jb_rt}/just-bashit-agent.sock"
 	export SSH_AUTH_SOCK
+	_jb_env="${_jb_rt}/just-bashit-agent.env"
 	unset _jb_rt
 
 	# A socket left by an earlier login may still have a live agent behind
@@ -164,10 +165,26 @@ _jb_ssh_agent() {
 	_jb_agent_live && return 0
 	rm -f "${SSH_AUTH_SOCK}" 2>/dev/null || true
 
-	# ssh-agent -s prints the exports plus an "Agent pid" banner; eval the
-	# former and discard the latter so login stays quiet.
-	eval "$(ssh-agent -s -a "${SSH_AUTH_SOCK}" 2>/dev/null)" >/dev/null 2>&1 ||
+	# The agent's stdio must be detached from whatever this shell inherited,
+	# and that rules out `eval "$(ssh-agent ...)"`. Command substitution
+	# hands the daemon the write end of a pipe, which it keeps open for its
+	# whole life — and anything reading that pipe then never sees EOF. A CI
+	# job or a script that sources this file hangs until something kills it:
+	# six hours, in the case that found this.
+	#
+	# Writing the exports to a file instead gives the daemon stdin, stdout
+	# and stderr that hold nothing open: /dev/null, a regular file, and
+	# /dev/null.
+	if ! ssh-agent -s -a "${SSH_AUTH_SOCK}" >"${_jb_env}" 2>/dev/null \
+		</dev/null; then
+		rm -f "${_jb_env}" 2>/dev/null
+		unset _jb_env
 		return 0
+	fi
+	# shellcheck source=/dev/null
+	. "${_jb_env}" >/dev/null 2>&1
+	rm -f "${_jb_env}" 2>/dev/null
+	unset _jb_env
 }
 
 _jb_ssh_agent
