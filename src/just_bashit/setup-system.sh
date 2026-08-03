@@ -182,6 +182,21 @@ _have() { command -v "$1" >/dev/null 2>&1; }
 # The download lands next to this script whenever that directory is writable
 # (it is, inside the cache) so the asset's own siblings resolve too.
 # ---------------------------------------------------------------------------
+# Retry flags the curl at hand understands. `--retry-all-errors` needs curl
+# >= 7.71; RHEL/Oracle/Rocky/Alma 8 ship 7.61, where the unknown flag aborts
+# the fetch. `--retry`/`--retry-connrefused` still ride out throttling there;
+# the all-errors flag is added only where supported. Probed once. (Kept in sync
+# with just-runit's copy — both fetch from the same Pages CDN.)
+_curl_retry_opts() {
+	if [[ -z ${_CURL_RETRY_OPTS+x} ]]; then
+		_CURL_RETRY_OPTS='--retry 3 --retry-connrefused'
+		if curl --retry-all-errors --help >/dev/null 2>&1; then
+			_CURL_RETRY_OPTS+=' --retry-all-errors'
+		fi
+	fi
+	printf '%s' "${_CURL_RETRY_OPTS}"
+}
+
 _asset() {
 	local name="$1" dest
 	if [[ -r "${_SCRIPT_DIR}/${name}" ]]; then
@@ -194,8 +209,9 @@ _asset() {
 		dest="$(mktemp "${TMPDIR:-/tmp}/jb-${name}.XXXXXX")"
 	fi
 	_log "fetching ${_JBS_BASE}/${name}"
-	if ! curl -sSL --fail --retry 3 --retry-all-errors \
-		--connect-timeout 30 -o "${dest}" "${_JBS_BASE}/${name}"; then
+	# shellcheck disable=SC2046  # deliberate word-split of the retry flags
+	if ! curl -sSL --fail $(_curl_retry_opts) --connect-timeout 30 \
+		-o "${dest}" "${_JBS_BASE}/${name}"; then
 		rm -f "${dest}"
 		echo "error: cannot obtain ${name} (no sibling copy, fetch failed)" >&2
 		return 1

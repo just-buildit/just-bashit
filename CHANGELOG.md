@@ -37,6 +37,14 @@
 
 ### Fixed
 
+- The bootstrap now works on curl < 7.71 (RHEL/Oracle/Rocky/Alma 8 ship 7.61) —
+    a large enterprise-LTS audience where `curl --retry-all-errors` aborted every
+    fetch with "option --retry-all-errors: is unknown", so `jbx`/`install-deps`
+    could not run at all. `just-runit` and `setup-system` now probe curl once and
+    add `--retry-all-errors` only where it is supported, keeping `--retry` /
+    `--retry-connrefused` (which already ride out throttling) everywhere else.
+    Regression test shims a 7.61-style curl and asserts the fetch degrades
+    instead of aborting.
 - `add-line` no longer prints "Not enough arguments" and its help text on the
     normal two-argument call — the else branch fired whenever both `ENTRY` and
     `FILEPATH` were given.
