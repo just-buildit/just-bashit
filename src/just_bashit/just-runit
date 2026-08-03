@@ -32,6 +32,28 @@ _JBS_LIBS=(
 	pkg toml
 )
 
+# ---- portable checksums -----------------------------------------------------
+# GNU coreutils' sha256sum/md5sum are absent on macOS/BSD, where the tools are
+# shasum/md5 — a fetch there died with "sha256sum: command not found". Prefer
+# the coreutils names, fall back to the BSD ones; both read stdin, and we emit
+# only the hex digest (BSD `md5` prints the bare hash for stdin, so the same
+# `cut` is harmless there).
+_sha256() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum | cut -d' ' -f1
+	else
+		shasum -a 256 | cut -d' ' -f1
+	fi
+}
+
+_md5() {
+	if command -v md5sum >/dev/null 2>&1; then
+		md5sum | cut -d' ' -f1
+	else
+		md5 | cut -d' ' -f1
+	fi
+}
+
 # ---- top-level dispatch (when called as "jb" or "just-buildit") -------------
 
 if [[ ${_ME} == "jb" || ${_ME} == "just-buildit" ]]; then
@@ -59,7 +81,7 @@ if [[ ${_ME} == "jb" || ${_ME} == "just-buildit" ]]; then
 				;;
 			*)
 				# Treat arg as a URL — remove its cache entry.
-				_key=$(printf '%s' "${_CACHE_TARGET}" | sha256sum | cut -d' ' -f1)
+				_key=$(printf '%s' "${_CACHE_TARGET}" | _sha256)
 				_removed=0
 				for _f in "${_CACHE_DIR}/${_key}".{sh,py} "${_CACHE_DIR}/${_key}".meta; do
 					[[ -f ${_f} ]] && {
@@ -290,7 +312,7 @@ _lookup_alias() {
 	local base="${1}" name="${2}"
 	local aliases_url="${base}/aliases.toml"
 	local key
-	key=$(printf '%s' "${base}" | sha256sum | cut -d' ' -f1)
+	key=$(printf '%s' "${base}" | _sha256)
 	local aliases_cache="${_CACHE_DIR}/aliases-${key}.toml"
 
 	if [[ ${OPT_REFRESH} -eq 1 ]] || ! _cache_valid "${aliases_cache}"; then
@@ -417,7 +439,7 @@ _resolve() {
 
 # ---- cache helpers ----------------------------------------------------------
 
-_cache_key() { printf '%s' "${1}" | sha256sum | cut -d' ' -f1; }
+_cache_key() { printf '%s' "${1}" | _sha256; }
 
 _cache_ext() { case "${1}" in *.py) echo ".py" ;; *) echo ".sh" ;; esac }
 
@@ -555,8 +577,8 @@ _verify() {
 	local file="${1}" spec="${2}"
 	local algo="${spec%%:*}" expected="${spec#*:}" actual
 	case "${algo}" in
-	sha256) actual=$(sha256sum "${file}" | cut -d' ' -f1) ;;
-	md5) actual=$(md5sum "${file}" | cut -d' ' -f1) ;;
+	sha256) actual=$(_sha256 <"${file}") ;;
+	md5) actual=$(_md5 <"${file}") ;;
 	*) _err "unsupported checksum algorithm: ${algo}" ;;
 	esac
 	[[ ${actual} == "${expected}" ]] ||
