@@ -395,6 +395,10 @@ _write_deps_toml() {
 }
 
 @test 'ssh step skips cleanly when ssh-keygen is unavailable' {
+	if [[ ${OSTYPE:-} == msys* || ${OSTYPE:-} == cygwin* ]]; then
+		skip "ssh step is not designed for Windows yet: a PATH-restricted \
+ssh-keygen removal is not reproducible under MSYS2"
+	fi
 	# A PATH containing only what the script needs to reach the ssh step,
 	# which is everything except ssh-keygen itself: the step still fixes
 	# permissions, and only generation needs the binary.
@@ -436,6 +440,10 @@ _write_deps_toml() {
 }
 
 @test 'ssh step tightens ~/.ssh permissions' {
+	if [[ ${OSTYPE:-} == msys* || ${OSTYPE:-} == cygwin* ]]; then
+		skip "ssh step is not designed for Windows yet: Unix mode bits \
+(drwx------) do not map onto the Windows filesystem"
+	fi
 	command -v ssh-keygen >/dev/null 2>&1 || skip "ssh-keygen not installed"
 	mkdir -p "${HOME}/.ssh"
 	chmod 777 "${HOME}/.ssh"
