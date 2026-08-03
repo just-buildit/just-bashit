@@ -13,3 +13,33 @@ _common_setup
 	refute_output --partial 'command not found'
 	assert_output --partial 'fetch failed'
 }
+
+# The bootstrap must survive curl < 7.71, which lacks --retry-all-errors —
+# RHEL/Oracle/Rocky/Alma 8 ship curl 7.61, a large downstream audience where an
+# unknown flag would abort every fetch ("option --retry-all-errors: is
+# unknown"). With that curl shimmed, the fetch must degrade to plain --retry and
+# fail for a NORMAL reason, never the unknown-flag abort.
+@test "fetch degrades on a curl without --retry-all-errors (EL8 curl 7.61)" {
+	local shim="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "${shim}"
+	cat >"${shim}/curl" <<'EOF'
+#!/usr/bin/env bash
+# Emulate curl 7.61: --retry-all-errors is an unknown option.
+for a in "$@"; do
+	if [[ $a == --retry-all-errors ]]; then
+		echo "curl: option --retry-all-errors: is unknown" >&2
+		exit 2
+	fi
+done
+# A real fetch (writes with -o) fails like an unreachable host so the run ends
+# in "fetch failed"; incidental best-effort probes (no -o) succeed quietly.
+for a in "$@"; do [[ $a == -o ]] && exit 7; done
+exit 0
+EOF
+	chmod +x "${shim}/curl"
+	PATH="${shim}:${PATH}" run just-runit \
+		"https://just-buildit.github.io/__el8_curl_compat_test__.sh"
+	assert_failure
+	refute_output --partial 'option --retry-all-errors: is unknown'
+	assert_output --partial 'fetch failed'
+}
