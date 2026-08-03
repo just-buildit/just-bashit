@@ -10,6 +10,11 @@ jobs:
   test:
     name: test (${{ matrix.distro }})
     runs-on: ubuntu-22.04
+    # The suite takes ~1 minute. A job that runs longer is hung, not slow,
+    # and without this it hangs for GitHub's 6-hour ceiling: a leaked
+    # ssh-agent holding bats' output descriptor cost exactly that, four
+    # jobs at a time, before anything went red.
+    timeout-minutes: 20
     container:
       image: ${{ matrix.image }}
     defaults:
@@ -78,6 +83,7 @@ jobs:
   test-macos:
     name: test (macos)
     runs-on: macos-latest
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash
@@ -100,6 +106,7 @@ jobs:
   test-windows:
     name: test (windows/ucrt64)
     runs-on: windows-latest
+    timeout-minutes: 30
     defaults:
       run:
         shell: msys2 {0}
@@ -120,6 +127,7 @@ jobs:
   coverage:
     name: coverage
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     container:
       image: kcov/kcov:latest
     defaults:
@@ -160,6 +168,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       security-events: write
