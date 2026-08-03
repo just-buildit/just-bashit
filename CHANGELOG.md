@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-03
+
+### Fixed
+
+- **The bootstrap now fetches on macOS/BSD again.** `just-runit` and
+    `setup-system.sh` run under a strict `IFS=$'\n\t'` (no space), then passed
+    curl an *unquoted* `$(_curl_retry_opts)` of a space-joined flag string —
+    which does not word-split under that IFS, so curl received the whole
+    `--retry 3 --retry-connrefused --retry-all-errors` as one bogus option and
+    aborted every fetch (`curl: option --retry 3 …: is unknown` → `fetch   failed`). The retry flags are now a bash array expanded
+    `"${_CURL_RETRY_OPTS[@]}"`, so they split into distinct arguments regardless
+    of IFS. (The EL8 path from 0.3.0 was affected identically; its test masked
+    the bug by never parsing the flags.)
+
 ## [0.3.1] - 2026-08-03
 
 ### Fixed
