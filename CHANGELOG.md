@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-03
+
+### Fixed
+
+- **The bootstrap now works on macOS/BSD, which have no `sha256sum`/`md5sum`.**
+    `just-runit` hashed cache keys and verified downloads with the GNU coreutils
+    names, so on macOS a fetch died with `sha256sum: command not found` and
+    `jbx`/`install-deps` could not run at all. It now prefers the coreutils
+    tools and falls back to `shasum -a 256` / `md5`.
+
 ## [0.3.0] - 2026-08-03
 
 ### Added

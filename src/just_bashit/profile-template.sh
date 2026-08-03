@@ -2,7 +2,7 @@
 # shellcheck shell=sh
 # ############################################################################
 # TEMPLATE: profile-template.sh                                              #
-# PACKAGE: just-bashit version 0.3.0                                         #
+# PACKAGE: just-bashit version 0.3.1                                         #
 # ############################################################################
 # Environment for EVERY shell — login, non-login, interactive and NOT.       #
 #                                                                            #
