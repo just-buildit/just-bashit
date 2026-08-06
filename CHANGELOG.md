@@ -2,6 +2,45 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-06
+
+### Added
+
+- **`make-run.sh` — ask a repo what its commands actually are.** Anything
+    needing a project's command has been transcribing it by hand, and
+    transcriptions drift: a skill doc said `make docs` runs
+    `uv run zensical build --clean`, the sanctioned default was
+    `uv run --group dev zensical build --clean --strict`, and doppler — which
+    overrides `ZENSICAL` — actually runs `uv run --group docs ...`. Three
+    answers, two wrong, nothing to make them disagree out loud. `mk-var`,
+    `mk-vars`, `mk-run`, `mk-has` and `mk-origin` read the result of
+    `standard.mk`'s defaults layered with the repo's overrides, so there is no
+    second copy to vendor and nothing to keep in sync. Reachable as
+    `jbx make-run` or `jbx just-bashit:make-run`.
+
+    Two properties are pinned by tests, both so that an empty answer means
+    something specific rather than nothing: an **undefined** variable is an
+    error and never an empty string (`DOCS_CHECK_CMD ?=` is legitimately
+    empty; a typo'd name is not), and an **unparseable** makefile fails loudly
+    (`make -pRrq` exits 1 in question mode, which is normal, and 2 when it
+    cannot read the makefiles at all).
+
+### Fixed
+
+- **CI is reachable when GitHub sheds webhooks.** `push` and `pull_request`
+    are both webhook-delivered, so during the 2026-08-06 Actions incident —
+    deliveries throttled to ~15% — this repo had no reachable trigger at all
+    and `gh workflow run` returned 422. `workflow_dispatch` is only honoured
+    when it exists on the default branch, so it could not be added from the
+    branch that needed it. `ci.yml` now carries it.
+
+- **`make-run` avoids `--eval`, which GNU make 3.81 lacks.** The option
+    arrived in 3.82 and macOS still ships 3.81 as `/usr/bin/make`, so the
+    first cut passed every Linux runner and failed only on macOS — confirmed
+    by a real run, where exactly the `--eval` callers failed and the rest
+    passed. The query now goes through a sentinel target in a throwaway
+    makefile passed alongside the repo's own via `-f`.
+
 ## [0.3.2] - 2026-08-03
 
 ### Fixed
