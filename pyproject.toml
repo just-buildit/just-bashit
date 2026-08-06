@@ -109,6 +109,11 @@ search = "version = \"{current_version}\""
 replace = "version = \"{new_version}\""
 
 [[tool.bumpversion.files]]
+filename = "src/just_bashit/make-run.sh"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+[[tool.bumpversion.files]]
 filename = "src/just_bashit/logging.sh"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
