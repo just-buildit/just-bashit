@@ -5,6 +5,14 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  # Both triggers above are webhook-delivered, so when GitHub sheds webhooks
+  # this repo goes completely dark — no run to read, and no way to ask for
+  # one. During the 2026-08-06 Actions incident, deliveries were throttled to
+  # ~15% and PR #21 sat with no checks for hours; `gh workflow run` answered
+  # 422, because a workflow can only be dispatched if the trigger is present
+  # on the DEFAULT branch. Adding it after the fact does not help the PR that
+  # needs it, which is why it belongs here before the next outage.
+  workflow_dispatch:
 
 jobs:
   test:
