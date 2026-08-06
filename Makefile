@@ -103,6 +103,12 @@ kcov --include-pattern=/src --exclude-pattern=/test \
     $(REPORT_PATH)/coverage $(BATS) test
 endef
 
+# CI's coverage job runs `make coverage` only to produce the report the
+# badge step reads from — nothing there calls `coverage-gate`, so the
+# threshold is not enforced. GATES_PROVISION says so explicitly; without it,
+# gates-check flags ci.yml's `make coverage` as unreachable from `gates`.
+GATES_PROVISION = install-deps coverage
+
 # A report is not a gate; this is the gate. sed rather than `grep -oP`, which
 # is GNU-only and would fail on the macOS runner.
 define COVERAGE_GATE_CMD
