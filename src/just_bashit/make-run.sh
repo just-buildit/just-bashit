@@ -19,10 +19,10 @@
 # only works if sourced and errors otherwise.
 (return 0 2>/dev/null) || (echo "This file must be sourced." && exit)
 
-# Sentinel target name. Prefixed to avoid colliding with any real target; the
-# recipe is expanded by make at RUN time, which is what makes `$(info ...)`
-# below see fully-layered values. A `--eval` string alone is parsed BEFORE any
-# makefile is read, so variables referenced there are still empty.
+# Sentinel target name. Prefixed to avoid colliding with any real target. Its
+# recipe is expanded by make at RUN time, which is what lets `$(info ...)` see
+# fully-layered values — evaluating the same expression while makefiles are
+# still being read yields nothing, because the variables do not exist yet.
 _MK_SENTINEL="__jb_make_run"
 
 # ---------------------------------------------------------------------------
@@ -49,6 +49,54 @@ _mk-db() {
 		echo "make-run: run 'make -C ${1} -pRrq' to see why" >&2
 		return 1
 	fi
+	printf '%s\n' "${out}"
+}
+
+# ---------------------------------------------------------------------------
+# _mk-file — name of the makefile a directory would use, in make's own order.
+#
+# Needed because the query below passes `-f` explicitly, and `-f` turns OFF
+# make's automatic search: naming only the sentinel would hide the repo's
+# actual makefile and every variable in it.
+# ---------------------------------------------------------------------------
+_mk-file() {
+	local f
+	for f in GNUmakefile makefile Makefile; do
+		if [[ -f ${1}/${f} ]]; then
+			printf '%s\n' "${f}"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# ---------------------------------------------------------------------------
+# _mk-eval — expand a make EXPRESSION against a repo, printing what it emits.
+#
+# The expression is placed in a sentinel target's recipe inside a throwaway
+# makefile, which is handed to make ALONGSIDE the repo's own via `-f`. The
+# obvious alternative, `--eval`, is not portable: it arrived in GNU make 3.82
+# (28 Jul 2010), and macOS still ships 3.81 as /usr/bin/make — so a library
+# built on it works everywhere except the one platform most likely to be
+# running an old make. `-f` has always been there. `$(info ...)` is fine: it
+# landed in 3.81.
+#
+# Nothing is built. The sentinel is .PHONY with a no-op command, so make
+# neither reports it up to date nor runs any real recipe.
+# ---------------------------------------------------------------------------
+_mk-eval() {
+	local dir="${1}" expr="${2}" mkfile sentinel out
+	mkfile="$(_mk-file "${dir}")" || return 1
+	sentinel="$(mktemp)" || return 1
+	{
+		printf '.PHONY: %s\n' "${_MK_SENTINEL}"
+		printf '%s:\n' "${_MK_SENTINEL}"
+		printf '\t@%s\n' "${expr}"
+		printf '\t@:\n'
+	} >"${sentinel}"
+	out="$(make -C "${dir}" --no-print-directory \
+		-f "${mkfile}" -f "${sentinel}" "${_MK_SENTINEL}" 2>/dev/null || true)"
+	rm -f "${sentinel}"
 	printf '%s\n' "${out}"
 }
 
@@ -122,9 +170,7 @@ mk-origin() {
 	dir="$(_mk-dir "${dir}")" || return 1
 
 	local out
-	out="$(make -C "${dir}" --no-print-directory \
-		--eval="${_MK_SENTINEL}: ;@\$(info \$(origin ${name}))" \
-		"${_MK_SENTINEL}" 2>/dev/null || true)"
+	out="$(_mk-eval "${dir}" "\$(info \$(origin ${name}))")" || return 1
 	head -n 1 <<<"${out}"
 }
 
@@ -201,9 +247,7 @@ mk-var() {
 	fi
 
 	local out
-	out="$(make -C "${dir}" --no-print-directory \
-		--eval="${_MK_SENTINEL}: ;@\$(info \$(${name}))" \
-		"${_MK_SENTINEL}" 2>/dev/null || true)"
+	out="$(_mk-eval "${dir}" "\$(info \$(${name}))")" || return 1
 	head -n 1 <<<"${out}"
 }
 
@@ -273,9 +317,8 @@ mk-vars() {
 	)" || true
 	[[ -z ${names} ]] && return 0
 
-	out="$(make -C "${dir}" --no-print-directory \
-		--eval="${_MK_SENTINEL}: ;@\$(foreach v,${names},\$(info \$(v)=\$(\$(v))))" \
-		"${_MK_SENTINEL}" 2>/dev/null || true)"
+	out="$(_mk-eval "${dir}" \
+		"\$(foreach v,${names},\$(info \$(v)=\$(\$(v))))")" || return 1
 	grep -vE "^make(\[[0-9]+\])?: " <<<"${out}" || true
 }
 

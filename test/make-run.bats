@@ -136,3 +136,12 @@ setup() {
 	assert_failure
 	assert_output --partial "no target 'no-such-target'"
 }
+
+# `--eval` is GNU make 3.82+ (28 Jul 2010), and macOS still ships 3.81 as
+# /usr/bin/make. Reaching for it breaks on exactly one runner and passes
+# everywhere else — cheaper to catch here than in a macOS-only CI failure.
+@test 'the library avoids --eval, which GNU make 3.81 lacks' {
+	run grep -nE '^[^#]*--eval' \
+		"${BATS_TEST_DIRNAME}/../src/just_bashit/make-run.sh"
+	assert_failure
+}
