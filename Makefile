@@ -152,7 +152,34 @@ just-runit|sed -n 's/^_VERSION="\(.*\)"/\1/p' src/just_bashit/just-runit
 src/ headers|grep -h '^# PACKAGE' src/just_bashit/*.sh | sed 's/.*version \([0-9.]*\).*/\1/' | sort -u
 endef
 
-RELEASE_WATCH_CMD = gh run watch --exit-status $$(gh run list \
-    --workflow=release.yml --limit 1 --json databaseId -q '.[0].databaseId')
+# Select the run BY TAG, and wait for it to exist.
+#
+# `--limit 1` alone is a race: `ship` is `tag-release` then `release-watch`, and
+# the push returns before GitHub has created the workflow run, so the newest
+# row is still the PREVIOUS release. Shipping v0.4.1 watched the run that had
+# failed the night before and reported the release as failed while it went on
+# to succeed — a watcher that can report the wrong run is worse than none,
+# because the failure it invents is indistinguishable from a real one.
+#
+# A tag-triggered run carries the tag in headBranch, so --branch pins it to
+# exactly this release. The wait covers creation latency, which is a second or
+# two; 60s of headroom costs nothing on the happy path and turns "no run yet"
+# into a clear error rather than an empty run ID.
+define RELEASE_WATCH_CMD
+@tag="v$(VERSION)"; id=""; \
+ for _ in $$(seq 1 30); do \
+     id=$$(gh run list --workflow=release.yml --branch "$$tag" \
+           --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null); \
+     [ -n "$$id" ] && break; \
+     sleep 2; \
+ done; \
+ if [ -z "$$id" ]; then \
+     echo "ERROR: no release run for $$tag after 60s"; \
+     echo "  check: gh run list --workflow=release.yml --branch $$tag"; \
+     exit 1; \
+ fi; \
+ echo "Watching release run $$id ($$tag)"; \
+ gh run watch --exit-status "$$id"
+endef
 
 include standard.mk

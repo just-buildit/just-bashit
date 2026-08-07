@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`make ship` could report a release as failed while it succeeded.**
+    `release-watch` took the newest release run with `--limit 1`, but `ship`
+    is `tag-release` then `release-watch`, and the tag push returns before
+    GitHub has created the run — so the newest row was still the *previous*
+    release. Shipping v0.4.1 watched a run that had failed the night before
+    and exited 1 while the real release went on to succeed. A watcher that can
+    report the wrong run is worse than no watcher, because the failure it
+    invents looks exactly like a real one. It now selects the run by tag —
+    `--branch "v$VERSION"`, which is what a tag-triggered run carries — and
+    waits up to 60s for it to exist, erroring clearly if it never does.
+
+- **A re-dispatched release always failed at the last step.** Since
+    `gh release create` refuses an existing tag, re-driving a release that had
+    already got as far as publishing died on "a release with the same tag name
+    already exists" — after build and publish had both succeeded. The
+    `workflow_dispatch` trigger was added to this workflow so a release could
+    be re-driven through a webhook outage; a final step that cannot survive a
+    second run takes that ability back. It now updates the release in place
+    when one already exists.
+
 ## [0.4.1] - 2026-08-06
 
 ### Added
