@@ -263,5 +263,5 @@ jbx inspect -v 2>&1 | head
 jbx inspect | diff jb.versions -
 
 # Pin script to a specific commit for reproducible CI output
-jbx gh:just-buildit/just-bashit/src/inspect.sh@abc1234 -w
+jbx gh:just-buildit/just-bashit/src/just_bashit/inspect.sh@abc1234 -w
 ```

@@ -155,7 +155,7 @@ used.
 # See which URL a cache file came from and when it was fetched
 cat ~/.cache/just-runit/<sha256>.meta
 # ts=1779583354
-# url=https://raw.githubusercontent.com/just-buildit/just-bashit/main/src/install-deps.sh
+# url=https://raw.githubusercontent.com/just-buildit/just-bashit/main/src/just_bashit/install-deps.sh
 ```
 
 **Force a fresh fetch (keep the entry, overwrite it)**
@@ -173,7 +173,7 @@ jbx -n https://example.com/tool.sh run
 **Purge a single entry**
 
 ```bash
-jb cache clear https://raw.githubusercontent.com/just-buildit/just-bashit/main/src/install-deps.sh
+jb cache clear https://raw.githubusercontent.com/just-buildit/just-bashit/main/src/just_bashit/install-deps.sh
 ```
 
 Or manually — find the hash with `-v` then remove the pair:

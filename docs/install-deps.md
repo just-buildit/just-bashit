@@ -282,7 +282,7 @@ jbx install-deps --template deps.toml  # write to file
 ### Pin to a specific script commit for reproducible CI
 
 ```bash
-jbx gh:just-buildit/just-bashit/src/install-deps.sh@abc1234
+jbx gh:just-buildit/just-bashit/src/just_bashit/install-deps.sh@abc1234
 ```
 
 ______________________________________________________________________

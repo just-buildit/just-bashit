@@ -1,6 +1,6 @@
 # network
 
-Source: `src/network.sh`
+Source: `src/just_bashit/network.sh`
 
 Network connectivity testing. Depends on `format.sh` and `environment.sh`.
 
@@ -13,7 +13,7 @@ Test internet connectivity by probing URLs with `curl`, `wget`, and/or `ping`
 timeout.
 
 ```bash
-. just-bashit/src/network.sh
+. just-bashit/src/just_bashit/network.sh
 
 # Silent check — returns 0/1
 test-internet-access && echo "online" || echo "offline"

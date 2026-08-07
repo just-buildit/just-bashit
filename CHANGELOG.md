@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`make-run` is documented.** It shipped in 0.4.0 as the headline feature
+    and appeared in no page, no nav entry, and no line of the README — so the
+    one tool whose whole purpose is ending hand-transcribed commands could
+    only be found by reading its source. New page under Libraries covering
+    `mk-var`, `mk-vars`, `mk-run`, `mk-has` and `mk-origin`, the
+    undefined-is-not-empty rule, and why the queries avoid `--eval`.
+
+- **`docs-coverage` gate.** Two invariants, one for each way the above went
+    unnoticed: every file shipped in `src/just_bashit/` must be named
+    somewhere in the docs, and every page under `docs/` must be reachable
+    from `zensical.toml`'s nav. `docs/changelog.md` is excluded as a mention
+    source — it records every script ever added, so counting it would pass
+    everything the moment it was released. Dispatched from pre-commit with
+    `always_run`, so it runs inside `make lint` (which CI runs) and fires on
+    commits touching no markdown, which is what adding a script looks like.
+
+### Fixed
+
+- **The docs pointed at `src/`, where nothing has lived since 0.2.0.**
+    Scripts moved to `src/just_bashit/` for Python packaging and the docs kept
+    the old path, so every `. just-bashit/src/datetime.sh` in the README, the
+    getting-started guide, and all ten library pages failed for anyone who
+    copied one — including from an unpacked release tarball, which carries the
+    current layout.
+
+- **The README described a package layout that no longer existed**, and never
+    mentioned installation, the `jb` / `jbx` / `jb-inspect` entry points, or
+    `make-run`.
+
 ## [0.4.0] - 2026-08-06
 
 ### Added

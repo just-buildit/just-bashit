@@ -17,14 +17,31 @@ Evolving set of [shfmt](https://github.com/mvdan/sh#shfmt)-conformant, [bats](ht
 
 **[Documentation](https://just-buildit.github.io/just-bashit/)**
 
+## Install
+
+```bash
+uv tool install just-bashit   # or: pip install just-bashit
+```
+
+That puts three commands on `PATH`: `jb` (top-level CLI), `jbx` (ephemeral
+runner — fetch a script, call a function, discard), and `jb-inspect`.
+
+Nothing needs installing to *use* a script. `jbx` fetches on demand:
+
+```bash
+jbx install-deps                              # install this repo's packages
+jbx make-run mk-var -C ~/doppler DOCS_BUILD_CMD
+```
+
 ## Getting Started
 
-A release package contains shell libraries along with a script and two function templates for developing your own tools.
+A release package contains shell libraries along with script and function
+templates for developing your own tools.
 
 ```
 just-bashit
     +--README.md
-    +--src/
+    +--src/just_bashit/
     |   +-- datetime.sh
     |   +-- environment.sh
     :   :
@@ -36,7 +53,23 @@ just-bashit
 Some libraries depend on others so it's best to use the whole package and source whatever you need, for example:
 
 ```bash
-. just-bashit/src/datetime.sh # contains iso-8601-basic()
+. just-bashit/src/just_bashit/datetime.sh # contains iso-8601-basic()
 iso-8601-basic -d '10:32 AM EDT Jan 5 1982'
 19820105T143200Z
 ```
+
+## Ask a repo what its commands are
+
+`make-run` resolves a repository's targets and command variables from that
+repository's own `Makefile`, so nothing downstream has to carry a second copy
+of a command that will drift from it:
+
+```bash
+jbx make-run mk-var -C ~/doppler DOCS_BUILD_CMD
+# uv run --group docs zensical build --clean --strict
+
+jbx make-run mk-run -C ~/doppler docs   # run it, whatever it is
+```
+
+An **undefined** variable is an error, never an empty string — see
+[the docs](https://just-buildit.github.io/just-bashit/libraries/make-run/).
