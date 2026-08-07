@@ -1,6 +1,6 @@
 # format
 
-Source: `src/format.sh`
+Source: `src/just_bashit/format.sh`
 
 String trimming and colorized output.
 
@@ -12,7 +12,7 @@ Trim a string at a marker character, from either direction, with optional
 greedy and keep-marker modes.
 
 ```bash
-. just-bashit/src/format.sh
+. just-bashit/src/just_bashit/format.sh
 
 trim-from 'report.2026.tar.gz'    # report.2026.tar
 trim-from -r 'report.2026.tar.gz' # 2026.tar.gz
@@ -53,7 +53,7 @@ ______________________________________________________________________
 Print colorized text to stdout using ANSI escape sequences.
 
 ```bash
-. just-bashit/src/format.sh
+. just-bashit/src/just_bashit/format.sh
 
 color-echo -bc green "Build succeeded"
 color-echo -bc red "Build failed"

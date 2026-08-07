@@ -1,7 +1,7 @@
 # Templates
 
-Source: `src/function-template.sh`, `src/script-template`,
-`src/bashrc-template.sh`, `src/profile-template.sh`
+Source: `src/just_bashit/function-template.sh`, `src/just_bashit/script-template`,
+`src/just_bashit/bashrc-template.sh`, `src/just_bashit/profile-template.sh`
 
 Copy-paste starting points for new bash functions and scripts, plus the
 opinionated shell configuration [`setup-system`](setup-system.md) installs.
@@ -16,7 +16,7 @@ getopts-based option parsing, a heredoc help string, variable initialization
 before and after `getopts`, and a nested helper function.
 
 ```bash
-. just-bashit/src/function-template.sh
+. just-bashit/src/just_bashit/function-template.sh
 
 full-on-template -h  # show usage
 full-on-template -p myvalue arg1 arg2
@@ -32,7 +32,7 @@ A stripped-down function template for simple functions that don't need the
 full getopts machinery.
 
 ```bash
-. just-bashit/src/function-template.sh
+. just-bashit/src/just_bashit/function-template.sh
 
 minimalist-template -h
 minimalist-template arg1
@@ -53,7 +53,7 @@ An executable script template (not a library) demonstrating:
 
 ```bash
 # Copy and rename
-cp just-bashit/src/script-template my-script
+cp just-bashit/src/just_bashit/script-template my-script
 chmod +x my-script
 ./my-script -h
 ```

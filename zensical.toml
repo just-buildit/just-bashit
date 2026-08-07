@@ -26,6 +26,7 @@ nav = [
     {"file" = "libraries/file.md"},
     {"format" = "libraries/format.md"},
     {"logging" = "libraries/logging.md"},
+    {"make-run" = "libraries/make-run.md"},
     {"match" = "libraries/match.md"},
     {"network" = "libraries/network.md"},
     {"path" = "libraries/path.md"},

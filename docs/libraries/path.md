@@ -1,6 +1,6 @@
 # path
 
-Source: `src/path.sh`
+Source: `src/just_bashit/path.sh`
 
 Resolve the directory containing the calling script, regardless of how it was
 invoked (executed or sourced, symlinked or direct).
@@ -13,7 +13,7 @@ Print the absolute, symlink-resolved path to the directory containing the
 calling script.
 
 ```bash
-. just-bashit/src/path.sh
+. just-bashit/src/just_bashit/path.sh
 
 # In your own script:
 SCRIPTDIR=$(get-scriptpath)
@@ -45,7 +45,7 @@ Set the `SCRIPTPATH` environment variable to the calling script's directory.
 Must be called via `eval` so the export propagates to the calling environment.
 
 ```bash
-. just-bashit/src/path.sh
+. just-bashit/src/just_bashit/path.sh
 
 eval $(set-scriptpath)
 echo "${SCRIPTPATH}"  # /absolute/path/to/your/script/dir

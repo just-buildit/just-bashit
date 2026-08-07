@@ -1,6 +1,6 @@
 # environment
 
-Source: `src/environment.sh`
+Source: `src/just_bashit/environment.sh`
 
 Idempotent management of `~/.bashrc` entries and command existence checks.
 
@@ -11,7 +11,7 @@ ______________________________________________________________________
 Write a line to `~/.bashrc` only if it is not already present.
 
 ```bash
-. just-bashit/src/environment.sh
+. just-bashit/src/just_bashit/environment.sh
 
 # Write a verbatim line
 set-bashrc 'alias ll="ls -la"'
@@ -45,7 +45,7 @@ ______________________________________________________________________
 Remove a line from `~/.bashrc` if present. No-op if not found.
 
 ```bash
-. just-bashit/src/environment.sh
+. just-bashit/src/just_bashit/environment.sh
 
 # Remove a verbatim line
 unset-bashrc 'alias ll="ls -la"'
@@ -79,7 +79,7 @@ ______________________________________________________________________
 Return 0 if a command is available in `PATH`, 1 otherwise.
 
 ```bash
-. just-bashit/src/environment.sh
+. just-bashit/src/just_bashit/environment.sh
 
 check-command-exists curl && echo "curl is available"
 check-command-exists nonexistent || echo "not found"

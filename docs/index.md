@@ -29,7 +29,7 @@ Download the latest release, extract it, and source whatever you need:
 
 ```bash
 tar xf just-bashit.tar.gz
-. just-bashit/src/datetime.sh
+. just-bashit/src/just_bashit/datetime.sh
 iso-8601-basic
 # 20260522T143200Z
 ```
@@ -61,6 +61,7 @@ package and source individual files from it.
 | [file](libraries/file.md)               | `add-line` `remove-line` `add-contents`                 |
 | [format](libraries/format.md)           | `trim-from` `color-echo`                                |
 | [logging](libraries/logging.md)         | `log` `log-wait`                                        |
+| [make-run](libraries/make-run.md)       | `mk-var` `mk-vars` `mk-run` `mk-has` `mk-origin`        |
 | [match](libraries/match.md)             | `is-number`                                             |
 | [network](libraries/network.md)         | `test-internet-access`                                  |
 | [path](libraries/path.md)               | `get-scriptpath` `set-scriptpath`                       |

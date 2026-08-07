@@ -31,3 +31,13 @@ repos:
         language: system
         pass_filenames: false
         types: [markdown]
+
+      # always_run, not types: [markdown] — what breaks this gate is adding a
+      # script under src/just_bashit/, and that commit touches no markdown at
+      # all. A markdown-scoped hook would have stayed silent for make-run.
+      - id: docs-coverage
+        name: docs-coverage
+        entry: make -s docs-coverage
+        language: system
+        pass_filenames: false
+        always_run: true

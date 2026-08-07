@@ -1,6 +1,6 @@
 # toml
 
-Source: `src/toml.sh`
+Source: `src/just_bashit/toml.sh`
 
 Pure-bash parser for the TOML subset used by just-bashit dependency files:
 `[group.pm]` sections with `packages = [...]` and `cmd = [...]` arrays.
@@ -14,7 +14,7 @@ Extract each double-quoted string value from a TOML fragment, one per line.
 Skips empty quoted strings.
 
 ```bash
-. just-bashit/src/toml.sh
+. just-bashit/src/just_bashit/toml.sh
 
 toml_strings '"curl", "wget"'       # prints: curl\nwget
 toml_strings '"a", "", "b"'         # prints: a\nb  (empty string skipped)

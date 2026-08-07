@@ -63,6 +63,19 @@ else \
 fi
 endef
 
+# ── docs coverage ─────────────────────────────────────────────────────────────
+# A repo-local target, so it needs naming here or help-check reports a rule
+# that help does not list.
+#
+# Dispatched from .pre-commit-config.yaml rather than DOCS_CHECK_PRE_CMDS: CI
+# runs `make test`, `make coverage` and `make lint` — not `make docs-check` —
+# so a docs gate hung off docs-check would be local-only, which is how a rule
+# nobody enforces sits on main indefinitely.
+LOCAL_TARGETS += docs-coverage
+
+docs-coverage: ## Verify every shipped script is documented and in the nav
+	@bash scripts/docs_coverage.sh
+
 # ── all ───────────────────────────────────────────────────────────────────────
 # Lint first: shellcheck and shfmt are seconds, the bats suite is minutes.
 #
