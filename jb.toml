@@ -1,6 +1,6 @@
 [project]
 name    = "just-bashit"
-version = "0.4.0"
+version = "0.4.1"
 
 [tools.install-deps]
 source = "src/install-deps.sh"

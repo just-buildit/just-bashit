@@ -59,9 +59,18 @@ ______________________________________________________________________
 
 - [ ] Every new script or library has a doc page under `docs/` or
     `docs/libraries/`.
+
 - [ ] New doc pages are wired into `nav` in `zensical.toml`.
+
+    Those two are enforced by `make docs-coverage`, which runs inside
+    `make lint` — a commit adding a script with no page fails before it
+    lands. They stay on the checklist because passing the gate is not the
+    same as the page being worth reading.
+
 - [ ] Option tables, examples, and usage blocks are up to date.
+
 - [ ] The strict build passes — it catches broken anchors the tests do not:
+
     ```bash
     make docs-check
     ```
