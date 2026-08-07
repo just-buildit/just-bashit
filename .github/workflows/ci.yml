@@ -67,7 +67,7 @@ jobs:
           apk add --update --no-cache \
             bash git make bats coreutils curl diffutils openssh-keygen
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -76,14 +76,14 @@ jobs:
 
       - name: Upload test report XML
         if: matrix.primary == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-report-xml
           path: test-results/*.xml
 
       - name: Upload release artifact
         if: matrix.primary == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: just-bashit
           path: just-bashit.tar.gz
@@ -104,7 +104,7 @@ jobs:
           echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           echo "$(brew --prefix bash)/bin" >> "$GITHUB_PATH"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -125,7 +125,7 @@ jobs:
           update: true
           install: git make diffutils curl openssh
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -147,7 +147,7 @@ jobs:
           apt-get update && apt-get install -y --no-install-recommends \
             ca-certificates make git bats curl openssh-client
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -169,7 +169,7 @@ jobs:
             "${PCT}" "${COLOR}" > test-results/coverage/coverage-badge.json
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: test-results/coverage/
@@ -182,9 +182,9 @@ jobs:
       security-events: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v8.1.0
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           python-version: "3.12"
 
@@ -233,9 +233,9 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -244,7 +244,7 @@ jobs:
       - run: zensical build --clean
 
       - name: Download test report XML
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: test-report-xml
           path: test-report-xml
@@ -263,7 +263,7 @@ jobs:
           junit2html test-report-xml/merged.xml site/test-report/index.html
 
       - name: Download coverage report
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-report
           path: site/coverage
@@ -271,9 +271,9 @@ jobs:
       - name: Move badge JSON to site root
         run: mv site/coverage/coverage-badge.json site/coverage-badge.json || true
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
-      - uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v5
         id: deployment
