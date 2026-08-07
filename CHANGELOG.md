@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-06
+
 ### Added
 
 - **`make-run` is documented.** It shipped in 0.4.0 as the headline feature
