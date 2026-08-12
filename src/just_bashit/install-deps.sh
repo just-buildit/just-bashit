@@ -307,7 +307,28 @@ _do_install() {
 	_resolve_prefix "${section}"
 	case "${section}" in
 	apt)
-		_run apt-get update
+		# `apt-get update` exits non-zero if ANY configured source fails, and a
+		# CI runner carries sources the project neither chose nor controls:
+		# GitHub's Ubuntu image ships packages.microsoft.com, which 403s often
+		# enough to matter. Measured 2026-08-12 on doppler CI — the azure-cli
+		# and prod repos returned 403, `update` exited 100, and the leg died
+		# without ever attempting an install, while the Ubuntu archive holding
+		# every package it actually wanted was fine. Four sibling matrix legs
+		# on the same commit passed.
+		#
+		# So `update` warns and `install` is the gate. A package that genuinely
+		# cannot be resolved still fails below, loudly and by name; an outage in
+		# somebody else's repository no longer reads as a dependency failure.
+		#
+		# Wrapped around _run rather than a bare sudo apt-get, so the dry run and
+		# the privilege prefix keep coming from the one place that owns them. In
+		# a dry run _run prints and returns 0, so the warning cannot fire there.
+		if ! _run apt-get update; then
+			echo "install-deps: warning: apt-get update reported errors." >&2
+			echo "install-deps: continuing — a source this project does not" >&2
+			echo "install-deps: use cannot block the install, and the install" >&2
+			echo "install-deps: below is the real check." >&2
+		fi
 		_run apt-get install -y --no-install-recommends "$@"
 		;;
 	pacman)

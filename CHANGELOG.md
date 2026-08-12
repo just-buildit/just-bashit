@@ -73,6 +73,25 @@
     changes nothing. It reads first lines with the `read` builtin, so it adds
     no command to the set a PATH-restricted machine needs to reach this step.
 
+### Fixed
+
+- **A broken third-party apt source no longer fails `install-deps`.**
+    `apt-get update` exits non-zero if **any** configured source fails, and a
+    CI runner carries sources the project never chose — GitHub's Ubuntu image
+    ships `packages.microsoft.com`. Measured 2026-08-12 on doppler CI: the
+    azure-cli and prod repos returned 403, `update` exited 100, and the matrix
+    leg died **without ever attempting an install**, while the Ubuntu archive
+    holding every package it actually wanted was fine. Four sibling legs on the
+    same commit passed, and the leg passed on rerun — so the wrong thing was
+    the gate.
+
+    `update` now warns and names what happened; `install` is the gate. A
+    package that genuinely cannot be resolved still fails, loudly and by name.
+
+    Only the `apt` branch changes — every other package manager already
+    refreshes as part of its install. Both directions are tested with a PATH
+    shim, and verified by sabotage: reverting the fix turns them red.
+
 ### Changed
 
 - **`make install-deps` runs this repo's own script instead of the published
