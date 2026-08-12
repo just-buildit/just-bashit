@@ -23,7 +23,7 @@
 #   uv.lock                 pins them, committed.
 #   .pre-commit-config.yaml WHEN a check fires; dispatches to `make -s
 #                           lint-<tool>` so it cannot drift from `make format`.
-#   jb.toml                 system packages, consumed by `install-deps`.
+#   bootstrap.toml          system packages, consumed by `install-deps`.
 #   .github/workflows       calls `make <target>`; anything else must be
 #                           provably environment plumbing.
 #
@@ -180,9 +180,9 @@ lint: standard-check help-check ghost-check gates-check ## Run the full lint gat
 format: ## Auto-fix formatting with every configured formatter
 	@for t in $(FORMAT_TOOLS); do $(MAKE) -s lint-$$t || exit 1; done
 
-# System packages, from jb.toml. A repo that declares none still gets a
+# System packages, from bootstrap.toml. A repo that declares none still gets a
 # working target — `jbx install-deps` is a no-op there.
-install-deps: ## Install system build dependencies (jb.toml)
+install-deps: ## Install system build dependencies (bootstrap.toml)
 	@command -v jbx >/dev/null 2>&1 \
 	    || curl -sSL https://just-buildit.github.io/get-jb.sh | bash
 	PATH="$$HOME/.local/bin:$$PATH" jbx install-deps
@@ -217,7 +217,25 @@ STD_TARGETS += test-all gates gates-check
 
 test-all: $(TEST_ALL_DEPS) ## Run every test suite in the repo
 
-gates: $(GATES_DEPS) ## Run every gate that guards a merge
+# Re-invoked with `-k` rather than declared as prerequisites, so ONE red gate
+# does not hide every gate ordered behind it. As a prerequisite list, make stops
+# at the first failure and the rest never run -- which reads as an ordinary
+# failure while a third of the set was silently skipped. Measured in doppler:
+# `glibc-check` cannot pass on a modern dev box BY DESIGN (its own comment says
+# so), sits mid-list, and made the six targets behind it structurally
+# unreachable. A broken `coverage` hid there for weeks.
+#
+# `docs-check` already settled this shape one level down -- "every check runs,
+# every failure is reported in one pass" -- and this is the same problem one
+# level up.
+#
+# Not a weakening: `-k` still exits non-zero if any gate failed, so the run
+# fails and `ALL PASS` cannot print. Recursion is what buys it; a target-
+# specific flag cannot, because the running make fixed its keep-going mode at
+# startup. Under `-j` the gates still schedule in parallel, which a shell loop
+# over the list would have serialised.
+gates: ## Run every gate that guards a merge
+	@$(MAKE) --no-print-directory -k $(GATES_DEPS)
 	@echo ""
 	@echo "gates: ALL PASS"
 
@@ -241,7 +259,12 @@ gates-check: ## Verify `gates` runs every make target CI invokes
 	     echo "  the scan found nothing, so it did not run, so it has not passed."; \
 	     exit 1; \
 	 fi; \
-	 closure=" "; frontier="gates"; \
+	 : "Seeded from the VARIABLE, not just the prerequisite edge: gates now"; \
+	 : "re-invokes its list with -k, so the edge no longer exists and a walk"; \
+	 : "of prerequisites alone finds an EMPTY closure -- every CI target then"; \
+	 : "reports as uncovered. Reading GATES_DEPS makes the check independent"; \
+	 : "of HOW gates invokes them, which is what it was always asserting."; \
+	 closure=" $(GATES_DEPS) "; frontier="gates $(GATES_DEPS)"; \
 	 while [ -n "$$frontier" ]; do \
 	     next=""; \
 	     for t in $$frontier; do \

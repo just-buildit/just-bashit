@@ -14,8 +14,8 @@ nav = [
     {"Setting up a new machine" = "guides/new-machine.md"},
   ]},
   {"CLI" = [
-    {"jb" = "jb.md"},
     {"just-runit" = "just-runit.md"},
+    {"bootstrap.toml" = "bootstrap-toml.md"},
     {"install-deps" = "install-deps.md"},
     {"setup-system" = "setup-system.md"},
     {"inspect" = "inspect.md"},

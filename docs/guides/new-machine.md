@@ -32,7 +32,7 @@ It will:
     each of `~/.bashrc` and `~/.profile`
 - create an ssh key **only** if `~/.ssh` has none
 - set git defaults **only** where you have not already set a value
-- install packages from a `jb.toml` in the current directory, if there is one
+- install packages from a `bootstrap.toml` in the current directory, if there is one
 
 It will not: touch anything else in your `~/.bashrc`, set `user.name` or
 `user.email`, replace a key you already have, or overwrite a git setting you
@@ -70,7 +70,7 @@ just-bashit setup-system
 dry run — nothing will be changed
 
 ==> deps — system packages
-    no jb.toml or jb-deps.toml in /home/you — nothing to install
+    no bootstrap.toml or jb-deps.toml in /home/you — nothing to install
 ==> shell — bash configuration
     creating:   /home/you/.config/just-bashit/bashrc.sh
     would append to /home/you/.bashrc: if [ -r "$HOME/... "; fi
@@ -276,7 +276,7 @@ ______________________________________________________________________
 
 ## Using it as your project's onboarding command
 
-Declare the steps and the system packages in `jb.toml`, and a new contributor
+Declare the steps and the system packages in `bootstrap.toml`, and a new contributor
 runs one command:
 
 ```toml
@@ -337,6 +337,6 @@ ______________________________________________________________________
 
 - [`setup-system`](../setup-system.md) — the full flag and step reference
 - [Templates](../templates.md) — reading the two shell templates on their own
-- [`install-deps`](../install-deps.md) — the `deps` step, and the `jb.toml`
+- [`install-deps`](../install-deps.md) — the `deps` step, and the `bootstrap.toml`
     package format
 - [`just-runit`](../just-runit.md) — how `jbx` fetches and runs a script
