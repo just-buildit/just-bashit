@@ -1,6 +1,6 @@
 # just-runit
 
-`just-runit` (aliases: `jb run`, `jbx`) is an ephemeral bash tool runner. Fetch a script from a
+`just-runit` (alias: `jbx`) is an ephemeral bash tool runner. Fetch a script from a
 URL or namespace, call a function it defines, then discard — no installation, no leftover
 environment pollution. The bash equivalent of `uvx`, for anything reachable over HTTPS.
 
@@ -253,4 +253,69 @@ jbx https://example.com/setup.sh   # runs whatever the script does top-level
 
 ```bash
 jbx just-bashit:network test-internet-access -vt 10 || exit 1
+```
+
+______________________________________________________________________
+
+## Names
+
+The installer creates two names in `~/.local/bin`:
+
+| Name         | Type    | Takes subcommands? |
+| ------------ | ------- | ------------------ |
+| `just-runit` | binary  | yes                |
+| `jbx`        | symlink | **no**             |
+
+The difference is deliberate. `just-runit` accepts the subcommands below and
+falls through to the SPEC runner when the first argument is not one of them;
+`jbx` never treats an argument as a subcommand. So a script genuinely named
+`install` or `cache` is always reachable as `jbx install` — no SPEC is
+shadowed by a keyword.
+
+!!! note "`jb` and `just-buildit` are not runner names"
+
+    They were until 0.5.0, which put one token on three different things: the
+    GitHub org, the [just-buildit](https://github.com/just-buildit/just-buildit)
+    PEP 517 build backend, and this runner. The backend keeps the name — it is
+    the one that actually builds. The installer prunes both aliases on upgrade.
+
+______________________________________________________________________
+
+## Subcommands
+
+These are available under `just-runit` only.
+
+### `just-runit install`
+
+Walk up from the current directory to find `bootstrap.toml`, then pre-fetch
+every `source` declared under `[tools.*]` into the local cache. Subsequent
+`jbx` calls for those tools are instant cache hits.
+
+```
+  reading /path/to/project/bootstrap.toml
+  -> just-bashit:install-deps ok
+```
+
+`jb.toml` is still read, and warns. See
+[bootstrap.toml](bootstrap-toml.md).
+
+### `just-runit cache`
+
+```
+just-runit cache clear           # remove everything under ~/.cache/just-runit/
+just-runit cache clear jbs       # remove the just-bashit co-fetch bundle only
+just-runit cache clear <url>     # remove the entry for one specific URL
+just-runit cache -h              # show cache subcommand help
+```
+
+### `just-runit version`
+
+Prints `just-runit vX.Y.Z` and exits.
+
+### `just-runit help`
+
+```
+just-runit help
+just-runit -h
+just-runit            # bare invocation also prints help
 ```

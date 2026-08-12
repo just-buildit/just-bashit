@@ -147,7 +147,7 @@ BUMP_VERSION_CMD = $(BUMP_MY_VERSION) bump --new-version $(VERSION) \
 # catches a manifest bumpversion was never told about.
 define VERSION_PROBES
 pyproject.toml|sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1
-jb.toml|sed -n 's/^version *= *"\(.*\)"/\1/p' jb.toml | head -1
+bootstrap.toml|sed -n 's/^version *= *"\(.*\)"/\1/p' bootstrap.toml | head -1
 just-runit|sed -n 's/^_VERSION="\(.*\)"/\1/p' src/just_bashit/just-runit
 src/ headers|grep -h '^# PACKAGE' src/just_bashit/*.sh | sed 's/.*version \([0-9.]*\).*/\1/' | sort -u
 endef

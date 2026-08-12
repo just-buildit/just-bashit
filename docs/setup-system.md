@@ -20,7 +20,7 @@ ______________________________________________________________________
 
 | Step     | What it does                                                                                                                                                  |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `deps`   | Installs system packages from `jb.toml` / `jb-deps.toml` in the current directory, via [`install-deps`](install-deps.md). Skipped when there is no deps file. |
+| `deps`   | Installs system packages from `bootstrap.toml` / `jb-deps.toml` in the current directory, via [`install-deps`](install-deps.md). Skipped when there is no deps file. |
 | `shell`  | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                         |
 | `ssh`    | Fixes `~/.ssh` permissions and creates an ed25519 key named after this host if there is no key at all. Prints the public key.                                 |
 | `git`    | Sets global git defaults that are not already set. Never touches `user.name` or `user.email`.                                                                 |
@@ -35,7 +35,7 @@ jbx setup-system -s shell,ssh      # only these
 jbx setup-system -x claude,deps    # everything except these
 ```
 
-To change the default set for a project, declare it in `jb.toml`:
+To change the default set for a project, declare it in `bootstrap.toml`:
 
 ```toml
 [tools.setup-system]
@@ -245,7 +245,7 @@ jbx setup-system -y -x claude,tools
 ### Use it as your project's onboarding command
 
 ```toml
-# jb.toml
+# bootstrap.toml
 [tools.setup-system]
 source = "just-bashit:setup-system"
 steps  = ["deps", "tools"]

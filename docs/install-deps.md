@@ -24,14 +24,14 @@ directory for a deps file in this order:
 | -------- | ----------------- | ------------------------------------------- |
 | 1        | explicit path arg | `jbx install-deps myfile.toml`              |
 | 2        | `jb-deps.toml`    | standalone deps-only file                   |
-| 3        | `jb.toml`         | combined tool + deps manifest (recommended) |
+| 3        | `bootstrap.toml`         | combined tool + deps manifest (recommended) |
 | 4        | stdin             | piped input, remote URLs                    |
 
-**Recommended:** put deps directly in `jb.toml` alongside your tool
+**Recommended:** put deps directly in `bootstrap.toml` alongside your tool
 declarations — one file covers everything `jb` needs.
 
 ```toml
-# jb.toml
+# bootstrap.toml
 [project]
 name    = "my_project"
 version = "0.1.0"
@@ -64,7 +64,7 @@ packages = ["doxygen", "graphviz"]
 ```
 
 Use a standalone `jb-deps.toml` only when the project doesn't have a
-`jb.toml` or you need to keep deps separate.
+`bootstrap.toml` or you need to keep deps separate.
 
 ______________________________________________________________________
 
@@ -186,7 +186,7 @@ By default `install-deps` installs **all groups** defined in the deps file.
 This matches the `uv sync` convention — zero config, everything included.
 
 To restrict which groups are installed when no `-g` flag is given, declare
-`groups` under `[tools.install-deps]` in `jb.toml`:
+`groups` under `[tools.install-deps]` in `bootstrap.toml`:
 
 ```toml
 [tools.install-deps]
@@ -220,7 +220,7 @@ jbx install-deps -g runtime,dev,docs
 ### From stdin
 
 ```bash
-curl -fsSL https://example.com/jb.toml | jbx install-deps
+curl -fsSL https://example.com/bootstrap.toml | jbx install-deps
 ```
 
 ______________________________________________________________________

@@ -119,7 +119,7 @@ Print comma-separated group names from `[tools.TOOL].groups = [...]`.
 Returns nothing if the key is absent. Reads TOML from stdin.
 
 ```bash
-cat jb.toml | toml_get_tool_groups install-deps
+cat bootstrap.toml | toml_get_tool_groups install-deps
 # prints e.g.: runtime,dev
 ```
 

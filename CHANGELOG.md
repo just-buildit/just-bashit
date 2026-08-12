@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: `jb.toml` is now `bootstrap.toml`, and `jb` / `just-buildit` are
+    no longer runner names.**
+
+    `jb` reads as just-buildit — the PEP 517 build backend — which has never
+    opened that file; it reads `pyproject.toml`, like every other backend. One
+    token meant three things at once: the GitHub org, the backend, and (via a
+    symlink `get-jb.sh` created) this runner.
+
+    Naming the file after a tool was the deeper mistake, and would have been
+    one without the collision: **two** different tools already read it
+    (`just-runit install` takes `[tools.*]`; the package groups are read by
+    `install-deps`, a separate fetched script), and the tool names were
+    themselves unsettled. `bootstrap.toml` names what the file declares, which
+    does not move when tools are renamed.
+
+    Migration is `git mv jb.toml bootstrap.toml`; nothing inside changes.
+    `jb.toml` and `jb-deps.toml` are still read and warn — these scripts are
+    fetched live from the CDN on every CI run, so a hard cutover would break
+    every repo that had not yet renamed, in the window between the publish and
+    their rename. Removal is tracked separately.
+
+- **The runner's subcommands moved to the full name.** They were only ever
+    reachable under `jb` / `just-buildit`, so removing those aliases had to
+    give them a home. `just-runit <subcommand>` now works and falls THROUGH to
+    the SPEC runner when the first argument is not a subcommand, so
+    `just-runit <url>` is unaffected. `jbx` deliberately takes no subcommands:
+    that is the escape hatch that keeps a script genuinely named `install`
+    reachable as `jbx install`, with no SPEC shadowed by a keyword.
+
+    `get-jb.sh` stops creating the `jb` and `just-buildit` symlinks and prunes
+    them on upgrade, alongside the existing `jr` / `jx` pruning.
+
+
 ### Fixed
 
 - **`make ship` could report a release as failed while it succeeded.**

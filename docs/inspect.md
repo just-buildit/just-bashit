@@ -2,7 +2,7 @@
 
 `inspect` queries the installed versions of system packages listed in a
 TOML deps file, together with OS, kernel, glibc, and compiler information.
-Output is valid TOML. Use `-w` to write `jb.versions` alongside `jb.toml`.
+Output is valid TOML. Use `-w` to write `jb.versions` alongside `bootstrap.toml`.
 
 ```bash
 jbx inspect              # print system + package versions to stdout
@@ -140,7 +140,7 @@ ______________________________________________________________________
 
 ## Project setup
 
-Declare both `install-deps` and `inspect` in `jb.toml` to control default
+Declare both `install-deps` and `inspect` in `bootstrap.toml` to control default
 groups for each tool independently:
 
 ```toml
@@ -210,7 +210,7 @@ ______________________________________________________________________
 
 By default `inspect` reports all groups defined in the deps file. To
 restrict which groups appear, pass `-g` or set `[tools.inspect].groups`
-in `jb.toml` (see [Project setup](#project-setup) above).
+in `bootstrap.toml` (see [Project setup](#project-setup) above).
 
 The `-g` flag always overrides the toml setting.
 
@@ -224,7 +224,7 @@ Same resolution order as [`install-deps`](install-deps.md):
 | -------- | ----------------------------- |
 | 1        | explicit `DEPS_FILE` argument |
 | 2        | `jb-deps.toml` in CWD         |
-| 3        | `jb.toml` in CWD              |
+| 3        | `bootstrap.toml` in CWD              |
 | 4        | stdin                         |
 
 ______________________________________________________________________
