@@ -24,7 +24,7 @@ directory for a deps file in this order:
 | -------- | ----------------- | ------------------------------------------- |
 | 1        | explicit path arg | `jbx install-deps myfile.toml`              |
 | 2        | `jb-deps.toml`    | standalone deps-only file                   |
-| 3        | `bootstrap.toml`         | combined tool + deps manifest (recommended) |
+| 3        | `bootstrap.toml`  | combined tool + deps manifest (recommended) |
 | 4        | stdin             | piped input, remote URLs                    |
 
 **Recommended:** put deps directly in `bootstrap.toml` alongside your tool

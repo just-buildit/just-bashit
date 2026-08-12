@@ -18,14 +18,14 @@ ______________________________________________________________________
 
 ## Steps
 
-| Step     | What it does                                                                                                                                                  |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Step     | What it does                                                                                                                                                         |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `deps`   | Installs system packages from `bootstrap.toml` / `jb-deps.toml` in the current directory, via [`install-deps`](install-deps.md). Skipped when there is no deps file. |
-| `shell`  | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                         |
-| `ssh`    | Fixes `~/.ssh` permissions and creates an ed25519 key named after this host if there is no key at all. Prints the public key.                                 |
-| `git`    | Sets global git defaults that are not already set. Never touches `user.name` or `user.email`.                                                                 |
-| `tools`  | Installs `uv` if missing; installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.                                      |
-| `claude` | Installs Claude Code if the `claude` command is missing.                                                                                                      |
+| `shell`  | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                                |
+| `ssh`    | Fixes `~/.ssh` permissions and creates an ed25519 key named after this host if there is no key at all. Prints the public key.                                        |
+| `git`    | Sets global git defaults that are not already set. Never touches `user.name` or `user.email`.                                                                        |
+| `tools`  | Installs `uv` if missing; installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.                                             |
+| `claude` | Installs Claude Code if the `claude` command is missing.                                                                                                             |
 
 They always run in that order, whatever order you list them in — packages
 land before the steps that need `git`, `curl` and `ssh-keygen`.
