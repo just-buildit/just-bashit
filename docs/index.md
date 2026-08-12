@@ -39,13 +39,13 @@ package and source individual files from it.
 
 ## CLI Tools
 
-| Tool                            | Purpose                                                           |
-| ------------------------------- | ----------------------------------------------------------------- |
-| [jb](jb.md)                     | Top-level CLI — dispatches `run`, `install`, `cache`, `version`   |
-| [just-runit](just-runit.md)     | Ephemeral runner — fetch a script, call a function, discard       |
-| [install-deps](install-deps.md) | Install packages declared in a `bootstrap.toml` / `jb-deps.toml`         |
-| [setup-system](setup-system.md) | Take a fresh machine to a working one — packages, shell, ssh, git |
-| [inspect](inspect.md)           | Snapshot installed package versions into a `.versions` file       |
+| Tool                                | Purpose                                                           |
+| ----------------------------------- | ----------------------------------------------------------------- |
+| [bootstrap.toml](bootstrap-toml.md) | The manifest — system packages and fetched tools                  |
+| [just-runit](just-runit.md)         | Ephemeral runner — fetch a script, call a function, discard       |
+| [install-deps](install-deps.md)     | Install packages declared in a `bootstrap.toml` / `jb-deps.toml`  |
+| [setup-system](setup-system.md)     | Take a fresh machine to a working one — packages, shell, ssh, git |
+| [inspect](inspect.md)               | Snapshot installed package versions into a `.versions` file       |
 
 ## Guides
 

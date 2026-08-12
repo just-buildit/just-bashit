@@ -36,7 +36,6 @@
     `get-jb.sh` stops creating the `jb` and `just-buildit` symlinks and prunes
     them on upgrade, alongside the existing `jr` / `jx` pruning.
 
-
 ### Fixed
 
 - **`make ship` could report a release as failed while it succeeded.**

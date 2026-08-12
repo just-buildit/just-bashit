@@ -224,7 +224,7 @@ Same resolution order as [`install-deps`](install-deps.md):
 | -------- | ----------------------------- |
 | 1        | explicit `DEPS_FILE` argument |
 | 2        | `jb-deps.toml` in CWD         |
-| 3        | `bootstrap.toml` in CWD              |
+| 3        | `bootstrap.toml` in CWD       |
 | 4        | stdin                         |
 
 ______________________________________________________________________
