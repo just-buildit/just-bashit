@@ -1,7 +1,7 @@
 #!/bin/bash
 # ############################################################################
 # LIBRARY: toml.sh                                                           #
-# PACKAGE: just-bashit version 0.2.0                                        #
+# PACKAGE: just-bashit version 0.4.1                                        #
 # ############################################################################
 # Pure-bash parser for the TOML subset used by just-bashit dependency files:#
 #   [group.pm] sections with packages = [...] and cmd = [...] arrays.       #
@@ -236,7 +236,7 @@ toml_get_tool_groups() {
 		  TOOL  The tool name as it appears in [tools.TOOL] (e.g. "install-deps").
 
 		Examples:
-		  cat jb.toml | toml_get_tool_groups install-deps
+		  cat bootstrap.toml | toml_get_tool_groups install-deps
 	EOF
 
 	local OPTARG="" OPTIND=0

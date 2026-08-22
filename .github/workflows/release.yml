@@ -4,6 +4,24 @@ on:
   push:
     tags:
       - "v*"
+  # A tag push is webhook-delivered. When GitHub sheds webhooks, the tag
+  # lands and nothing runs — v0.4.0 was tagged during the 2026-08-06 Actions
+  # incident, twice, and this workflow never fired either time. Without a
+  # manual trigger a release can then only wait out the outage.
+  #
+  # `tag` is an input rather than relying on the dispatch ref, because
+  # dispatching AT the tag would use that tag's copy of this file, which
+  # predates this trigger. Dispatch from the default branch and name the tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release, e.g. v0.4.0"
+        required: true
+        type: string
+
+# Resolved once: the dispatch input when present, otherwise the pushed tag.
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   # Gate: wait for the CI run on this tagged commit to turn green.
@@ -20,7 +38,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
+          SHA: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.sha }}
         run: |
           for i in $(seq 1 60); do
             runs="$(gh api "repos/$REPO/commits/$SHA/check-runs" --paginate \
@@ -48,11 +66,12 @@ jobs:
     needs: verify-ci
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.tag || github.ref_name }}
           submodules: recursive
 
-      - uses: astral-sh/setup-uv@v8.1.0
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           python-version: "3.12"
 
@@ -66,12 +85,12 @@ jobs:
           uv build --wheel --no-build-isolation
           tar -czf just-bashit.tar.gz src/just_bashit/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: tarball
           path: just-bashit.tar.gz
@@ -83,7 +102,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
@@ -95,26 +114,43 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: tarball
 
       - name: Extract changelog section
         run: |
-          VER="${GITHUB_REF_NAME#v}"
+          VER="${TAG#v}"
           awk -v ver="$VER" \
             'index($0, "## [" ver "]") == 1 {found=1; next}
              found && /^## / {exit}
              found {print}' CHANGELOG.md > release-notes.md
           cat release-notes.md
 
-      - name: Create GitHub Release
+      # Converge rather than create. `gh release create` refuses an existing
+      # tag, so re-dispatching a release that already got this far failed here
+      # every time — after build and publish had both succeeded, which is the
+      # most confusing place to stop. workflow_dispatch was added to this
+      # workflow so a release could be re-driven through a webhook outage; a
+      # final step that cannot survive a second run takes that back.
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" just-bashit.tar.gz \
-            --title "just-bashit ${GITHUB_REF_NAME}" \
-            --latest \
-            --notes-file release-notes.md
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists — updating it in place"
+            gh release edit "${TAG}" \
+              --title "just-bashit ${TAG}" \
+              --latest \
+              --notes-file release-notes.md
+            gh release upload "${TAG}" just-bashit.tar.gz --clobber
+          else
+            gh release create "${TAG}" just-bashit.tar.gz \
+              --title "just-bashit ${TAG}" \
+              --latest \
+              --notes-file release-notes.md
+          fi

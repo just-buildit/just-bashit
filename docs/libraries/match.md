@@ -1,37 +1,37 @@
 # match
 
-Source: `src/match.sh`
+Source: `src/just_bashit/match.sh`
 
 Regex pattern constants and numeric validation.
 
----
+______________________________________________________________________
 
 ## Pattern Constants
 
 Exported variables for use in `[[ =~ ]]` expressions:
 
-| Variable | Matches |
-|---|---|
-| `IS_NUMBER` | Unsigned integer or decimal (`5`, `5.`, `.5`, `22.5`) |
-| `IS_SIGNED_NUMBER` | Signed integer or decimal (`-5`, `+5.3`) |
-| `IS_ONLY_NUMBER` | `IS_NUMBER` anchored to full string |
-| `IS_ONLY_SIGNED_NUMBER` | `IS_SIGNED_NUMBER` anchored to full string |
+| Variable                | Matches                                               |
+| ----------------------- | ----------------------------------------------------- |
+| `IS_NUMBER`             | Unsigned integer or decimal (`5`, `5.`, `.5`, `22.5`) |
+| `IS_SIGNED_NUMBER`      | Signed integer or decimal (`-5`, `+5.3`)              |
+| `IS_ONLY_NUMBER`        | `IS_NUMBER` anchored to full string                   |
+| `IS_ONLY_SIGNED_NUMBER` | `IS_SIGNED_NUMBER` anchored to full string            |
 
 ```bash
-. just-bashit/src/match.sh
+. just-bashit/src/just_bashit/match.sh
 
 [[ "3.14" =~ $IS_ONLY_NUMBER ]] && echo "numeric"
 [[ "-7"   =~ $IS_ONLY_SIGNED_NUMBER ]] && echo "signed numeric"
 ```
 
----
+______________________________________________________________________
 
 ## is-number
 
 Return 0 (PASS) if a string is a valid number, 1 (FAIL) otherwise.
 
 ```bash
-. just-bashit/src/match.sh
+. just-bashit/src/just_bashit/match.sh
 
 is-number 42      # PASS
 is-number 3.14    # PASS

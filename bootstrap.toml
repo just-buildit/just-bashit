@@ -1,0 +1,54 @@
+[project]
+name    = "just-bashit"
+version = "0.4.1"
+
+[tools.install-deps]
+source = "src/install-deps.sh"
+
+[tools.just-runit]
+source = "src/just-runit"
+
+[tools.get-jb]
+source = "src/get-jb.sh"
+
+[tools.setup-system]
+source = "just-bashit:setup-system"
+
+# System packages this repo needs to build and test itself — what `make
+# install-deps` installs, and what CI installs inline per container image.
+#
+# ssh-keygen is here because without it three setup-system tests `skip`
+# rather than fail, and a suite that quietly tests less than it appears to is
+# how the ssh step shipped requiring the binary for work that never needed it.
+# The package that carries it differs on every manager; each name below was
+# checked by generating a key in that distro's image, not inferred.
+[dev.apt]
+packages = ["ca-certificates", "make", "git", "bats", "curl", "openssh-client"]
+
+[dev.pacman]
+packages = ["git", "make", "diffutils", "bats", "curl", "openssh"]
+
+[dev.dnf]
+packages = ["git", "make", "diffutils", "bats", "curl", "openssh-clients"]
+
+[dev.zypper]
+packages = ["git", "make", "diffutils", "bats", "curl", "openssh"]
+
+[dev.apk]
+packages = [
+    "bash",
+    "git",
+    "make",
+    "bats",
+    "coreutils",
+    "curl",
+    "diffutils",
+    "openssh-keygen",
+]
+
+# macOS ships ssh-keygen in the base system, so brew has nothing to add.
+[dev.brew]
+packages = ["bash", "coreutils", "diffutils", "bats-core"]
+
+[dev.msys2]
+packages = ["git", "make", "diffutils", "curl", "openssh"]

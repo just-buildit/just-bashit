@@ -2,7 +2,7 @@
 
 `inspect` queries the installed versions of system packages listed in a
 TOML deps file, together with OS, kernel, glibc, and compiler information.
-Output is valid TOML. Use `-w` to write `jb.versions` alongside `jb.toml`.
+Output is valid TOML. Use `-w` to write `jb.versions` alongside `bootstrap.toml`.
 
 ```bash
 jbx inspect              # print system + package versions to stdout
@@ -12,18 +12,18 @@ jbx inspect -w ci.versions   # explicit output path
 
 See [`install-deps`](install-deps.md) to install the packages.
 
----
+______________________________________________________________________
 
 ## What it reports
 
 ### `[system]`
 
-| Field | Source |
-|---|---|
-| `os` | `/etc/os-release` (`NAME` + `VERSION_ID` or `BUILD_ID`) |
-| `kernel` | `uname -r` |
-| `arch` | `uname -m` |
-| `glibc` | `getconf GNU_LIBC_VERSION` or `ldd --version` |
+| Field    | Source                                                  |
+| -------- | ------------------------------------------------------- |
+| `os`     | `/etc/os-release` (`NAME` + `VERSION_ID` or `BUILD_ID`) |
+| `kernel` | `uname -r`                                              |
+| `arch`   | `uname -m`                                              |
+| `glibc`  | `getconf GNU_LIBC_VERSION` or `ldd --version`           |
 
 ### `[compiler]`
 
@@ -49,7 +49,7 @@ are not queried:
 # versions not queried for custom cmd sections
 ```
 
----
+______________________________________________________________________
 
 ## jb.versions
 
@@ -95,7 +95,7 @@ python-numpy = "2.4.6-1.1"
 rust = "1:1.95.0-1.1"
 ```
 
----
+______________________________________________________________________
 
 ## CI workflow
 
@@ -136,11 +136,11 @@ In GitHub Actions:
     git push
 ```
 
----
+______________________________________________________________________
 
 ## Project setup
 
-Declare both `install-deps` and `inspect` in `jb.toml` to control default
+Declare both `install-deps` and `inspect` in `bootstrap.toml` to control default
 groups for each tool independently:
 
 ```toml
@@ -175,7 +175,7 @@ packages = ["doxygen", "graphviz"]
 packages = ["doxygen", "graphviz"]
 ```
 
----
+______________________________________________________________________
 
 ## Version pinning
 
@@ -191,6 +191,7 @@ packages = ["zeromq-devel-4.3.4"]    # dnf: pkg-version
 ```
 
 !!! note "pacman has no version-pin syntax"
+
     `pacman -S pkg` always installs the current repo version. Use the `cmd`
     escape hatch to install from the package cache:
 
@@ -203,42 +204,42 @@ packages = ["zeromq-devel-4.3.4"]    # dnf: pkg-version
 `brew` supports major-version taps (`zeromq@4`) but not patch-level pinning
 without locking to a specific formula commit.
 
----
+______________________________________________________________________
 
 ## Groups
 
 By default `inspect` reports all groups defined in the deps file. To
 restrict which groups appear, pass `-g` or set `[tools.inspect].groups`
-in `jb.toml` (see [Project setup](#project-setup) above).
+in `bootstrap.toml` (see [Project setup](#project-setup) above).
 
 The `-g` flag always overrides the toml setting.
 
----
+______________________________________________________________________
 
 ## File auto-discovery
 
 Same resolution order as [`install-deps`](install-deps.md):
 
-| Priority | Source |
-|---|---|
-| 1 | explicit `DEPS_FILE` argument |
-| 2 | `jb-deps.toml` in CWD |
-| 3 | `jb.toml` in CWD |
-| 4 | stdin |
+| Priority | Source                        |
+| -------- | ----------------------------- |
+| 1        | explicit `DEPS_FILE` argument |
+| 2        | `jb-deps.toml` in CWD         |
+| 3        | `bootstrap.toml` in CWD       |
+| 4        | stdin                         |
 
----
+______________________________________________________________________
 
 ## Options
 
-| Flag | Long form | Description |
-|---|---|---|
-| `-h` | `--help` | Show help and exit |
-| `-v` | `--verbose` | Print resolved section and groups to stderr |
-| `-w [FILE]` | `--write [FILE]` | Write output to FILE (default: `jb.versions`) |
-| `-s SECTION` | `--section SECTION` | Override auto-detected package manager |
-| `-g GROUP` | `--groups GROUP` | Comma-separated groups to inspect (overrides all defaults) |
+| Flag         | Long form           | Description                                                |
+| ------------ | ------------------- | ---------------------------------------------------------- |
+| `-h`         | `--help`            | Show help and exit                                         |
+| `-v`         | `--verbose`         | Print resolved section and groups to stderr                |
+| `-w [FILE]`  | `--write [FILE]`    | Write output to FILE (default: `jb.versions`)              |
+| `-s SECTION` | `--section SECTION` | Override auto-detected package manager                     |
+| `-g GROUP`   | `--groups GROUP`    | Comma-separated groups to inspect (overrides all defaults) |
 
----
+______________________________________________________________________
 
 ## Examples
 
@@ -262,5 +263,5 @@ jbx inspect -v 2>&1 | head
 jbx inspect | diff jb.versions -
 
 # Pin script to a specific commit for reproducible CI output
-jbx gh:just-buildit/just-bashit/src/inspect.sh@abc1234 -w
+jbx gh:just-buildit/just-bashit/src/just_bashit/inspect.sh@abc1234 -w
 ```

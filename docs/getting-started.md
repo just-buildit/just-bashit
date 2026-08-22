@@ -35,8 +35,8 @@ All libraries **must be sourced**, not executed. Each file enforces this at
 load time and will exit with an error if you try to run it directly.
 
 ```bash
-. just-bashit/src/logging.sh   # correct
-bash just-bashit/src/logging.sh # error: "This file must be sourced."
+. just-bashit/src/just_bashit/logging.sh   # correct
+bash just-bashit/src/just_bashit/logging.sh # error: "This file must be sourced."
 ```
 
 Some libraries depend on others (`logging.sh` sources `format.sh`,
@@ -49,7 +49,7 @@ chain resolves automatically from relative paths.
 Every function accepts `-h`:
 
 ```bash
-. just-bashit/src/datetime.sh
+. just-bashit/src/just_bashit/datetime.sh
 iso-8601-basic -h
 ```
 

@@ -5,11 +5,24 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  # Both triggers above are webhook-delivered, so when GitHub sheds webhooks
+  # this repo goes completely dark — no run to read, and no way to ask for
+  # one. During the 2026-08-06 Actions incident, deliveries were throttled to
+  # ~15% and PR #21 sat with no checks for hours; `gh workflow run` answered
+  # 422, because a workflow can only be dispatched if the trigger is present
+  # on the DEFAULT branch. Adding it after the fact does not help the PR that
+  # needs it, which is why it belongs here before the next outage.
+  workflow_dispatch:
 
 jobs:
   test:
     name: test (${{ matrix.distro }})
     runs-on: ubuntu-22.04
+    # The suite takes ~1 minute. A job that runs longer is hung, not slow,
+    # and without this it hangs for GitHub's 6-hour ceiling: a leaked
+    # ssh-agent holding bats' output descriptor cost exactly that, four
+    # jobs at a time, before anything went red.
+    timeout-minutes: 20
     container:
       image: ${{ matrix.image }}
     defaults:
@@ -37,24 +50,24 @@ jobs:
         if: matrix.distro == 'debian'
         run: |
           apt-get update && apt-get install -y --no-install-recommends \
-            ca-certificates make git bats curl
+            ca-certificates make git bats curl openssh-client
 
       - name: Install dependencies (arch)
         if: matrix.distro == 'arch'
-        run: pacman -Sy --noconfirm --needed git make diffutils bats curl
+        run: pacman -Sy --noconfirm --needed git make diffutils bats curl openssh
 
       - name: Install dependencies (fedora)
         if: matrix.distro == 'fedora'
-        run: dnf install -y git make diffutils bats curl
+        run: dnf install -y git make diffutils bats curl openssh-clients
 
       - name: Install dependencies (alpine)
         if: matrix.distro == 'alpine'
         shell: sh
         run: |
           apk add --update --no-cache \
-            bash git make bats coreutils curl diffutils
+            bash git make bats coreutils curl diffutils openssh-keygen
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -63,14 +76,14 @@ jobs:
 
       - name: Upload test report XML
         if: matrix.primary == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-report-xml
           path: test-results/*.xml
 
       - name: Upload release artifact
         if: matrix.primary == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: just-bashit
           path: just-bashit.tar.gz
@@ -78,6 +91,7 @@ jobs:
   test-macos:
     name: test (macos)
     runs-on: macos-latest
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash
@@ -90,7 +104,7 @@ jobs:
           echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           echo "$(brew --prefix bash)/bin" >> "$GITHUB_PATH"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -100,6 +114,7 @@ jobs:
   test-windows:
     name: test (windows/ucrt64)
     runs-on: windows-latest
+    timeout-minutes: 30
     defaults:
       run:
         shell: msys2 {0}
@@ -108,9 +123,9 @@ jobs:
         with:
           msystem: UCRT64
           update: true
-          install: git make diffutils curl
+          install: git make diffutils curl openssh
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -120,6 +135,7 @@ jobs:
   coverage:
     name: coverage
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     container:
       image: kcov/kcov:latest
     defaults:
@@ -129,9 +145,9 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update && apt-get install -y --no-install-recommends \
-            ca-certificates make git bats curl
+            ca-certificates make git bats curl openssh-client
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -153,19 +169,30 @@ jobs:
             "${PCT}" "${COLOR}" > test-results/coverage/coverage-badge.json
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: test-results/coverage/
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       security-events: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          python-version: "3.12"
+
+      # The gate. Everything it runs — the standard.mk drift check, help and
+      # ghost gates, shellcheck, shfmt, mdformat — is defined in the Makefile
+      # and the hook config, so local and CI cannot disagree.
+      - name: make lint
+        run: make lint
 
       - name: shellcheck (SARIF → Code Scanning)
         run: |
@@ -223,9 +250,9 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -234,7 +261,7 @@ jobs:
       - run: zensical build --clean
 
       - name: Download test report XML
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: test-report-xml
           path: test-report-xml
@@ -253,7 +280,7 @@ jobs:
           junit2html test-report-xml/merged.xml site/test-report/index.html
 
       - name: Download coverage report
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-report
           path: site/coverage
@@ -261,10 +288,9 @@ jobs:
       - name: Move badge JSON to site root
         run: mv site/coverage/coverage-badge.json site/coverage-badge.json || true
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
-      - uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v5
         id: deployment
-

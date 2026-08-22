@@ -520,3 +520,47 @@ EOF
 	zzz_pos=$(echo "${output}" | grep -n "zzz-pkg" | cut -d: -f1)
 	assert [ "${aaa_pos}" -lt "${zzz_pos}" ]
 }
+
+# --- bootstrap.toml (the name; jb.toml and jb-deps.toml are deprecated) ------
+
+@test 'auto-discovers bootstrap.toml in CWD' {
+	local tmpdir="${BATS_TEST_TMPDIR}/autodiscover_bootstrap"
+	mkdir -p "${tmpdir}"
+	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/bootstrap.toml"
+	cd "${tmpdir}"
+	run install-deps.sh -n -s apt
+	assert_success
+	assert_output --partial "curl"
+}
+
+@test 'bootstrap.toml takes priority over both deprecated names' {
+	local tmpdir="${BATS_TEST_TMPDIR}/bootstrap_priority"
+	mkdir -p "${tmpdir}"
+	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/bootstrap.toml"
+	printf '[runtime.apt]\npackages = ["wget"]\n' >"${tmpdir}/jb-deps.toml"
+	printf '[runtime.apt]\npackages = ["nano"]\n' >"${tmpdir}/jb.toml"
+	cd "${tmpdir}"
+	run install-deps.sh -n -s apt
+	assert_success
+	assert_output --partial "curl"
+	refute_output --partial "wget"
+	refute_output --partial "nano"
+}
+
+@test 'bootstrap.toml is silent; the deprecated names warn' {
+	local tmpdir="${BATS_TEST_TMPDIR}/deprecation_notice"
+	mkdir -p "${tmpdir}/new" "${tmpdir}/old"
+	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/new/bootstrap.toml"
+	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/old/jb.toml"
+
+	cd "${tmpdir}/new"
+	run install-deps.sh -n -s apt
+	assert_success
+	refute_output --partial "deprecated"
+
+	cd "${tmpdir}/old"
+	run install-deps.sh -n -s apt
+	assert_success
+	assert_output --partial "jb.toml is deprecated"
+	assert_output --partial "bootstrap.toml"
+}

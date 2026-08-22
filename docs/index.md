@@ -29,7 +29,7 @@ Download the latest release, extract it, and source whatever you need:
 
 ```bash
 tar xf just-bashit.tar.gz
-. just-bashit/src/datetime.sh
+. just-bashit/src/just_bashit/datetime.sh
 iso-8601-basic
 # 20260522T143200Z
 ```
@@ -39,43 +39,51 @@ package and source individual files from it.
 
 ## CLI Tools
 
-| Tool | Purpose |
-|---|---|
-| [jb](jb.md) | Top-level CLI — dispatches `run`, `install`, `cache`, `version` |
-| [just-runit](just-runit.md) | Ephemeral runner — fetch a script, call a function, discard |
-| [install-deps](install-deps.md) | Install packages declared in a `jb.toml` / `jb-deps.toml` |
-| [inspect](inspect.md) | Snapshot installed package versions into a `.versions` file |
+| Tool                                | Purpose                                                           |
+| ----------------------------------- | ----------------------------------------------------------------- |
+| [bootstrap.toml](bootstrap-toml.md) | The manifest — system packages and fetched tools                  |
+| [just-runit](just-runit.md)         | Ephemeral runner — fetch a script, call a function, discard       |
+| [install-deps](install-deps.md)     | Install packages declared in a `bootstrap.toml` / `jb-deps.toml`  |
+| [setup-system](setup-system.md)     | Take a fresh machine to a working one — packages, shell, ssh, git |
+| [inspect](inspect.md)               | Snapshot installed package versions into a `.versions` file       |
+
+## Guides
+
+- [Setting up a new machine](guides/new-machine.md) — bare OS to a working
+    shell, what lands on disk, and how to check it worked
 
 ## Libraries
 
-| Library | Functions |
-|---|---|
-| [datetime](libraries/datetime.md) | `iso-8601-basic` |
-| [environment](libraries/environment.md) | `set-bashrc` `unset-bashrc` `check-command-exists` |
-| [file](libraries/file.md) | `add-line` `remove-line` `add-contents` |
-| [format](libraries/format.md) | `trim-from` `color-echo` |
-| [logging](libraries/logging.md) | `log` `log-wait` |
-| [match](libraries/match.md) | `is-number` |
-| [network](libraries/network.md) | `test-internet-access` |
-| [path](libraries/path.md) | `get-scriptpath` `set-scriptpath` |
-| [pkg](libraries/pkg.md) | `get-pkg-mgr` `get-pkg-version` |
-| [toml](libraries/toml.md) | `toml_get` `toml_discover_groups` `toml_discover_tools` |
+| Library                                 | Functions                                               |
+| --------------------------------------- | ------------------------------------------------------- |
+| [datetime](libraries/datetime.md)       | `iso-8601-basic`                                        |
+| [environment](libraries/environment.md) | `set-bashrc` `unset-bashrc` `check-command-exists`      |
+| [file](libraries/file.md)               | `add-line` `remove-line` `add-contents`                 |
+| [format](libraries/format.md)           | `trim-from` `color-echo`                                |
+| [logging](libraries/logging.md)         | `log` `log-wait`                                        |
+| [make-run](libraries/make-run.md)       | `mk-var` `mk-vars` `mk-run` `mk-has` `mk-origin`        |
+| [match](libraries/match.md)             | `is-number`                                             |
+| [network](libraries/network.md)         | `test-internet-access`                                  |
+| [path](libraries/path.md)               | `get-scriptpath` `set-scriptpath`                       |
+| [pkg](libraries/pkg.md)                 | `get-pkg-mgr` `get-pkg-version`                         |
+| [toml](libraries/toml.md)               | `toml_get` `toml_discover_groups` `toml_discover_tools` |
 
 ## Platform Support
 
 Tested on every release across six platforms:
 
-| Platform | Package manager |
-|---|---|
-| Debian (latest) | apt |
-| Arch Linux (latest) | pacman |
-| Fedora (latest) | dnf |
-| Alpine Linux (latest) | apk |
-| macOS (latest) | brew |
-| Windows — MSYS2 UCRT64 | pacman (MSYS2) |
+| Platform               | Package manager |
+| ---------------------- | --------------- |
+| Debian (latest)        | apt             |
+| Arch Linux (latest)    | pacman          |
+| Fedora (latest)        | dnf             |
+| Alpine Linux (latest)  | apk             |
+| macOS (latest)         | brew            |
+| Windows — MSYS2 UCRT64 | pacman (MSYS2)  |
 
 ## Templates
 
 See [Templates](templates.md) for copy-paste starting points: a full-featured
-function template with getopts, a minimalist variant, and an executable script
-template with strict mode and exit traps.
+function template with getopts, a minimalist variant, an executable script
+template with strict mode and exit traps, and the opinionated bash
+configuration [setup-system](setup-system.md) installs.

@@ -1,12 +1,12 @@
 # toml
 
-Source: `src/toml.sh`
+Source: `src/just_bashit/toml.sh`
 
 Pure-bash parser for the TOML subset used by just-bashit dependency files:
 `[group.pm]` sections with `packages = [...]` and `cmd = [...]` arrays.
 All parse functions read from stdin.
 
----
+______________________________________________________________________
 
 ## toml_strings
 
@@ -14,7 +14,7 @@ Extract each double-quoted string value from a TOML fragment, one per line.
 Skips empty quoted strings.
 
 ```bash
-. just-bashit/src/toml.sh
+. just-bashit/src/just_bashit/toml.sh
 
 toml_strings '"curl", "wget"'       # prints: curl\nwget
 toml_strings '"a", "", "b"'         # prints: a\nb  (empty string skipped)
@@ -34,7 +34,7 @@ Arguments:
   TEXT  Raw TOML fragment containing one or more double-quoted strings.
 ```
 
----
+______________________________________________________________________
 
 ## toml_get_array
 
@@ -63,7 +63,7 @@ Arguments:
   KEY      The array key to extract (e.g. "packages", "cmd").
 ```
 
----
+______________________________________________________________________
 
 ## toml_get_packages
 
@@ -87,7 +87,7 @@ Arguments:
   SECTION  The package manager name (e.g. "apt", "pacman").
 ```
 
----
+______________________________________________________________________
 
 ## toml_get_cmd
 
@@ -111,7 +111,7 @@ Arguments:
   SECTION  The package manager name (e.g. "apt", "pacman").
 ```
 
----
+______________________________________________________________________
 
 ## toml_get_tool_groups
 
@@ -119,7 +119,7 @@ Print comma-separated group names from `[tools.TOOL].groups = [...]`.
 Returns nothing if the key is absent. Reads TOML from stdin.
 
 ```bash
-cat jb.toml | toml_get_tool_groups install-deps
+cat bootstrap.toml | toml_get_tool_groups install-deps
 # prints e.g.: runtime,dev
 ```
 
@@ -135,7 +135,7 @@ Arguments:
   TOOL  The tool name as it appears in [tools.TOOL] (e.g. "install-deps").
 ```
 
----
+______________________________________________________________________
 
 ## toml_discover_groups
 

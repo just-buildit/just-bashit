@@ -1,10 +1,10 @@
 # pkg
 
-Source: `src/pkg.sh`
+Source: `src/just_bashit/pkg.sh`
 
 Package manager detection and installed-version querying.
 
----
+______________________________________________________________________
 
 ## get-pkg-mgr
 
@@ -12,7 +12,7 @@ Print the name of the active package manager for the running OS.
 Returns non-zero and prints to stderr if the OS is unrecognised.
 
 ```bash
-. just-bashit/src/pkg.sh
+. just-bashit/src/just_bashit/pkg.sh
 
 pm=$(get-pkg-mgr)          # e.g. "pacman" on Arch, "apt" on Debian
 echo "Using ${pm}"
@@ -34,17 +34,17 @@ Output:
 
 ### OS mapping
 
-| OS / distro family | Output |
-|---|---|
-| macOS | `brew` |
-| Debian, Ubuntu | `apt` |
-| Arch, CachyOS, Manjaro | `pacman` |
-| Fedora, RHEL, CentOS, Rocky, AlmaLinux | `dnf` |
-| openSUSE | `zypper` |
-| Alpine | `apk` |
-| MSYS2 / Cygwin / MinGW | `msys2` |
+| OS / distro family                     | Output   |
+| -------------------------------------- | -------- |
+| macOS                                  | `brew`   |
+| Debian, Ubuntu                         | `apt`    |
+| Arch, CachyOS, Manjaro                 | `pacman` |
+| Fedora, RHEL, CentOS, Rocky, AlmaLinux | `dnf`    |
+| openSUSE                               | `zypper` |
+| Alpine                                 | `apk`    |
+| MSYS2 / Cygwin / MinGW                 | `msys2`  |
 
----
+______________________________________________________________________
 
 ## get-pkg-version
 
@@ -52,7 +52,7 @@ Print the installed version of a package using the specified package manager.
 Prints nothing (not an error) if the package is not installed.
 
 ```bash
-. just-bashit/src/pkg.sh
+. just-bashit/src/just_bashit/pkg.sh
 
 get-pkg-version apt curl           # e.g. "8.5.0-2"
 get-pkg-version pacman bash        # e.g. "5.2.37-1"

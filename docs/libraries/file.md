@@ -1,10 +1,10 @@
 # file
 
-Source: `src/file.sh`
+Source: `src/just_bashit/file.sh`
 
 Idempotent line-level file content management.
 
----
+______________________________________________________________________
 
 ## add-line
 
@@ -12,7 +12,7 @@ Write a line to a file only if it is not already present. Optionally write a
 blank line.
 
 ```bash
-. just-bashit/src/file.sh
+. just-bashit/src/just_bashit/file.sh
 
 # Append a line (idempotent — safe to call repeatedly)
 add-line "export PATH=$PATH:/opt/myapp/bin" /etc/environment
@@ -41,14 +41,14 @@ Arguments:
   FILEPATH  Path to file for writing.
 ```
 
----
+______________________________________________________________________
 
 ## remove-line
 
 Remove a line from a file if present. No-op if not found.
 
 ```bash
-. just-bashit/src/file.sh
+. just-bashit/src/just_bashit/file.sh
 
 remove-line "export PATH=$PATH:/opt/myapp/bin" /etc/environment
 
@@ -75,14 +75,14 @@ Arguments:
   FILEPATH  Path to file for line removal.
 ```
 
----
+______________________________________________________________________
 
 ## add-contents
 
 Copy every line from one file into another, skipping duplicates.
 
 ```bash
-. just-bashit/src/file.sh
+. just-bashit/src/just_bashit/file.sh
 
 # Merge new.conf into existing.conf without duplicating lines
 add-contents new.conf existing.conf

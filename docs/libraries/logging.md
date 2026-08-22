@@ -1,18 +1,18 @@
 # logging
 
-Source: `src/logging.sh`
+Source: `src/just_bashit/logging.sh`
 
 Structured, colorized logging with timestamps. Depends on `format.sh`,
 `match.sh`, and `datetime.sh` — all resolved automatically from relative paths.
 
----
+______________________________________________________________________
 
 ## log
 
 Log a message to stdout with a timestamp and type label.
 
 ```bash
-. just-bashit/src/logging.sh
+. just-bashit/src/just_bashit/logging.sh
 
 log "Starting deployment"
 # [20260522T143200Z::INFO]::Starting deployment
@@ -44,13 +44,13 @@ Options:
 
 ### Log Types and Colors
 
-| Type | Color |
-|---|---|
-| `INFO` | White |
+| Type      | Color  |
+| --------- | ------ |
+| `INFO`    | White  |
 | `WARNING` | Yellow |
-| `DEBUG` | Yellow |
-| `ERROR` | Red |
-| `SUCCESS` | Green |
+| `DEBUG`   | Yellow |
+| `ERROR`   | Red    |
+| `SUCCESS` | Green  |
 
 ### Examples
 
@@ -67,14 +67,14 @@ log -s 'DEPLOY blue' "Pushing image"
 log -c OFF -t WARNING "Disk usage above 90%"
 ```
 
----
+______________________________________________________________________
 
 ## log-wait
 
 Sleep for a given duration with input validation.
 
 ```bash
-. just-bashit/src/logging.sh
+. just-bashit/src/just_bashit/logging.sh
 
 log-wait 5      # sleep 5 seconds
 log-wait 0.5    # sleep 500ms

@@ -13,25 +13,25 @@ jbx install-deps -n               # dry run — print commands, don't run
 
 See [`inspect`](inspect.md) to query what versions are currently installed.
 
----
+______________________________________________________________________
 
 ## File auto-discovery
 
 When no file argument is given, `install-deps` searches the current working
 directory for a deps file in this order:
 
-| Priority | Source | When to use |
-|---|---|---|
-| 1 | explicit path arg | `jbx install-deps myfile.toml` |
-| 2 | `jb-deps.toml` | standalone deps-only file |
-| 3 | `jb.toml` | combined tool + deps manifest (recommended) |
-| 4 | stdin | piped input, remote URLs |
+| Priority | Source            | When to use                                 |
+| -------- | ----------------- | ------------------------------------------- |
+| 1        | explicit path arg | `jbx install-deps myfile.toml`              |
+| 2        | `jb-deps.toml`    | standalone deps-only file                   |
+| 3        | `bootstrap.toml`  | combined tool + deps manifest (recommended) |
+| 4        | stdin             | piped input, remote URLs                    |
 
-**Recommended:** put deps directly in `jb.toml` alongside your tool
+**Recommended:** put deps directly in `bootstrap.toml` alongside your tool
 declarations — one file covers everything `jb` needs.
 
 ```toml
-# jb.toml
+# bootstrap.toml
 [project]
 name    = "my_project"
 version = "0.1.0"
@@ -64,9 +64,9 @@ packages = ["doxygen", "graphviz"]
 ```
 
 Use a standalone `jb-deps.toml` only when the project doesn't have a
-`jb.toml` or you need to keep deps separate.
+`bootstrap.toml` or you need to keep deps separate.
 
----
+______________________________________________________________________
 
 ## The deps.toml format
 
@@ -101,15 +101,15 @@ requires — `test`, `ci`, `docs`, etc.
 
 **Supported package managers:**
 
-| Section key | Package manager | Platform |
-|---|---|---|
-| `apt` | apt-get | Debian, Ubuntu |
-| `pacman` | pacman | Arch, CachyOS, Manjaro |
-| `brew` | Homebrew | macOS |
-| `dnf` | dnf | Fedora, RHEL, Rocky, Alma |
-| `zypper` | zypper | openSUSE |
-| `apk` | apk | Alpine |
-| `msys2` | pacman (UCRT64) | Windows / MSYS2 |
+| Section key | Package manager | Platform                  |
+| ----------- | --------------- | ------------------------- |
+| `apt`       | apt-get         | Debian, Ubuntu            |
+| `pacman`    | pacman          | Arch, CachyOS, Manjaro    |
+| `brew`      | Homebrew        | macOS                     |
+| `dnf`       | dnf             | Fedora, RHEL, Rocky, Alma |
+| `zypper`    | zypper          | openSUSE                  |
+| `apk`       | apk             | Alpine                    |
+| `msys2`     | pacman (UCRT64) | Windows / MSYS2           |
 
 Both multiline and inline array syntax are supported:
 
@@ -126,7 +126,7 @@ packages = [
 packages = ["cmake", "libzmq3-dev"]
 ```
 
----
+______________________________________________________________________
 
 ## Version pinning
 
@@ -142,10 +142,11 @@ packages = ["zeromq-devel-4.3.4"]    # dnf: pkg-version
 ```
 
 !!! note "pacman has no version-pin syntax"
+
     `pacman -S pkg` always installs the current repo version.
     Use `cmd` (below) to install directly from the package cache.
 
----
+______________________________________________________________________
 
 ## Custom commands (`cmd`)
 
@@ -173,10 +174,11 @@ group — e.g. `[runtime.pacman]` uses `cmd` while `[runtime.apt]` uses
 `packages`.
 
 !!! tip
+
     `jbx inspect` notes `cmd` sections in `jb.versions` but cannot query
     their installed versions. Use the output to confirm the command ran.
 
----
+______________________________________________________________________
 
 ## Default groups
 
@@ -184,7 +186,7 @@ By default `install-deps` installs **all groups** defined in the deps file.
 This matches the `uv sync` convention — zero config, everything included.
 
 To restrict which groups are installed when no `-g` flag is given, declare
-`groups` under `[tools.install-deps]` in `jb.toml`:
+`groups` under `[tools.install-deps]` in `bootstrap.toml`:
 
 ```toml
 [tools.install-deps]
@@ -194,7 +196,7 @@ groups = ["runtime", "dev"]   # docs and test groups excluded by default
 
 The `-g` flag always overrides this, regardless of the toml setting.
 
----
+______________________________________________________________________
 
 ## Installing dependencies
 
@@ -218,23 +220,23 @@ jbx install-deps -g runtime,dev,docs
 ### From stdin
 
 ```bash
-curl -fsSL https://example.com/jb.toml | jbx install-deps
+curl -fsSL https://example.com/bootstrap.toml | jbx install-deps
 ```
 
----
+______________________________________________________________________
 
 ## Options
 
-| Flag | Long form | Description |
-|---|---|---|
-| `-h` | `--help` | Show help and exit |
-| `-n` | `--dry-run` | Print commands without executing |
-| `-v` | `--verbose` | Print section, groups, and packages before acting |
-| `-s SECTION` | `--section SECTION` | Override auto-detected package manager |
-| `-g GROUP` | `--groups GROUP` | Comma-separated groups to install (overrides all defaults) |
-| | `--template [PATH]` | Write scaffold deps.toml to PATH, or stdout if omitted |
+| Flag         | Long form           | Description                                                |
+| ------------ | ------------------- | ---------------------------------------------------------- |
+| `-h`         | `--help`            | Show help and exit                                         |
+| `-n`         | `--dry-run`         | Print commands without executing                           |
+| `-v`         | `--verbose`         | Print section, groups, and packages before acting          |
+| `-s SECTION` | `--section SECTION` | Override auto-detected package manager                     |
+| `-g GROUP`   | `--groups GROUP`    | Comma-separated groups to install (overrides all defaults) |
+|              | `--template [PATH]` | Write scaffold deps.toml to PATH, or stdout if omitted     |
 
----
+______________________________________________________________________
 
 ## Examples
 
@@ -280,10 +282,10 @@ jbx install-deps --template deps.toml  # write to file
 ### Pin to a specific script commit for reproducible CI
 
 ```bash
-jbx gh:just-buildit/just-bashit/src/install-deps.sh@abc1234
+jbx gh:just-buildit/just-bashit/src/just_bashit/install-deps.sh@abc1234
 ```
 
----
+______________________________________________________________________
 
 ## Scaffold a new deps.toml
 
@@ -298,7 +300,7 @@ jbx install-deps --template deps.toml  # write to file
 The generated file includes usage instructions and example values for every
 supported section. Delete the sections you don't need, fill in the rest.
 
----
+______________________________________________________________________
 
 ## Windows / MSYS2
 
@@ -320,30 +322,31 @@ install-deps.sh deps.toml
 ```
 
 !!! warning "Use the UCRT64 shell, not MSYS"
+
     The MSYS POSIX compiler and the UCRT64 native compiler have incompatible
     headers. Always launch from the **UCRT64** shortcut so `/ucrt64/bin`
     is first on `PATH`.
 
----
+______________________________________________________________________
 
 ## Platform detection
 
 The package manager is inferred from `/etc/os-release` on Linux and
 `uname -s` elsewhere. The mapping:
 
-| `ID` / `ID_LIKE` contains | Section |
-|---|---|
-| `debian`, `ubuntu` | `apt` |
-| `arch`, `cachyos`, `manjaro` | `pacman` |
-| `fedora`, `rhel`, `centos`, `rocky`, `alma` | `dnf` |
-| `suse` | `zypper` |
-| `alpine` | `apk` |
-| Darwin (`uname`) | `brew` |
-| MINGW / MSYS / CYGWIN (`uname`) | `msys2` |
+| `ID` / `ID_LIKE` contains                   | Section  |
+| ------------------------------------------- | -------- |
+| `debian`, `ubuntu`                          | `apt`    |
+| `arch`, `cachyos`, `manjaro`                | `pacman` |
+| `fedora`, `rhel`, `centos`, `rocky`, `alma` | `dnf`    |
+| `suse`                                      | `zypper` |
+| `alpine`                                    | `apk`    |
+| Darwin (`uname`)                            | `brew`   |
+| MINGW / MSYS / CYGWIN (`uname`)             | `msys2`  |
 
 If detection fails, use `--section` to specify the package manager explicitly.
 
----
+______________________________________________________________________
 
 ## Shell compatibility
 
@@ -352,11 +355,11 @@ system bash shipped on macOS (bash 3.2.57, GPL-2). No bash 4+ features are
 used: no `mapfile`/`readarray`, no associative arrays (`declare -A`), no
 `[[ =~ ]]` capture groups.
 
-| Shell | Minimum version | Notes |
-|---|---|---|
-| bash | 3.2+ | macOS default `/bin/bash` works |
-| zsh | not supported | run via `bash install-deps.sh` explicitly |
-| dash / sh | not supported | arrays and process substitution required |
+| Shell     | Minimum version | Notes                                     |
+| --------- | --------------- | ----------------------------------------- |
+| bash      | 3.2+            | macOS default `/bin/bash` works           |
+| zsh       | not supported   | run via `bash install-deps.sh` explicitly |
+| dash / sh | not supported   | arrays and process substitution required  |
 
 If your environment ships an older bash or a non-bash shell as `/bin/sh`,
 invoke the script directly:

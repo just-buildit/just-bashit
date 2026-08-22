@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ############################################################################
-# EXECUTABLE: just-runit (aliases: jb run, jbx)                              #
-# PACKAGE: just-bashit version 0.2.0                                         #
+# EXECUTABLE: just-runit (alias: jbx)                                        #
+# PACKAGE: just-bashit version 0.4.1                                         #
 # ############################################################################
 # Ephemeral bash tool runner. Fetch a script from a URL or namespace, call   #
 # an optional function, then discard — no installation, no env pollution.    #
@@ -14,7 +14,7 @@ IFS=$'\n\t'
 
 _CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/just-runit"
 _ME="$(basename "$0")"
-_VERSION="0.1.4"
+_VERSION="0.4.1"
 _DEFAULT_TTL=3600
 
 # Default namespace base URL (just-buildit org pages root).
@@ -32,9 +32,47 @@ _JBS_LIBS=(
 	pkg toml
 )
 
-# ---- top-level dispatch (when called as "jb" or "just-buildit") -------------
+# ---- portable checksums -----------------------------------------------------
+# GNU coreutils' sha256sum/md5sum are absent on macOS/BSD, where the tools are
+# shasum/md5 — a fetch there died with "sha256sum: command not found". Prefer
+# the coreutils names, fall back to the BSD ones; both read stdin, and we emit
+# only the hex digest (BSD `md5` prints the bare hash for stdin, so the same
+# `cut` is harmless there).
+_sha256() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum | cut -d' ' -f1
+	else
+		shasum -a 256 | cut -d' ' -f1
+	fi
+}
 
-if [[ ${_ME} == "jb" || ${_ME} == "just-buildit" ]]; then
+_md5() {
+	if command -v md5sum >/dev/null 2>&1; then
+		md5sum | cut -d' ' -f1
+	else
+		md5 | cut -d' ' -f1
+	fi
+}
+
+# ---- top-level dispatch (when called by the full name, "just-runit") --------
+#
+# This triggered on "jb" and "just-buildit" until 0.5.0, and that was the root
+# of a three-way collision on one token: `just-buildit` is the GitHub org, the
+# PEP 517 build backend, AND — via a symlink get-jb.sh created — this runner.
+# `jb`/`just-buildit` now mean the backend only, since it is the one that
+# actually builds; this runner answers to `just-runit` and `jbx`.
+#
+# The subcommands had to move somewhere, since they were only ever reachable
+# under those two names. They now live under the FULL name, and `just-runit`
+# falls THROUGH to the SPEC runner when the first argument is not a known
+# subcommand — so `just-runit <url>` keeps working, which is how the fetch
+# tests and every existing caller invoke it.
+#
+# `jbx` deliberately does NOT take subcommands. That is the escape hatch: a
+# script genuinely named `install` or `cache` is reachable as `jbx install`,
+# unambiguously, and no SPEC is shadowed by a keyword.
+
+if [[ ${_ME} == "just-runit" ]]; then
 	SUBCMD="${1:-}"
 	case "${SUBCMD}" in
 	run)
@@ -59,7 +97,7 @@ if [[ ${_ME} == "jb" || ${_ME} == "just-buildit" ]]; then
 				;;
 			*)
 				# Treat arg as a URL — remove its cache entry.
-				_key=$(printf '%s' "${_CACHE_TARGET}" | sha256sum | cut -d' ' -f1)
+				_key=$(printf '%s' "${_CACHE_TARGET}" | _sha256)
 				_removed=0
 				for _f in "${_CACHE_DIR}/${_key}".{sh,py} "${_CACHE_DIR}/${_key}".meta; do
 					[[ -f ${_f} ]] && {
@@ -95,19 +133,35 @@ if [[ ${_ME} == "jb" || ${_ME} == "just-buildit" ]]; then
 		exit 0
 		;;
 	install)
-		# Find jb.toml walking up from CWD.
+		# Find the bootstrap manifest walking up from CWD.
+		#
+		# `bootstrap.toml` is the name; `jb.toml` is accepted and deprecated.
+		# The old name pointed at the wrong tool — `jb` reads as just-buildit,
+		# the PEP 517 backend, which never opens this file. The new one says
+		# what the file declares instead: what must exist before the language
+		# ecosystem's own package manager can run.
+		#
+		# Both names are read during the transition because this script is
+		# fetched live from the CDN on every CI run, so a hard cutover would
+		# break every repo that had not yet renamed, in the window between the
+		# publish and their rename. Removal is tracked separately.
 		_toml=""
 		_dir="${PWD}"
 		while [[ "${_dir}" != "/" ]]; do
-			if [[ -f "${_dir}/jb.toml" ]]; then
-				_toml="${_dir}/jb.toml"
-				break
-			fi
+			for _cand in bootstrap.toml jb.toml; do
+				if [[ -f "${_dir}/${_cand}" ]]; then
+					_toml="${_dir}/${_cand}"
+					break 2
+				fi
+			done
 			_dir="$(dirname "${_dir}")"
 		done
 		if [[ -z "${_toml}" ]]; then
-			echo "${_ME}: no jb.toml found (searched up from ${PWD})" >&2
+			echo "${_ME}: no bootstrap.toml found (searched up from ${PWD})" >&2
 			exit 1
+		fi
+		if [[ "$(basename "${_toml}")" == "jb.toml" ]]; then
+			echo "${_ME}: ${_toml} — jb.toml is deprecated, rename it to bootstrap.toml" >&2
 		fi
 		printf '  reading %s\n' "${_toml}"
 		# Extract all source = "..." values from [tools.*] sections.
@@ -150,7 +204,7 @@ if [[ ${_ME} == "jb" || ${_ME} == "just-buildit" ]]; then
 
 			Commands:
 			  run      Ephemeral script runner (alias: jbx)
-			  install  Pre-fetch all tools declared in jb.toml
+			  install  Pre-fetch all tools declared in bootstrap.toml
 			  cache    Manage the local script cache
 			  version  Print version and exit
 
@@ -159,9 +213,10 @@ if [[ ${_ME} == "jb" || ${_ME} == "just-buildit" ]]; then
 		exit 0
 		;;
 	*)
-		echo "${_ME}: unknown command '${SUBCMD}'" >&2
-		echo "Run '${_ME} help' for usage." >&2
-		exit 1
+		# Not a subcommand, so it is a SPEC: fall through to the runner
+		# below rather than erroring. This is what keeps `just-runit <url>`
+		# working now that the full name owns the subcommands.
+		:
 		;;
 	esac
 fi
@@ -290,7 +345,7 @@ _lookup_alias() {
 	local base="${1}" name="${2}"
 	local aliases_url="${base}/aliases.toml"
 	local key
-	key=$(printf '%s' "${base}" | sha256sum | cut -d' ' -f1)
+	key=$(printf '%s' "${base}" | _sha256)
 	local aliases_cache="${_CACHE_DIR}/aliases-${key}.toml"
 
 	if [[ ${OPT_REFRESH} -eq 1 ]] || ! _cache_valid "${aliases_cache}"; then
@@ -417,7 +472,7 @@ _resolve() {
 
 # ---- cache helpers ----------------------------------------------------------
 
-_cache_key() { printf '%s' "${1}" | sha256sum | cut -d' ' -f1; }
+_cache_key() { printf '%s' "${1}" | _sha256; }
 
 _cache_ext() { case "${1}" in *.py) echo ".py" ;; *) echo ".sh" ;; esac }
 
@@ -441,6 +496,28 @@ _cache_valid() {
 	((now - ts < OPT_TTL))
 }
 
+# Retry flags the curl at hand actually understands. `--retry-all-errors` needs
+# curl >= 7.71, but enterprise LTS bases — RHEL/Oracle/Rocky/Alma 8, a large
+# slice of downstream consumers — ship 7.61, where an unknown flag aborts the
+# whole fetch ("option --retry-all-errors: is unknown"). `--retry` and
+# `--retry-connrefused` (>= 7.52) already ride out timeouts and 429/5xx
+# throttling there; `--retry-all-errors` is added only where curl accepts it, so
+# the bootstrap stays dependable from curl 7.61 through current. Probed once.
+#
+# Populated as an ARRAY, not a space-joined string: this file runs under the
+# strict `IFS=$'\n\t'` set at the top, so an unquoted `$(...)` of a
+# space-separated string would NOT word-split — curl would see the whole
+# "--retry 3 --retry-connrefused ..." as one bogus option and abort every
+# fetch. `"${_CURL_RETRY_OPTS[@]}"` expands to distinct args regardless of IFS.
+_curl_retry_opts_init() {
+	if [[ -z ${_CURL_RETRY_OPTS+x} ]]; then
+		_CURL_RETRY_OPTS=(--retry 3 --retry-connrefused)
+		if curl --retry-all-errors --help >/dev/null 2>&1; then
+			_CURL_RETRY_OPTS+=(--retry-all-errors)
+		fi
+	fi
+}
+
 _fetch_to() {
 	local url="${1}" dest="${2}"
 	_log "fetching ${url}"
@@ -450,8 +527,9 @@ _fetch_to() {
 	# as the script ("line 1: 400: command not found"). --fail emits no body
 	# and returns non-zero on >=400, and the retries ride out transient
 	# throttling so a blip retries instead of reddening the build.
-	if ! curl -sSL --fail --retry 3 --retry-all-errors --retry-connrefused \
-		--connect-timeout 30 -o "${dest}" "${url}"; then
+	_curl_retry_opts_init
+	if ! curl -sSL --fail "${_CURL_RETRY_OPTS[@]}" --connect-timeout 30 \
+		-o "${dest}" "${url}"; then
 		rm -f "${dest}"
 		_err "fetch failed (no usable response from ${url})"
 	fi
@@ -502,7 +580,7 @@ _acquire() {
 	# at ${_SCRIPT_DIR}/ (where _SCRIPT_DIR = dirname of the cached file).
 	# Route through _acquire_jbs so all libs land together in cache/jbs/.
 	if [[ ${url} == "${_JBS_BASE}/"* ]]; then
-		local _lib="${url#${_JBS_BASE}/}"
+		local _lib="${url#"${_JBS_BASE}"/}"
 		_acquire_jbs "${_lib%.sh}"
 		return
 	fi
@@ -537,8 +615,8 @@ _verify() {
 	local file="${1}" spec="${2}"
 	local algo="${spec%%:*}" expected="${spec#*:}" actual
 	case "${algo}" in
-	sha256) actual=$(sha256sum "${file}" | cut -d' ' -f1) ;;
-	md5) actual=$(md5sum "${file}" | cut -d' ' -f1) ;;
+	sha256) actual=$(_sha256 <"${file}") ;;
+	md5) actual=$(_md5 <"${file}") ;;
 	*) _err "unsupported checksum algorithm: ${algo}" ;;
 	esac
 	[[ ${actual} == "${expected}" ]] ||

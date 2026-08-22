@@ -5,27 +5,27 @@
 ### Fixed
 
 - **`toml.sh` / `pkg.sh` still missing when `install-deps` resolves via the
-  `just-buildit` namespace** — 0.1.8 added `pkg` and `toml` to `_JBS_LIBS`
-  so the `jbs:` co-fetch path works, but `jbx install-deps` (bare name) goes
-  through the `just-buildit` namespace and resolves to a raw GitHub URL, which
-  `_acquire` cached at a hash-based path in `~/.cache/just-runit/` — not in
-  `~/.cache/just-runit/jbs/`.  When `install-deps.sh` then sources
-  `${_SCRIPT_DIR}/toml.sh` it looks in the hash dir, where siblings never
-  land.  Fix: detect URLs that originate from `_JBS_BASE` in `_acquire` and
-  redirect them through `_acquire_jbs`, so the script and all its siblings end
-  up in `cache/jbs/` regardless of how the name was originally spelled.
+    `just-buildit` namespace** — 0.1.8 added `pkg` and `toml` to `_JBS_LIBS`
+    so the `jbs:` co-fetch path works, but `jbx install-deps` (bare name) goes
+    through the `just-buildit` namespace and resolves to a raw GitHub URL, which
+    `_acquire` cached at a hash-based path in `~/.cache/just-runit/` — not in
+    `~/.cache/just-runit/jbs/`. When `install-deps.sh` then sources
+    `${_SCRIPT_DIR}/toml.sh` it looks in the hash dir, where siblings never
+    land. Fix: detect URLs that originate from `_JBS_BASE` in `_acquire` and
+    redirect them through `_acquire_jbs`, so the script and all its siblings end
+    up in `cache/jbs/` regardless of how the name was originally spelled.
 
 ## v0.1.8 — 2026-05-25
 
 ### Fixed
 
 - **`toml.sh` / `pkg.sh` missing from cache** — `install-deps.sh` sources
-  `${_SCRIPT_DIR}/toml.sh` and `${_SCRIPT_DIR}/pkg.sh` at startup, but only
-  the libs listed in `_JBS_LIBS` were co-fetched by `just-runit`.  Adding
-  `pkg` and `toml` to `_JBS_LIBS` ensures they are always present in the
-  cache alongside the other libs.
+    `${_SCRIPT_DIR}/toml.sh` and `${_SCRIPT_DIR}/pkg.sh` at startup, but only
+    the libs listed in `_JBS_LIBS` were co-fetched by `just-runit`. Adding
+    `pkg` and `toml` to `_JBS_LIBS` ensures they are always present in the
+    cache alongside the other libs.
 
----
+______________________________________________________________________
 
 ## v0.1.7 — 2026-05-24
 
@@ -49,11 +49,11 @@
 ### Coverage
 
 - Fixed `BASH_XTRACEFD` clobbering kcov's internal named pipe — was causing
-  kcov to hang indefinitely waiting for trace data that never arrived
+    kcov to hang indefinitely waiting for trace data that never arrived
 - Use `BASH_XTRACEFD=${BASH_XTRACEFD:-2}` to preserve kcov's fd under kcov,
-  fall back to stderr otherwise
+    fall back to stderr otherwise
 
----
+______________________________________________________________________
 
 ## v0.1.6 — 2025-05-01
 
@@ -71,7 +71,7 @@
 - `install-deps` and `inspect` refactored to share `toml.sh` and `pkg.sh`
 - 60+ new bats tests across all modules
 
----
+______________________________________________________________________
 
 ## v0.1.5 — 2025-04-01
 
@@ -89,7 +89,7 @@
 - `install-deps`: bash 3.2 compatibility (macOS); replaced `mapfile` with `while read`
 - Docs site launched at `https://just-buildit.github.io/just-bashit/`
 
----
+______________________________________________________________________
 
 ## v0.1.4 — 2025-03-01
 

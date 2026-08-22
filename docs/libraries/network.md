@@ -1,10 +1,10 @@
 # network
 
-Source: `src/network.sh`
+Source: `src/just_bashit/network.sh`
 
 Network connectivity testing. Depends on `format.sh` and `environment.sh`.
 
----
+______________________________________________________________________
 
 ## test-internet-access
 
@@ -13,7 +13,7 @@ Test internet connectivity by probing URLs with `curl`, `wget`, and/or `ping`
 timeout.
 
 ```bash
-. just-bashit/src/network.sh
+. just-bashit/src/just_bashit/network.sh
 
 # Silent check — returns 0/1
 test-internet-access && echo "online" || echo "offline"
@@ -48,10 +48,10 @@ When no URLs are given, the function tests:
 
 ### Exit Codes
 
-| Code | Meaning |
-|---|---|
-| `0` | Connection established |
-| `1` | All probes failed |
+| Code  | Meaning                            |
+| ----- | ---------------------------------- |
+| `0`   | Connection established             |
+| `1`   | All probes failed                  |
 | `124` | Timeout expired before any success |
 
 ### Examples

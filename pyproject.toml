@@ -7,7 +7,7 @@ pure = true
 
 [project]
 name = "just-bashit"
-version = "0.2.0"
+version = "0.4.1"
 description = "Evolving set of auto-formatted, bats-tested, shellcheck-linted tools, templates, and more."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -30,6 +30,7 @@ classifiers = [
 jb     = "just_bashit._launcher:jb"
 jbx    = "just_bashit._launcher:jbx"
 jb-inspect = "just_bashit._launcher:jb_inspect"
+jb-setup-system = "just_bashit._launcher:jb_setup_system"
 
 [project.urls]
 Homepage      = "https://just-buildit.github.io/just-bashit/"
@@ -38,13 +39,23 @@ Documentation = "https://just-buildit.github.io/just-bashit/"
 Changelog     = "https://github.com/just-buildit/just-bashit/blob/main/CHANGELOG.md"
 
 [dependency-groups]
+# WHICH tools, at WHAT versions; uv.lock pins them. The Makefile owns HOW they
+# run, .pre-commit-config.yaml owns WHEN. mdformat's plugins live here rather
+# than as pre-commit additional_dependencies, where they were unpinned and
+# drifted while the config still read as pinned.
 dev = [
     "pre-commit",
+    "bump-my-version",
     "zensical>=0.0.29; python_version >= '3.10'",
+    "mdformat>=1.0; python_version >= '3.10'",
+    "mdformat-gfm; python_version >= '3.10'",
+    "mdformat-gfm-alerts; python_version >= '3.10'",
+    "mdformat-mkdocs; python_version >= '3.10'",
+    "mdformat-frontmatter; python_version >= '3.10'",
 ]
 
 [tool.bumpversion]
-current_version = "0.2.0"
+current_version = "0.4.1"
 commit = true
 tag = true
 tag_name = "v{new_version}"
@@ -85,6 +96,23 @@ filename = "src/just_bashit/just-runit"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
 
+# The version `jb version` prints. Missing from this list until 0.2.0, which is
+# how it sat at 0.1.4 through two releases; `make version-check` gates it now.
+[[tool.bumpversion.files]]
+filename = "src/just_bashit/just-runit"
+search = "_VERSION=\"{current_version}\""
+replace = "_VERSION=\"{new_version}\""
+
+[[tool.bumpversion.files]]
+filename = "jb.toml"
+search = "version = \"{current_version}\""
+replace = "version = \"{new_version}\""
+
+[[tool.bumpversion.files]]
+filename = "src/just_bashit/make-run.sh"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
 [[tool.bumpversion.files]]
 filename = "src/just_bashit/logging.sh"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
@@ -112,6 +140,21 @@ replace = "# PACKAGE: just-bashit version {new_version}                         
 
 [[tool.bumpversion.files]]
 filename = "src/just_bashit/script-template"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+[[tool.bumpversion.files]]
+filename = "src/just_bashit/setup-system.sh"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+[[tool.bumpversion.files]]
+filename = "src/just_bashit/bashrc-template.sh"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+[[tool.bumpversion.files]]
+filename = "src/just_bashit/profile-template.sh"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
 

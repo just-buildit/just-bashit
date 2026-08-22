@@ -10,10 +10,14 @@ extra_css = ["stylesheets/extra.css"]
 nav = [
   {"Home" = "index.md"},
   {"Getting Started" = "getting-started.md"},
+  {"Guides" = [
+    {"Setting up a new machine" = "guides/new-machine.md"},
+  ]},
   {"CLI" = [
-    {"jb" = "jb.md"},
     {"just-runit" = "just-runit.md"},
+    {"bootstrap.toml" = "bootstrap-toml.md"},
     {"install-deps" = "install-deps.md"},
+    {"setup-system" = "setup-system.md"},
     {"inspect" = "inspect.md"},
   ]},
   {"Libraries" = [
@@ -22,6 +26,7 @@ nav = [
     {"file" = "libraries/file.md"},
     {"format" = "libraries/format.md"},
     {"logging" = "libraries/logging.md"},
+    {"make-run" = "libraries/make-run.md"},
     {"match" = "libraries/match.md"},
     {"network" = "libraries/network.md"},
     {"path" = "libraries/path.md"},

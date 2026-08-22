@@ -1,10 +1,10 @@
 # format
 
-Source: `src/format.sh`
+Source: `src/just_bashit/format.sh`
 
 String trimming and colorized output.
 
----
+______________________________________________________________________
 
 ## trim-from
 
@@ -12,7 +12,7 @@ Trim a string at a marker character, from either direction, with optional
 greedy and keep-marker modes.
 
 ```bash
-. just-bashit/src/format.sh
+. just-bashit/src/just_bashit/format.sh
 
 trim-from 'report.2026.tar.gz'    # report.2026.tar
 trim-from -r 'report.2026.tar.gz' # 2026.tar.gz
@@ -46,14 +46,14 @@ trim-from -m MA "HEYMA!"   # HEY
 trim-from -rm MA "HEYMA!"  # !
 ```
 
----
+______________________________________________________________________
 
 ## color-echo
 
 Print colorized text to stdout using ANSI escape sequences.
 
 ```bash
-. just-bashit/src/format.sh
+. just-bashit/src/just_bashit/format.sh
 
 color-echo -bc green "Build succeeded"
 color-echo -bc red "Build failed"
@@ -75,15 +75,15 @@ Options:
 
 ### Colors
 
-| Flag | Color |
-|---|---|
-| `-c black` | Black |
-| `-c red` | Red |
-| `-c green` | Green |
-| `-c yellow` | Yellow |
-| `-c blue` | Blue |
-| `-c magenta` | Magenta |
-| `-c cyan` | Cyan |
-| `-c white` | White (default) |
+| Flag         | Color           |
+| ------------ | --------------- |
+| `-c black`   | Black           |
+| `-c red`     | Red             |
+| `-c green`   | Green           |
+| `-c yellow`  | Yellow          |
+| `-c blue`    | Blue            |
+| `-c magenta` | Magenta         |
+| `-c cyan`    | Cyan            |
+| `-c white`   | White (default) |
 
 Add `-b` to any color for the bright/bold variant.

@@ -1,13 +1,13 @@
 # datetime
 
-Source: `src/datetime.sh`
+Source: `src/just_bashit/datetime.sh`
 
 ## iso-8601-basic
 
 Generate a path- and filename-friendly ISO 8601 UTC timestamp.
 
 ```bash
-. just-bashit/src/datetime.sh
+. just-bashit/src/just_bashit/datetime.sh
 iso-8601-basic
 # 20260522T143200Z
 ```
