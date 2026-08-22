@@ -176,7 +176,7 @@ test-fast: ## Run tests, stopping at the first failure
 # `lint` is the gate — CI runs exactly this and nothing else. The three
 # consistency gates come first because they are near-free and catch the class
 # of rot that review demonstrably does not.
-lint: standard-check help-check ghost-check gates-check ## Run the full lint gate (CI runs this)
+lint: standard-check help-check ghost-check hook-dispatch-check hook-stage-check gates-check ## Run the full lint gate (CI runs this)
 	@hook=$$(git rev-parse --git-path hooks/pre-commit 2>/dev/null); \
 	 if [ -n "$$hook" ] && [ ! -f "$$hook" ]; then \
 	     $(PRE_COMMIT) install >/dev/null 2>&1 \
@@ -263,7 +263,7 @@ gates-check: ## Verify `gates` runs every make target CI invokes
 	 ci_targets=$$(sed -E 's/(^|[[:space:]])#.*$$//' "$$ci" \
 	     | grep -hoE '(^[[:space:]]*(- )?run:[[:space:]]*make|^[[:space:]]*make|[;&|][[:space:]]*make)[[:space:]]+[a-zA-Z_][a-zA-Z0-9_-]*' \
 	     | grep -oE 'make[[:space:]]+[a-zA-Z_][a-zA-Z0-9_-]*$$' \
-	     | sed -E 's/make[[:space:]]+//' | sort -u); \
+	     | sed -E 's/make[[:space:]]+//' | LC_ALL=C sort -u); \
 	 if [ -z "$$ci_targets" ]; then \
 	     echo "ERROR: gates-check matched no 'make <target>' in $$ci —"; \
 	     echo "  the scan found nothing, so it did not run, so it has not passed."; \
@@ -304,12 +304,29 @@ gates-check: ## Verify `gates` runs every make target CI invokes
 # `release` is RESERVED for the C build type. The release workflow is `ship`
 # and `tag-release`, so the two senses never collide.
 ifeq ($(HAS_C),1)
-STD_TARGETS += build debug release
+STD_TARGETS += build debug release compile-commands tidy
 
 BUILD_DIR     ?= build
 BUILD_TYPE    ?= RelWithDebInfo
 CMAKE         ?= cmake
 CMAKE_FLAGS   ?=
+CLANG_TIDY    ?= clang-tidy
+
+# How the root compile_commands.json is produced: `copy` (default) or
+# `symlink`. A symlink CANNOT go stale -- it resolves to whatever the last
+# configure wrote, so there is nothing to refresh -- and a relative one carries
+# no absolute path, so it survives a worktree or a fresh clone. It is not the
+# default only because a symlink is not free everywhere (Windows without
+# developer mode). Either way this target is idempotent: a root entry that
+# already resolves to the build one is left alone.
+COMPILE_DB    ?= copy
+
+# The translation units `tidy` lints, one per line. sed rather than an
+# interpreter on purpose: a C-only repo should not need Python or jq installed
+# to lint its C, and cmake writes compile_commands.json one "file" key per
+# line. Override it if your generator emits something denser.
+TIDY_FILES    ?= sed -n 's/.*"file": *"\([^"]*\)".*/\1/p' \
+                     compile_commands.json | LC_ALL=C sort -u
 PYEXT_CMD     ?=
 
 # The in-place extension build belongs to the OVERLAP of the two flags, not to
@@ -331,10 +348,74 @@ release: ## Build the native library clean, with BUILD_TYPE=Release
 	@$(MAKE) clean
 	@$(MAKE) build BUILD_TYPE=Release
 
+# `test` and `test-fast` execute COMPILED artifacts, so they must not execute
+# stale ones. A prerequisite-only line: it adds to the recipes defined in the
+# Core section above rather than replacing them, so there is no second recipe
+# and no `overriding recipe` warning.
+#
+# The failure this closes is not the noisy one. Editing a test and re-running
+# reported a failure quoting the OLD assertion at the OLD line numbers, which
+# is confusing but self-correcting the moment you read it. The one that
+# matters is the inverse: edit a source, `make test`, see green, ship -- with
+# the suite having never compiled the change, and nothing in the output
+# distinguishing that from a real pass. Reported from doppler
+# (doppler-dsp/doppler#659), where `make` is the only sanctioned way to run
+# the C suite -- a pre-commit hook blocks raw ctest -- so this was the single
+# path to a result and it was the one that could be silently stale.
+#
+# Inside HAS_C because `build` only exists here; a Python-only repo compiles
+# nothing and keeps `test` free-standing.
+#
+# No separate gate: a missing prerequisite reproduces the bug immediately, so
+# the dependency IS the check and there is nothing here that can rot.
+test test-fast: build
+
 ifeq ($(HAS_PYTHON),1)
 pyext: ## Build the Python extension in place
 	$(PYEXT_CMD)
 endif
+
+# clangd and clang-tidy read compile_commands.json from the PROJECT ROOT, while
+# cmake writes it into $(BUILD_DIR) -- hence the copy.
+#
+# Phony, and re-configuring every time. A file target keyed on
+# $(BUILD_DIR)/CMakeCache.txt is the obvious shape and it is wrong: the cache
+# does not move when the source list does, so the copy runs once and never
+# again, and anything that later touches the root copy pins it as up to date
+# forever. That exact rule shipped in just-makeit's generated projects and
+# could not re-copy at all (just-buildit/just-makeit#940). There is no
+# timestamp here to get wrong; configure is idempotent and costs a second.
+compile-commands: ## Refresh compile_commands.json for clangd / clang-tidy
+	$(CMAKE) -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
+	    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON $(CMAKE_FLAGS)
+	@src=$(BUILD_DIR)/compile_commands.json; dst=compile_commands.json; \
+	 if [ "$(COMPILE_DB)" = symlink ]; then \
+	     ln -sfn "$$src" "$$dst"; \
+	     echo "compile-commands: $$dst -> $$src"; \
+	 elif [ "$$dst" -ef "$$src" ]; then \
+	     : "Already the same file -- a relative symlink into the build tree."; \
+	     : "cp refuses that outright ('are the same file') and took the whole"; \
+	     : "target, and tidy with it, down in the first HAS_C adopter."; \
+	     echo "compile-commands: $$dst already resolves to $$src"; \
+	 else \
+	     cp "$$src" "$$dst"; \
+	 fi
+
+# The file list comes from the compile DATABASE, not a directory walk, so tidy
+# sees exactly the translation units cmake compiles -- no more (a generated .c
+# that no target references, which would fail to lint for reasons that are not
+# about the code) and no less.
+#
+# A repo with no .clang-tidy gets a clear refusal rather than clang-tidy's own
+# default check set, which is not the same thing as "the project's checks".
+tidy: compile-commands ## Run clang-tidy over the compile database
+	@command -v $(CLANG_TIDY) >/dev/null 2>&1 || \
+	    { echo "tidy: $(CLANG_TIDY) not found -- install it first"; exit 1; }
+	@[ -f .clang-tidy ] || \
+	    { echo "tidy: no .clang-tidy in this repo; refusing to lint against"; \
+	      echo "  clang-tidy's defaults, which are not your project's checks."; \
+	      exit 1; }
+	@$(TIDY_FILES) | xargs $(CLANG_TIDY) -p .
 endif
 
 # ── HAS_PYTHON ───────────────────────────────────────────────────────────────
@@ -582,8 +663,28 @@ endif
 	@test "$$(git rev-parse HEAD)" = "$$(git rev-parse origin/main)" || \
 	    { echo "ERROR: local main != origin/main — git pull first"; exit 1; }
 	@$(MAKE) version-check VERSION=$(VERSION)
-	git tag -a "v$(VERSION)" -m "Release v$(VERSION)"
-	git push origin "v$(VERSION)"
+# Idempotent, so `ship` can be RE-RUN after its watch is interrupted. The tag
+# push is the point of no return -- it starts the release -- but the watch that
+# follows runs for tens of minutes, and anything cutting it short (a timeout, a
+# dropped connection, Ctrl-C) used to leave `ship` unusable: `git tag` fails on
+# an existing tag, so the way back was to know that `release-watch` is a
+# separate target. Re-running the command you already ran is the obvious move,
+# and it now works.
+#
+# An existing tag on a DIFFERENT commit is still refused. That is the case
+# worth failing on: the artifacts were built from wherever the tag pointed when
+# the workflow ran, so moving it makes the tag disagree with what was published.
+	@if git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null 2>&1; then \
+	    test "$$(git rev-parse "v$(VERSION)^{commit}")" = "$$(git rev-parse HEAD)" || \
+	        { echo "ERROR: v$(VERSION) exists and points at another commit."; \
+	          echo "  A released tag must not move — its artifacts were built"; \
+	          echo "  from where it pointed. Cut the next patch version."; \
+	          exit 1; }; \
+	    echo "tag-release: v$(VERSION) already tags HEAD — reusing it"; \
+	else \
+	    git tag -a "v$(VERSION)" -m "Release v$(VERSION)"; \
+	fi
+	@git push origin "v$(VERSION)"
 	@echo "Tagged v$(VERSION) — release workflow starting on GitHub"
 
 release-watch: ## VERSION=x.y.z — watch the release workflow and verify it
@@ -612,7 +713,8 @@ endif
 # Three invariants that review has been shown not to catch, each failing rather
 # than warning. A gate that cannot run has not passed.
 
-STD_TARGETS += standard-check help-check ghost-check
+STD_TARGETS += standard-check help-check ghost-check hook-dispatch-check
+STD_TARGETS += hook-stage-check
 
 # A temp file, portably: bare `mktemp` is a GNU extension, and the BSD one
 # macOS ships requires a template. The gates parse make's own database, which
@@ -656,7 +758,7 @@ _STD_SECTION = case "$$t" in \
         tsec="Core";; \
     lint-*) tsec="Lint";; \
     test-all|gates|gates-check) tsec="Aggregates";; \
-    build|debug|release|pyext) tsec="C";; \
+    build|debug|release|pyext|compile-commands|tidy) tsec="C";; \
     wheel|test-python) tsec="Python";; \
     test-rust) tsec="Rust";; \
     docs|docs-serve|docs-check) tsec="Docs";; \
@@ -666,7 +768,8 @@ _STD_SECTION = case "$$t" in \
     bump-version|version-check|release-branch|tag-release|release-watch \
         |ship) tsec="Release";; \
     test-examples) tsec="Examples";; \
-    standard-check|help-check|ghost-check) tsec="Gates";; \
+    standard-check|help-check|ghost-check|hook-dispatch-check|hook-stage-check) \
+        tsec="Gates";; \
     *) tsec="Local";; \
 esac
 
@@ -762,7 +865,7 @@ help-check: ## Verify help documents every target, and every target is listed
 	                                          b = 1; r = 0; next } \
 	      b && / to execute/ { r = 1 } \
 	      b && /^$$/ { if (r) print n; b = 0 } \
-	      END { if (b && r) print n }' "$$db" | sort -u); \
+	      END { if (b && r) print n }' "$$db" | LC_ALL=C sort -u); \
 	 if [ -z "$$withrecipe" ]; then \
 	     echo "ERROR: parsed no rules out of make's database"; \
 	     echo "  This half of the gate did not run, so it has not passed."; \
@@ -788,20 +891,44 @@ help-check: ## Verify help documents every target, and every target is listed
 # The prerequisite half of that test is what keeps the aggregates legitimate:
 # `all: test`, `test-all: ...` and `ship: ...` carry no recipe by design and do
 # their work entirely through what they depend on.
+#
+# EVERY `sort` AND THE `comm` BELOW PIN LC_ALL=C, AND THAT IS LOAD-BEARING.
+# Target names are hyphen- and underscore-heavy, and a UTF-8 collation ignores
+# punctuation at the primary weight — so this gate broke two ways at once on a
+# developer box running en_US.UTF-8 (doppler, 2026-08-18):
+#
+#   `sort -u` DROPS DISTINCT NAMES. Under en_US, `test-stubs`, `teststubs` and
+#   `test_stubs` all compare equal, so three targets dedup to one and two
+#   vanish from the gate's input before anything is compared.
+#
+#   `comm` DESYNCS. It compares byte-wise while `sort` ordered by locale, so it
+#   printed `comm: input is not in sorted order` on every run and silently
+#   skipped matches in the disordered window.
+#
+# Net effect: a genuine ghost (`.PHONY`, no recipe, `make X` says "Nothing to
+# be done" and exits 0) sailed through as `ghost-check: no ghost targets`,
+# exit 0. Two of four probe names were missed — unreliable rather than
+# uniformly broken, which is why it looked fine for so long. CI mostly runs
+# C.UTF-8, so the gate was WEAKER on a workstation than in CI, backwards from
+# what a pre-commit gate should be.
+#
+# The same reasoning applies to the other pinned sites in this file: any
+# `sort -u` deduping names or paths can silently drop entries, so the gates
+# that dedup CI targets, tidy file lists and hook stages pin it too.
 ghost-check: ## Verify every .PHONY target has a recipe
 	@db=$$($(_STD_TMP)); phony=$$($(_STD_TMP)); norecipe=$$($(_STD_TMP)); \
 	 trap 'rm -f "$$db" "$$phony" "$$norecipe"' EXIT; \
 	 $(MAKE) -rpn --no-print-directory .std-db-goal >"$$db" 2>/dev/null; \
 	 sed -n 's/^\.PHONY:[ ]*//p' "$$db" | tr ' ' '\n' | sed '/^$$/d' \
-	     | sort -u >"$$phony"; \
+	     | LC_ALL=C sort -u >"$$phony"; \
 	 awk '/^[a-zA-Z0-9_.-]+:/ { n = $$0; sub(/:.*/, "", n); \
 	                            p = $$0; sub(/^[^:]*:/, "", p); \
 	                            b = 1; r = 0; next } \
 	      b && / to execute/ { r = 1 } \
 	      b && /^$$/ { if (!r && p !~ /[^[:space:]]/) print n; b = 0 } \
 	      END { if (b && !r && p !~ /[^[:space:]]/) print n }' "$$db" \
-	     | sort -u >"$$norecipe"; \
-	 ghosts=$$(comm -12 "$$phony" "$$norecipe"); \
+	     | LC_ALL=C sort -u >"$$norecipe"; \
+	 ghosts=$$(LC_ALL=C comm -12 "$$phony" "$$norecipe"); \
 	 if [ -n "$$ghosts" ]; then \
 	     echo "ERROR: .PHONY targets with no recipe behind them:"; \
 	     printf '  %s\n' $$ghosts; \
@@ -810,6 +937,180 @@ ghost-check: ## Verify every .PHONY target has a recipe
 	     exit 1; \
 	 fi; \
 	 echo "ghost-check: no ghost targets"
+
+# Every `entry: make -s <target>` in .pre-commit-config.yaml must name a target
+# make actually defines.
+#
+# The convention is that hooks dispatch through make, so the config holds make
+# TARGET NAMES -- and nothing checked they resolve. doppler pointed a hook at
+# `make -s lint-clang-tidy` and pinned clang-tidy in its dev group, but never
+# added it to LINT_TOOLS. The target did not exist, so the hook could only die
+# with "No rule to make target", and the commit that introduced it said "every
+# pre-commit hook dispatches through make". It stayed broken because three
+# things hid it at once: `ghost-check` looks for a .PHONY with no recipe and an
+# UNDECLARED target is not a ghost, the hook was `stages: [pre-push]` while
+# `setup` installs only the pre-commit stage, and `lint` runs pre-commit at the
+# default stage so CI never reached it either. Filed as
+# just-buildit/just-makeit#943.
+#
+# Reads make's DATABASE rather than trying each target: `make -n <target>`
+# expands recipes and, by the documented recursion rule, still EXECUTES lines
+# containing $(MAKE). Probing a target must not run it.
+#
+# Inert with no config file, so a repo without pre-commit is not asked to care.
+hook-dispatch-check: ## Verify every pre-commit `make` dispatch names a real target
+	@cfg=.pre-commit-config.yaml; \
+	 if [ ! -f "$$cfg" ]; then \
+	     echo "hook-dispatch-check: no $$cfg — nothing to check"; \
+	     exit 0; \
+	 fi; \
+	 db=$$($(_STD_TMP)); trap 'rm -f "$$db"' EXIT; \
+	 $(MAKE) -rpn --no-print-directory .std-db-goal >"$$db" 2>/dev/null; \
+	 n=0; missing=""; \
+	 for t in $$(sed -n "s/^[[:space:]]*entry:[[:space:]]*make[[:space:]]\{1,\}\(-s[[:space:]]\{1,\}\)\{0,1\}\([a-zA-Z0-9_.-]\{1,\}\).*/\2/p" "$$cfg"); do \
+	     n=$$((n + 1)); \
+	     grep -q "^$$t:" "$$db" || missing="$$missing $$t"; \
+	 done; \
+	 if [ -n "$$missing" ]; then \
+	     echo "ERROR: pre-commit dispatches to make targets that do not exist:"; \
+	     printf '  %s\n' $$missing; \
+	     echo ""; \
+	     echo "  Each hook runs \`make <target>\` and can only fail with"; \
+	     echo "  'No rule to make target'. Add the target, or fix the entry."; \
+	     exit 1; \
+	 fi; \
+	 : "A config that exists and matched NOTHING is a disarmed gate, not a"; \
+	 : "clean one. Quoting every entry -- a valid YAML rewrite -- moved the"; \
+	 : "shape out from under the pattern and took all 8 dispatches with it,"; \
+	 : "green: the thesis of this gate, reproduced inside the gate."; \
+	 if [ "$$n" -eq 0 ]; then \
+	     echo "ERROR: $$cfg exists but no \`make\` dispatch matched."; \
+	     echo ""; \
+	     echo "  Either no hook dispatches through make -- in which case delete"; \
+	     echo "  this gate deliberately -- or the \`entry:\` shape has moved and"; \
+	     echo "  the pattern no longer sees it. A gate matching nothing is"; \
+	     echo "  indistinguishable from a gate passing, which is what it was"; \
+	     echo "  written to prevent."; \
+	     exit 1; \
+	 fi; \
+	 echo "hook-dispatch-check: $$n make dispatch(es) resolve"
+
+# ── hook-stage-check ────────────────────────────────────────────────────────
+#
+# `hook-dispatch-check` above proves each hook names a real target. It says
+# NOTHING about whether the hook is ever reached, and that is the hole that let
+# two of doppler's gates run nowhere for months (doppler#737).
+#
+# The mechanism, which is worth stating because every part of it reads healthy
+# on its own:
+#
+#   * a hook at `stages: [pre-push]` is installed by `pre-commit install` ONLY
+#     when the config also declares `default_install_hook_types`. Without it,
+#     plain `pre-commit install` writes `.git/hooks/pre-commit` and nothing
+#     else, so the pre-push hook has no git hook to fire from;
+#   * `make lint` runs pre-commit at the DEFAULT stage, so CI does not reach it
+#     either.
+#
+# Both halves are individually reasonable. Together they produce a hook that is
+# configured, dispatches correctly, passes `hook-dispatch-check`, and executes
+# on no machine and in no pipeline. Its findings count is zero because it never
+# looked -- a dead gate that happens to be green, which is the one failure mode
+# nothing downstream can distinguish from success.
+#
+# THE TRAP, recorded because it cost a wrong plan once: clearing a backlog does
+# not revive such a gate. The backlog is why it cannot be switched on; it is
+# not why it does not run. A repo that fixes every finding still runs the tool
+# nowhere.
+#
+# Checked STATICALLY, from the config alone, because that is the property that
+# survives a fresh clone: CI has no `.git/hooks` to inspect, and a check that
+# passes only on a developer machine that happens to have run `make setup` is
+# the same class of illusion being fixed.
+#
+# `manual` is exempt and deliberately so: it means "never run automatically",
+# which is a choice rather than an accident. A `manual` hook that no target
+# invokes is still dead, but that is not knowable from this file.
+hook-stage-check: ## Verify every pre-commit hook stage is actually installed
+	@cfg=.pre-commit-config.yaml; \
+	 if [ ! -f "$$cfg" ]; then \
+	     echo "hook-stage-check: no $$cfg — nothing to check"; \
+	     exit 0; \
+	 fi; \
+	 : "Both YAML spellings, because either is valid and a gate that reads"; \
+	 : "only one goes quietly blind the day someone reformats the file --"; \
+	 : "which is exactly how hook-dispatch-check lost all 8 dispatches."; \
+	 parsed=$$(awk ' \
+	   function emit(kind, list,   n, i, arr) { \
+	     gsub(/[][]/, " ", list); gsub(/,/, " ", list); \
+	     n = split(list, arr, /[[:space:]]+/); \
+	     for (i = 1; i <= n; i++) if (arr[i] != "") print kind "\t" arr[i]; \
+	   } \
+	   /^[[:space:]]*#/ { next } \
+	   /^[[:space:]]*$$/ { next } \
+	   /^[[:space:]]*default_install_hook_types:/ { \
+	     v = $$0; sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[[:space:]]*#.*/, "", v); \
+	     if (v ~ /[[]/) { emit("install", v); mode = "" } else { mode = "install" } \
+	     next \
+	   } \
+	   /^[[:space:]]*stages:/ { \
+	     v = $$0; sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[[:space:]]*#.*/, "", v); \
+	     if (v ~ /[[]/) { emit("stage", v); mode = "" } else { mode = "stage" } \
+	     next \
+	   } \
+	   mode != "" && /^[[:space:]]*-[[:space:]]*/ { \
+	     v = $$0; sub(/^[[:space:]]*-[[:space:]]*/, "", v); sub(/[[:space:]]*#.*/, "", v); \
+	     if (v != "") print mode "\t" v; \
+	     next \
+	   } \
+	   { mode = "" } \
+	 ' "$$cfg"); \
+	 : "Old pre-commit spelled these without the prefix, and a config using"; \
+	 : "the legacy name is correctly wired -- normalise rather than fail it."; \
+	 norm() { \
+	     case "$$1" in \
+	         commit) echo pre-commit ;; \
+	         push) echo pre-push ;; \
+	         merge-commit) echo pre-merge-commit ;; \
+	         *) echo "$$1" ;; \
+	     esac; \
+	 }; \
+	 installed=$$(printf '%s\n' "$$parsed" | sed -n 's/^install\t//p'); \
+	 : "No declaration means pre-commit installs the pre-commit type ALONE."; \
+	 : "That default is the whole bug: it is silent, and it is not nothing."; \
+	 if [ -z "$$installed" ]; then installed=pre-commit; declared=0; else declared=1; fi; \
+	 inst=""; for s in $$installed; do inst="$$inst $$(norm $$s)"; done; \
+	 n=0; orphan=""; \
+	 for s in $$(printf '%s\n' "$$parsed" | sed -n 's/^stage\t//p' | LC_ALL=C sort -u); do \
+	     s=$$(norm "$$s"); \
+	     [ "$$s" = manual ] && continue; \
+	     n=$$((n + 1)); \
+	     case " $$inst " in *" $$s "*) ;; *) orphan="$$orphan $$s" ;; esac; \
+	 done; \
+	 if [ -n "$$orphan" ]; then \
+	     echo "ERROR: pre-commit hooks are configured at a stage nothing installs:"; \
+	     printf '  %s\n' $$orphan; \
+	     echo ""; \
+	     if [ "$$declared" = 0 ]; then \
+	         echo "  $$cfg declares no \`default_install_hook_types\`, so"; \
+	         echo "  \`pre-commit install\` writes .git/hooks/pre-commit and nothing"; \
+	         echo "  else. \`make lint\` runs the default stage, so CI does not reach"; \
+	         echo "  these either. They run NOWHERE — zero findings because they"; \
+	         echo "  never looked."; \
+	     else \
+	         echo "  $$cfg declares default_install_hook_types ($$inst )"; \
+	         echo "  but not the stage(s) above, so nothing installs them."; \
+	     fi; \
+	     echo ""; \
+	     echo "  Fix by giving them an execution home, then PROVE IT BY SABOTAGE:"; \
+	     echo "    default_install_hook_types: [pre-commit,$$orphan]"; \
+	     echo "  or run the stage from a make target CI invokes:"; \
+	     echo "    \$$(PRE_COMMIT) run --all-files --hook-stage <stage>"; \
+	     echo ""; \
+	     echo "  Clearing the tool's findings does NOT fix this. A backlog is why"; \
+	     echo "  a gate cannot be switched on; it is not why it does not run."; \
+	     exit 1; \
+	 fi; \
+	 echo "hook-stage-check: $$n non-default stage(s) have an execution home"
 
 # ── Help ─────────────────────────────────────────────────────────────────────
 # Generated from the `## description` on each active target's rule line. Never
@@ -834,7 +1135,7 @@ help: ## Show this message
 	     [ -z "$$ts" ] && continue; \
 	     echo ""; \
 	     echo "$${c_title}$$s:$${c_reset}"; \
-	     for t in $$(printf '%s\n' $$ts | sort); do \
+	     for t in $$(printf '%s\n' $$ts | LC_ALL=C sort); do \
 	         $(_STD_DESC); \
 	         printf "  $${c_target}%-*s$${c_reset}  %s\n" "$$w" "$$t" "$$d"; \
 	     done; \
