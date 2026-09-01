@@ -152,34 +152,28 @@ just-runit|sed -n 's/^_VERSION="\(.*\)"/\1/p' src/just_bashit/just-runit
 src/ headers|grep -h '^# PACKAGE' src/just_bashit/*.sh | sed 's/.*version \([0-9.]*\).*/\1/' | sort -u
 endef
 
-# Select the run BY TAG, and wait for it to exist.
+# The release watcher is VENDORED from canonical and gated by standard-check;
+# everything repo-specific is here.
 #
-# `--limit 1` alone is a race: `ship` is `tag-release` then `release-watch`, and
-# the push returns before GitHub has created the workflow run, so the newest
-# row is still the PREVIOUS release. Shipping v0.4.1 watched the run that had
-# failed the night before and reported the release as failed while it went on
-# to succeed — a watcher that can report the wrong run is worse than none,
-# because the failure it invents is indistinguishable from a real one.
+# This used to be an inline `define` -- a THIRD implementation of release
+# watching across the org, at the lowest capability level of the three: it
+# watched, and did not auto-recover a pre-publish flake or verify the published
+# artifacts afterwards.
 #
-# A tag-triggered run carries the tag in headBranch, so --branch pins it to
-# exactly this release. The wait covers creation latency, which is a second or
-# two; 60s of headroom costs nothing on the happy path and turns "no run yet"
-# into a clear error rather than an empty run ID.
-define RELEASE_WATCH_CMD
-@tag="v$(VERSION)"; id=""; \
- for _ in $$(seq 1 30); do \
-     id=$$(gh run list --workflow=release.yml --branch "$$tag" \
-           --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null); \
-     [ -n "$$id" ] && break; \
-     sleep 2; \
- done; \
- if [ -z "$$id" ]; then \
-     echo "ERROR: no release run for $$tag after 60s"; \
-     echo "  check: gh run list --workflow=release.yml --branch $$tag"; \
-     exit 1; \
- fi; \
- echo "Watching release run $$id ($$tag)"; \
- gh run watch --exit-status "$$id"
-endef
+# It also still carried the defect its own comment described. Selecting on
+# `--branch "$tag"` fixed the `--limit 1` race that broke v0.4.1, and stopped
+# there: a tag that is DELETED and RE-PUSHED leaves a run from the previous
+# push carrying the same headBranch, and a tag push returns before GitHub
+# creates the new run -- so the wait loop is satisfied immediately by the stale
+# one. just-makeit hit exactly that on v0.74.0 (2026-09-01) and canonical now
+# matches on the tag's COMMIT as well as its name
+# (just-buildit.github.io#36).
+RELEASE_WATCH_CMD = REPO=just-buildit/just-bashit RW_PKG=just-bashit \
+                        scripts/release-watch.sh "$(VERSION)"
+
+# ── Vendored from canonical ──────────────────────────────────────────────────
+# Verbatim copies the drift gate holds to canonical, alongside standard.mk
+# itself. Edit canonical and re-vendor; never edit these in place.
+VENDORED_FILES = scripts/release-watch.sh
 
 include standard.mk
