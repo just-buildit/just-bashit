@@ -19,6 +19,14 @@ repos:
     rev: v3.13.1-1
     hooks:
       - id: shfmt
+        # Vendored files are excluded, and the two rules are otherwise JOINTLY
+        # IMPOSSIBLE: shfmt reformats every shell file it is given, and
+        # `standard-check` requires a file in VENDORED_FILES to be byte-identical
+        # to canonical. Formatting one guarantees the drift gate fails; passing
+        # the drift gate guarantees the formatter reports a diff. Neither is
+        # wrong on its own -- the vendored copy simply is not this repo's code
+        # to format. Change it at canonical and re-vendor.
+        exclude: ^scripts/release-watch\.sh$
 
   # Dispatches inward so the hook cannot format differently from `make format`.
   # Versions — mdformat and every plugin — come from pyproject.toml's dev group
