@@ -564,3 +564,63 @@ EOF
 	assert_output --partial "jb.toml is deprecated"
 	assert_output --partial "bootstrap.toml"
 }
+
+# ---------------------------------------------------------------------------
+# `apt-get update` must not be the gate. A CI runner carries third-party apt
+# sources the project never chose (GitHub's Ubuntu image ships
+# packages.microsoft.com), and `apt-get update` exits non-zero if ANY of them
+# fails. Measured 2026-08-12: a 403 there killed a doppler matrix leg before an
+# install was ever attempted, while four sibling legs on the same commit passed.
+#
+# Both directions are asserted, because a fix that cannot fail is not a fix:
+# a broken source must NOT fail the run, and a missing package still MUST.
+# ---------------------------------------------------------------------------
+
+# A shim dir where `sudo` just drops its own name and `apt-get` behaves as the
+# test dictates via APT_UPDATE_RC / APT_INSTALL_RC.
+_apt_shim() {
+	local shim="${BATS_TEST_TMPDIR}/aptshim"
+	mkdir -p "${shim}"
+	cat >"${shim}/sudo" <<'EOF'
+#!/usr/bin/env bash
+exec "$@"
+EOF
+	cat >"${shim}/apt-get" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+update)  echo "apt-get update ran";  exit "${APT_UPDATE_RC:-0}"  ;;
+install) echo "apt-get install ran"; exit "${APT_INSTALL_RC:-0}" ;;
+esac
+exit 0
+EOF
+	chmod +x "${shim}/sudo" "${shim}/apt-get"
+	echo "${shim}"
+}
+
+@test 'a broken third-party apt source does not block the install' {
+	local shim
+	shim="$(_apt_shim)"
+	APT_UPDATE_RC=100 APT_INSTALL_RC=0 \
+		PATH="${shim}:${PATH}" run install-deps.sh -s apt "${INLINE_FILE}"
+	assert_success
+	assert_output --partial "apt-get install ran"
+	assert_output --partial "apt-get update reported errors"
+}
+
+@test 'a package that cannot be installed still fails the run' {
+	local shim
+	shim="$(_apt_shim)"
+	APT_UPDATE_RC=100 APT_INSTALL_RC=100 \
+		PATH="${shim}:${PATH}" run install-deps.sh -s apt "${INLINE_FILE}"
+	assert_failure
+	assert_output --partial "apt-get install ran"
+}
+
+@test 'a clean update stays silent about errors' {
+	local shim
+	shim="$(_apt_shim)"
+	APT_UPDATE_RC=0 APT_INSTALL_RC=0 \
+		PATH="${shim}:${PATH}" run install-deps.sh -s apt "${INLINE_FILE}"
+	assert_success
+	refute_output --partial "reported errors"
+}
