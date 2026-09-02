@@ -220,6 +220,23 @@ jobs:
           fi
           echo "All required jobs passed"
 
+  trigger-mirror:
+    name: Trigger docs mirror refresh
+    # Nudges just-buildit.github.io's mirror.yml (repository_dispatch:
+    # mirror) to pull the fresh get-jb.sh/just-runit immediately instead of
+    # waiting for its daily cron. Never blocks anything else in this repo —
+    # not a required check, doesn't gate merges.
+    needs: ci-passed
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci-passed.result == 'success'
+    steps:
+      - name: Dispatch mirror refresh
+        env:
+          GH_TOKEN: ${{ secrets.MIRROR_DISPATCH_TOKEN }}
+        run: |
+          gh api repos/just-buildit/just-buildit.github.io/dispatches \
+            -f event_type=mirror
+
   deploy-docs:
     needs: [coverage, lint]
     runs-on: ubuntu-latest
