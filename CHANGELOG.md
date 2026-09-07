@@ -52,6 +52,22 @@
     hardcoded `"sudo"` will still break a root container — the documented
     examples no longer contain one.
 
+### Fixed
+
+- **`toml.sh` silently parsed a CRLF file as empty.** `read` strips the
+    newline but not the carriage return, and both places that recognise a
+    section header are exact matches — `[[ "$line" == "$target" ]]` in
+    `toml_get_array`, and a `$`-anchored regex in `toml_discover_groups`. A
+    trailing CR failed both, so every function returned success with no
+    output.
+
+    On Windows, where `actions/checkout` writes CRLF, that meant
+    `install-deps` found no packages in a perfectly valid `bootstrap.toml`.
+    It went unnoticed because every fixture in the suite is written with
+    `printf`, so LF was the only line ending ever exercised — the bug was
+    only reachable through a file that had been through a checkout, which the
+    tests never used. The regression tests now build CRLF fixtures explicitly.
+
 ### Changed
 
 - **CI installs from `bootstrap.toml` instead of repeating the package list

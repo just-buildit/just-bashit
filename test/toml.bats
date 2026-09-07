@@ -300,3 +300,70 @@ _common_setup
 	assert_success
 	assert_output --regexp "${HELP_REGEX}"
 }
+
+# ---------------------------------------------------------------------------
+# CRLF
+#
+# A TOML file checked out on Windows has CRLF endings and `read` strips only
+# the newline. The section test is an exact string compare and the group
+# discovery regex is anchored at $, so a trailing CR made both fail silently:
+# the file parsed to no output rather than to an error. Every fixture in this
+# suite is written with printf, so LF was the only ending ever exercised until
+# CI parsed the repo's own checked-out bootstrap.toml on Windows.
+# ---------------------------------------------------------------------------
+
+_crlf() { sed 's/$/\r/'; }
+
+@test 'toml_get_packages reads a CRLF file' {
+	local f="${BATS_TEST_TMPDIR}/inline.toml"
+	printf '[runtime.apt]\npackages = ["curl", "wget"]\n' | _crlf >"${f}"
+	run toml_get_packages runtime apt <"${f}"
+	assert_success
+	assert_line "curl"
+	assert_line "wget"
+}
+
+@test 'toml_get_packages reads a CRLF multiline array' {
+	local f="${BATS_TEST_TMPDIR}/multi.toml"
+	printf '[runtime.apt]\npackages = [\n    "curl",\n    "wget",\n]\n' |
+		_crlf >"${f}"
+	run toml_get_packages runtime apt <"${f}"
+	assert_success
+	assert_line "curl"
+	assert_line "wget"
+}
+
+@test 'toml_get_cmd reads a CRLF file' {
+	local f="${BATS_TEST_TMPDIR}/cmd.toml"
+	printf '[runtime.apt]\ncmd = ["echo", "hi"]\n' | _crlf >"${f}"
+	run toml_get_cmd runtime apt <"${f}"
+	assert_success
+	assert_line "echo"
+	assert_line "hi"
+}
+
+@test 'toml_discover_groups reads a CRLF file' {
+	local f="${BATS_TEST_TMPDIR}/groups.toml"
+	printf '[runtime.apt]\npackages = ["curl"]\n\n[dev.apt]\npackages = ["git"]\n' |
+		_crlf >"${f}"
+	run toml_discover_groups <"${f}"
+	assert_success
+	assert_output "runtime,dev"
+}
+
+@test 'toml_get_tool_groups reads a CRLF file' {
+	local f="${BATS_TEST_TMPDIR}/tool.toml"
+	printf '[tools.install-deps]\ngroups = ["runtime", "dev"]\n' | _crlf >"${f}"
+	run toml_get_tool_groups install-deps <"${f}"
+	assert_success
+	assert_output "runtime,dev"
+}
+
+@test 'a CRLF section header does not leak the CR into a package name' {
+	local f="${BATS_TEST_TMPDIR}/leak.toml"
+	printf '[runtime.apt]\npackages = ["curl"]\n' | _crlf >"${f}"
+	run toml_get_packages runtime apt <"${f}"
+	assert_success
+	# $'curl\r' would install nothing and report no error.
+	assert_output "curl"
+}
