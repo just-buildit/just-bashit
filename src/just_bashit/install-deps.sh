@@ -14,6 +14,7 @@ source "${_SCRIPT_DIR}/pkg.sh"
 
 DRY_RUN=0
 VERBOSE=0
+SUDO_MODE="auto"
 SECTION_OVERRIDE=""
 GROUPS_STR=""
 GROUPS_EXPLICIT=0
@@ -52,6 +53,12 @@ read -r -d '' HELP <<-'EOF' || true
 
 	  Supported package managers: apt, pacman, brew, dnf, zypper, apk, msys2.
 
+	  Privilege escalation is DERIVED, not assumed: sudo is used only when
+	  the manager needs root, the caller is not already root, and sudo is
+	  on PATH. A root CI container therefore needs no flag and no sudo
+	  package. --sudo / --no-sudo force it either way. `cmd` arrays are
+	  still run verbatim — leave sudo out of them and they work in both.
+
 	  Default groups: all groups found in the file. To restrict defaults,
 	  set groups = [...] under [tools.install-deps] in bootstrap.toml.
 
@@ -62,6 +69,9 @@ read -r -d '' HELP <<-'EOF' || true
 	  -s / --section SECTION   Override auto-detected package manager.
 	  -g / --groups  GROUP     Comma-separated groups to install (overrides all
 	                           defaults; e.g. -g runtime or -g runtime,dev).
+	       --no-sudo           Never prefix sudo (root containers, CI images
+	                           with no sudo package installed).
+	       --sudo              Always prefix sudo, even when already root.
 	       --template [PATH]   Write a scaffold deps.toml to PATH (default: stdout).
 
 	Arguments:
@@ -94,6 +104,14 @@ while [[ $# -gt 0 ]]; do
 		GROUPS_STR="${2:?Option $1 requires an argument.}"
 		GROUPS_EXPLICIT=1
 		shift 2
+		;;
+	--no-sudo)
+		SUDO_MODE="no"
+		shift
+		;;
+	--sudo)
+		SUDO_MODE="yes"
+		shift
 		;;
 	--template)
 		TEMPLATE=1
@@ -136,73 +154,92 @@ _template() {
 }
 
 # ---------------------------------------------------------------------------
+# _resolve_sudo: decide once whether install commands get a sudo prefix.
+#
+# Sets _SUDO to "sudo" or "" — ONE declaration, read by both the dry-run
+# printer and the executor in _run, so what -n prints is exactly what would
+# have run. The auto derivation is what lets a single bootstrap.toml serve a
+# workstation (unprivileged, sudo present) and a CI container (already root,
+# no sudo package installed) with no flag and no second package list.
+#
+# brew is exempt on purpose: Homebrew refuses to run under sudo and manages
+# its own prefix, so it never gets a prefix even with --sudo.
+# ---------------------------------------------------------------------------
+_SUDO=""
+_resolve_sudo() {
+	local section="$1"
+	if [ "${section}" = "brew" ]; then
+		_SUDO=""
+		return
+	fi
+	case "${SUDO_MODE}" in
+	no)
+		_SUDO=""
+		;;
+	yes)
+		_SUDO="sudo"
+		;;
+	*)
+		if [ "$(id -u)" -eq 0 ]; then
+			_SUDO=""
+		elif command -v sudo >/dev/null 2>&1; then
+			_SUDO="sudo"
+		else
+			# Not root and no sudo: run bare and let the package manager
+			# report the permission failure itself. Guessing a different
+			# escalation tool here would only hide the real cause.
+			printf 'warning: not root and sudo not found; running %s\n' \
+				"${section} unprivileged" >&2
+			_SUDO=""
+		fi
+		;;
+	esac
+}
+
+# ---------------------------------------------------------------------------
+# _run: print (dry run) or execute one install command, sudo prefix included.
+# ---------------------------------------------------------------------------
+_run() {
+	if [ "${DRY_RUN}" -eq 1 ]; then
+		(
+			IFS=' '
+			echo "${_SUDO:+${_SUDO} }$*"
+		)
+		return
+	fi
+	if [ -n "${_SUDO}" ]; then
+		"${_SUDO}" "$@"
+	else
+		"$@"
+	fi
+}
+
+# ---------------------------------------------------------------------------
 # _do_install: run or print the install command for the detected section.
 # ---------------------------------------------------------------------------
 _do_install() {
 	local section="$1"
 	shift
+	_resolve_sudo "${section}"
 	case "${section}" in
 	apt)
-		if [ "${DRY_RUN}" -eq 1 ]; then
-			echo "sudo apt-get update"
-			(
-				IFS=' '
-				echo "sudo apt-get install -y --no-install-recommends $*"
-			)
-			return
-		fi
-		sudo apt-get update
-		sudo apt-get install -y --no-install-recommends "$@"
+		_run apt-get update
+		_run apt-get install -y --no-install-recommends "$@"
 		;;
 	pacman)
-		if [ "${DRY_RUN}" -eq 1 ]; then
-			(
-				IFS=' '
-				echo "sudo pacman -Sy --needed --noconfirm $*"
-			)
-			return
-		fi
-		sudo pacman -Sy --needed --noconfirm "$@"
+		_run pacman -Sy --needed --noconfirm "$@"
 		;;
 	brew)
-		if [ "${DRY_RUN}" -eq 1 ]; then
-			(
-				IFS=' '
-				echo "brew install $*"
-			)
-			return
-		fi
-		brew install "$@"
+		_run brew install "$@"
 		;;
 	dnf)
-		if [ "${DRY_RUN}" -eq 1 ]; then
-			(
-				IFS=' '
-				echo "sudo dnf install -y $*"
-			)
-			return
-		fi
-		sudo dnf install -y "$@"
+		_run dnf install -y "$@"
 		;;
 	zypper)
-		if [ "${DRY_RUN}" -eq 1 ]; then
-			(
-				IFS=' '
-				echo "sudo zypper install -y $*"
-			)
-			return
-		fi
-		sudo zypper install -y "$@"
+		_run zypper install -y "$@"
 		;;
 	apk)
-		if [ "${DRY_RUN}" -eq 1 ]; then
-			(
-				IFS=' '
-				echo "sudo apk add $*"
-			)
-			return
-		fi
-		sudo apk add "$@"
+		_run apk add "$@"
 		;;
 	msys2)
 		# msys2 is Windows — always print instructions, never run.

@@ -15,7 +15,12 @@ source = "src/get-jb.sh"
 source = "just-bashit:setup-system"
 
 # System packages this repo needs to build and test itself — what `make
-# install-deps` installs, and what CI installs inline per container image.
+# install-deps` installs, and, since CI stopped repeating the list per
+# container image, the only copy of it. CI now bootstraps just what
+# `actions/checkout` needs (git, plus a trust store where absent) and then
+# runs install-deps.sh against this file. The containers run as root with no
+# sudo package: the script derives that rather than being told, which is what
+# lets one list serve both CI and a workstation.
 #
 # ssh-keygen is here because without it three setup-system tests `skip`
 # rather than fail, and a suite that quietly tests less than it appears to is

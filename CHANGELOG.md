@@ -2,7 +2,40 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`install-deps` derives whether it needs `sudo`, with `--sudo` /
+    `--no-sudo` to force it.**
+
+    The prefix was hardcoded, which made `bootstrap.toml` unusable as the
+    single source of dependencies: a CI container runs as root and ships no
+    `sudo` binary, so every run of the list had to be duplicated inline in
+    the workflow, per distro. Both copies then drifted independently.
+
+    A command is now prefixed only when the manager needs root, the caller is
+    not already root, and `sudo` resolves on `PATH` — so the same invocation
+    works on a workstation and in a root container with no flag. `brew` is
+    never prefixed; Homebrew refuses to run under `sudo`. Not root and no
+    `sudo` warns on stderr and runs unprivileged, letting the package manager
+    report the real permission failure rather than guessing at another
+    escalation tool.
+
+    The decision is made once and read by both the executor and the
+    `--dry-run` printer, so `-n` output is exactly what would have run.
+    `cmd` arrays are still executed verbatim and are the one place a
+    hardcoded `"sudo"` will still break a root container — the documented
+    examples no longer contain one.
+
 ### Changed
+
+- **CI installs from `bootstrap.toml` instead of repeating the package list
+    per container image.** Each job now bootstraps only what
+    `actions/checkout` needs — `git`, plus a TLS trust store on the images
+    that ship none, plus `bash` on Alpine — and then runs `install-deps.sh`
+    against the manifest. The four inline Linux lists, the macOS `brew   install` line and the coverage job's copy are gone; the dev dependency
+    list now exists exactly once. Windows is the remaining carve-out:
+    `msys2/setup-msys2` takes its package list as an action input, before
+    checkout, so `[dev.msys2]` is still mirrored in the workflow.
 
 - **BREAKING: `jb.toml` is now `bootstrap.toml`, and `jb` / `just-buildit` are
     no longer runner names.**
