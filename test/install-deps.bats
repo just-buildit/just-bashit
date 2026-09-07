@@ -823,3 +823,16 @@ _run_clean() {
 	assert_output --partial "http_proxy"
 	assert_output --partial "no_proxy"
 }
+
+@test 'a CRLF bootstrap.toml installs the same packages as an LF one' {
+	# The end-to-end symptom of the toml.sh CRLF bug: on Windows, where
+	# actions/checkout writes CRLF, install-deps found no packages at all.
+	local dir="${BATS_TEST_TMPDIR}/crlf"
+	mkdir -p "${dir}"
+	printf '[dev.apt]\npackages = ["git", "make"]\n' |
+		sed 's/$/\r/' >"${dir}/bootstrap.toml"
+	cd "${dir}"
+	run install-deps.sh -n --no-sudo -s apt
+	assert_success
+	assert_line "apt-get install -y --no-install-recommends git make"
+}
