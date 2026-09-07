@@ -169,7 +169,10 @@ while IFS= read -r path; do
 	done < <(grep -nF -- "${current}" "${path}")
 done < <(
 	find src/just_bashit -type f
-	find . -maxdepth 1 -name '*.toml' -printf '%P\n'
+	# A glob, not `find -maxdepth 1 -printf`: -printf is GNU-only and BSD
+	# find just errors, which would have left the root manifests unscanned
+	# on macOS — the gate silently checking less than it claims to.
+	printf '%s\n' *.toml
 )
 
 if ((${#uncovered[@]} > 0)); then
