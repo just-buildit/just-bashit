@@ -46,30 +46,40 @@ jobs:
             primary: 'false'
 
     steps:
-      - name: Install dependencies (debian)
+      # Only what `actions/checkout` itself needs — git, and a TLS trust store
+      # on the images that ship none. The real dependency list is NOT repeated
+      # here: it lives once in bootstrap.toml and is installed below, after
+      # checkout. Keeping a second copy in this file is how the ssh-keygen
+      # package drifted out of sync per distro in the first place.
+      - name: Bootstrap checkout prerequisites (debian)
         if: matrix.distro == 'debian'
-        run: |
-          apt-get update && apt-get install -y --no-install-recommends \
-            ca-certificates make git bats curl openssh-client
+        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates git
 
-      - name: Install dependencies (arch)
+      - name: Bootstrap checkout prerequisites (arch)
         if: matrix.distro == 'arch'
-        run: pacman -Sy --noconfirm --needed git make diffutils bats curl openssh
+        run: pacman -Sy --noconfirm --needed git
 
-      - name: Install dependencies (fedora)
+      - name: Bootstrap checkout prerequisites (fedora)
         if: matrix.distro == 'fedora'
-        run: dnf install -y git make diffutils bats curl openssh-clients
+        run: dnf install -y git
 
-      - name: Install dependencies (alpine)
+      # alpine has no bash until this step, so it is the one image whose
+      # bootstrap must run under sh — and must install bash, since every step
+      # after it (and install-deps.sh) is bash.
+      - name: Bootstrap checkout prerequisites (alpine)
         if: matrix.distro == 'alpine'
         shell: sh
-        run: |
-          apk add --update --no-cache \
-            bash git make bats coreutils curl diffutils openssh-keygen
+        run: apk add --update --no-cache bash git
 
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+
+      # Every container above runs as root with no sudo package installed.
+      # install-deps.sh derives that and omits the prefix, so one invocation
+      # covers all four distros and the workstation case unchanged.
+      - name: Install dependencies (bootstrap.toml)
+        run: bash src/just_bashit/install-deps.sh --verbose
 
       - name: Run tests
         run: make test
@@ -96,17 +106,21 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Install dependencies
-        run: brew install bash coreutils diffutils bats-core
+      # The macOS image already ships git, so checkout needs no bootstrap and
+      # the brew list comes straight from bootstrap.toml. The runner is an
+      # unprivileged user with passwordless sudo, but brew is never prefixed
+      # with it — Homebrew refuses to run as root.
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install dependencies (bootstrap.toml)
+        run: bash src/just_bashit/install-deps.sh --verbose
 
       - name: Export GNU utilities to PATH
         run: |
           echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           echo "$(brew --prefix bash)/bin" >> "$GITHUB_PATH"
-
-      - uses: actions/checkout@v7
-        with:
-          submodules: recursive
 
       - name: Run tests
         run: make test
@@ -142,14 +156,15 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Install dependencies
-        run: |
-          apt-get update && apt-get install -y --no-install-recommends \
-            ca-certificates make git bats curl openssh-client
+      - name: Bootstrap checkout prerequisites
+        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates git
 
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+
+      - name: Install dependencies (bootstrap.toml)
+        run: bash src/just_bashit/install-deps.sh --verbose
 
       - name: Run tests with coverage
         run: make coverage

@@ -155,9 +155,10 @@ for a section with `cmd`. The array is executed verbatim; `packages` is
 ignored for that group/section:
 
 ```toml
-# pin via package cache on Arch
+# pin via package cache on Arch. No "sudo" element: cmd is run verbatim,
+# so hardcoding it here breaks the same file in a root container.
 [runtime.pacman]
-cmd = ["sudo", "pacman", "-U",
+cmd = ["pacman", "-U", "--noconfirm",
        "/var/cache/pacman/pkg/zeromq-4.3.5-3-x86_64.pkg.tar.zst"]
 
 # post-install hook on Debian
@@ -234,13 +235,74 @@ ______________________________________________________________________
 | `-v`         | `--verbose`         | Print section, groups, and packages before acting          |
 | `-s SECTION` | `--section SECTION` | Override auto-detected package manager                     |
 | `-g GROUP`   | `--groups GROUP`    | Comma-separated groups to install (overrides all defaults) |
+|              | `--no-sudo`         | Never prefix `sudo` (root containers, images without it)   |
+|              | `--sudo`            | Always prefix `sudo`, even when already root               |
 |              | `--template [PATH]` | Write scaffold deps.toml to PATH, or stdout if omitted     |
+
+______________________________________________________________________
+
+## Privileges — one file for the workstation and for CI
+
+`install-deps` **derives** whether a `sudo` prefix is needed rather than
+assuming one. A command is prefixed only when all three hold:
+
+1. the package manager needs root (`brew` never does),
+1. the caller is not already root, and
+1. `sudo` resolves on `PATH`.
+
+That is what lets a single `bootstrap.toml` drive both a developer's machine
+and CI. A container image runs as root and usually has no `sudo` package at
+all, so the same invocation works in both places with no flag:
+
+```yaml
+# .github/workflows/ci.yml — inside a debian:latest container
+- name: Bootstrap checkout prerequisites
+  run: apt-get update && apt-get install -y --no-install-recommends ca-certificates git
+
+- uses: actions/checkout@v7
+
+- name: Install dependencies (bootstrap.toml)
+  run: bash src/just_bashit/install-deps.sh
+```
+
+Only `git` (and a TLS trust store, on images that ship none) is installed
+inline — enough for `actions/checkout`. Everything else comes from
+`bootstrap.toml`, so the dependency list exists exactly once.
+
+Force the decision either way when the derivation cannot see the whole
+picture — an unprivileged user whose `sudo` lives outside `PATH`, or a
+rootless container that must not escalate:
+
+```bash
+jbx install-deps --no-sudo   # never escalate
+jbx install-deps --sudo      # always escalate
+```
+
+If you are not root and `sudo` is not found, the command runs unprivileged
+and the package manager reports the permission failure itself, after a
+warning on stderr. Nothing else is tried — guessing at another escalation
+tool would only hide the real cause.
+
+!!! warning "`cmd` arrays are run verbatim"
+
+    The derivation applies to the `packages` form only. A `cmd` array is
+    executed exactly as written, so a hardcoded `"sudo"` in one will fail in
+    a root container that has no `sudo` binary. Leave it out and the command
+    works in both places:
+
+    ```toml
+    [pinned.apt]
+    cmd = ["apt-get", "install", "-y", "libzmq3-dev=4.3.4-1"]
+    ```
 
 ______________________________________________________________________
 
 ## Examples
 
 ### Dry run — see what would be installed
+
+`--dry-run` prints exactly what would have run, prefix included — the
+`sudo` below is the derived one, and is absent when run as root:
 
 ```bash
 jbx install-deps --dry-run
@@ -249,6 +311,9 @@ jbx install-deps --dry-run
 
 jbx install-deps --dry-run -g runtime
 # sudo pacman -Sy --needed --noconfirm zeromq fftw
+
+jbx install-deps --dry-run --no-sudo -g runtime
+# pacman -Sy --needed --noconfirm zeromq fftw
 ```
 
 ### Verbose output

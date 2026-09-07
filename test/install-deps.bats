@@ -346,22 +346,26 @@ EOF
 	assert_output --partial "no packages or cmd found"
 }
 
+# The sudo prefix is derived from the caller's uid, so these pin the mode
+# explicitly. The same assertions without --sudo pass on a workstation and
+# fail inside the root CI container -- a split this suite should catch, not
+# reproduce.
 @test 'dry run dnf section' {
-	run install-deps.sh -n -s dnf "${ALL_PM_FILE}"
+	run install-deps.sh -n --sudo -s dnf "${ALL_PM_FILE}"
 	assert_success
 	assert_output --partial "sudo dnf install -y"
 	assert_output --partial "curl"
 }
 
 @test 'dry run zypper section' {
-	run install-deps.sh -n -s zypper "${ALL_PM_FILE}"
+	run install-deps.sh -n --sudo -s zypper "${ALL_PM_FILE}"
 	assert_success
 	assert_output --partial "sudo zypper install -y"
 	assert_output --partial "curl"
 }
 
 @test 'dry run apk section' {
-	run install-deps.sh -n -s apk "${ALL_PM_FILE}"
+	run install-deps.sh -n --sudo -s apk "${ALL_PM_FILE}"
 	assert_success
 	assert_output --partial "sudo apk add"
 	assert_output --partial "curl"
@@ -563,4 +567,126 @@ EOF
 	assert_success
 	assert_output --partial "jb.toml is deprecated"
 	assert_output --partial "bootstrap.toml"
+}
+
+# ---------------------------------------------------------------------------
+# sudo resolution
+#
+# The point of these: one bootstrap.toml has to serve a workstation (not
+# root, sudo present) and a CI container (already root, no sudo package).
+# The mode is derived from the environment, so each case below pins the
+# environment rather than the expectation.
+# ---------------------------------------------------------------------------
+
+# Put a fake `id` ahead of the real one so the root branch is reachable from
+# an unprivileged test run. `command -v sudo` is left alone -- root must not
+# consult it at all.
+_fake_uid() {
+	local uid="$1"
+	local dir="${BATS_TEST_TMPDIR}/fakebin-${uid}"
+	local real_id
+	# Resolve the real id now, while the real PATH is still in effect: the
+	# shim runs with a PATH that deliberately excludes it.
+	real_id="$(command -v id)"
+	mkdir -p "${dir}"
+	# shellcheck disable=SC2016  # $1 and $@ belong to the generated script
+	printf '#!/bin/sh\nif [ "$1" = "-u" ]; then echo %s; else exec %s "$@"; fi\n' \
+		"${uid}" "${real_id}" >"${dir}/id"
+	chmod +x "${dir}/id"
+	printf '%s\n' "${dir}"
+}
+
+@test '--no-sudo drops the prefix from apt' {
+	run install-deps.sh -n --no-sudo -s apt "${ALL_PM_FILE}"
+	assert_success
+	assert_output --partial "apt-get install -y --no-install-recommends curl"
+	refute_output --partial "sudo"
+}
+
+@test '--no-sudo drops the prefix from the apt update step too' {
+	run install-deps.sh -n --no-sudo -s apt "${ALL_PM_FILE}"
+	assert_success
+	assert_line "apt-get update"
+}
+
+@test '--no-sudo drops the prefix from every root-needing manager' {
+	local pm
+	for pm in pacman dnf zypper apk; do
+		run install-deps.sh -n --no-sudo -s "${pm}" "${ALL_PM_FILE}"
+		assert_success
+		refute_output --partial "sudo"
+	done
+}
+
+@test '--sudo forces the prefix even when already root' {
+	local bin
+	bin="$(_fake_uid 0)"
+	PATH="${bin}:${PATH}" run install-deps.sh -n --sudo -s apt "${ALL_PM_FILE}"
+	assert_success
+	assert_line "sudo apt-get update"
+}
+
+@test 'auto: root gets no sudo prefix' {
+	local bin
+	bin="$(_fake_uid 0)"
+	PATH="${bin}:${PATH}" run install-deps.sh -n -s apt "${ALL_PM_FILE}"
+	assert_success
+	assert_line "apt-get update"
+	refute_output --partial "sudo"
+}
+
+@test 'auto: non-root with sudo on PATH gets the prefix' {
+	local bin
+	bin="$(_fake_uid 1000)"
+	# A stub sudo makes the `command -v sudo` probe true regardless of what
+	# the host image actually ships.
+	# shellcheck disable=SC2016  # $@ belongs to the generated script
+	printf '#!/bin/sh\nexec "$@"\n' >"${bin}/sudo"
+	chmod +x "${bin}/sudo"
+	PATH="${bin}:${PATH}" run install-deps.sh -n -s apt "${ALL_PM_FILE}"
+	assert_success
+	assert_line "sudo apt-get update"
+}
+
+@test 'auto: non-root without sudo warns and runs bare' {
+	local bin dir tool
+	bin="$(_fake_uid 1000)"
+	# A PATH holding only what the script itself needs -- and no sudo -- so
+	# the `command -v sudo` probe genuinely fails. Emptying PATH instead
+	# would lose bash and test nothing.
+	dir="${BATS_TEST_TMPDIR}/nosudo"
+	mkdir -p "${dir}"
+	cp "${bin}/id" "${dir}/id"
+	for tool in bash cat dirname head pwd tr uname; do
+		ln -sf "$(command -v "${tool}")" "${dir}/${tool}"
+	done
+	run env -i PATH="${dir}" HOME="${HOME}" \
+		"${dir}/bash" "${PROJECT_ROOT}/src/just_bashit/install-deps.sh" \
+		-n -s apt "${ALL_PM_FILE}"
+	assert_success
+	assert_output --partial "sudo not found"
+	assert_line "apt-get update"
+}
+
+@test 'brew never gets a sudo prefix, even with --sudo' {
+	run install-deps.sh -n --sudo -s brew "${ALL_PM_FILE}"
+	assert_success
+	assert_line "brew install curl"
+	refute_output --partial "sudo"
+}
+
+@test 'sudo mode does not touch verbatim cmd arrays' {
+	local f="${BATS_TEST_TMPDIR}/cmd_nosudo.toml"
+	printf '[runtime.apt]\ncmd = ["apt-get", "install", "-y", "mypkg"]\n' >"${f}"
+	run install-deps.sh -n --sudo -s apt "${f}"
+	assert_success
+	assert_line "apt-get install -y mypkg"
+	refute_output --partial "sudo"
+}
+
+@test 'help documents both sudo flags' {
+	run install-deps.sh --help
+	assert_success
+	assert_output --partial "--no-sudo"
+	assert_output --partial "--sudo"
 }
