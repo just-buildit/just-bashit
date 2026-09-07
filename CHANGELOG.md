@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.5.0] - 2026-09-07
 
 ### Added
 
@@ -52,29 +52,6 @@
     hardcoded `"sudo"` will still break a root container — the documented
     examples no longer contain one.
 
-### Fixed
-
-- **`make bump-version` was broken, so no release could be cut.** The
-    `jb.toml` → `bootstrap.toml` rename updated the file but not the
-    `[[tool.bumpversion.files]]` entry pointing at it, so every bump died with
-    `FileNotFoundError: File not found: 'jb.toml'`. Nothing caught it because
-    no release had been attempted since the rename — `version-check` compares
-    the manifests to each other, which cannot detect a bump that never ran.
-
-- **`toml.sh` silently parsed a CRLF file as empty.** `read` strips the
-    newline but not the carriage return, and both places that recognise a
-    section header are exact matches — `[[ "$line" == "$target" ]]` in
-    `toml_get_array`, and a `$`-anchored regex in `toml_discover_groups`. A
-    trailing CR failed both, so every function returned success with no
-    output.
-
-    On Windows, where `actions/checkout` writes CRLF, that meant
-    `install-deps` found no packages in a perfectly valid `bootstrap.toml`.
-    It went unnoticed because every fixture in the suite is written with
-    `printf`, so LF was the only line ending ever exercised — the bug was
-    only reachable through a file that had been through a checkout, which the
-    tests never used. The regression tests now build CRLF fixtures explicitly.
-
 ### Changed
 
 - **CI installs from `bootstrap.toml` instead of repeating the package list
@@ -119,6 +96,27 @@
     them on upgrade, alongside the existing `jr` / `jx` pruning.
 
 ### Fixed
+
+- **`make bump-version` was broken, so no release could be cut.** The
+    `jb.toml` → `bootstrap.toml` rename updated the file but not the
+    `[[tool.bumpversion.files]]` entry pointing at it, so every bump died with
+    `FileNotFoundError: File not found: 'jb.toml'`. Nothing caught it because
+    no release had been attempted since the rename — `version-check` compares
+    the manifests to each other, which cannot detect a bump that never ran.
+
+- **`toml.sh` silently parsed a CRLF file as empty.** `read` strips the
+    newline but not the carriage return, and both places that recognise a
+    section header are exact matches — `[[ "$line" == "$target" ]]` in
+    `toml_get_array`, and a `$`-anchored regex in `toml_discover_groups`. A
+    trailing CR failed both, so every function returned success with no
+    output.
+
+    On Windows, where `actions/checkout` writes CRLF, that meant
+    `install-deps` found no packages in a perfectly valid `bootstrap.toml`.
+    It went unnoticed because every fixture in the suite is written with
+    `printf`, so LF was the only line ending ever exercised — the bug was
+    only reachable through a file that had been through a checkout, which the
+    tests never used. The regression tests now build CRLF fixtures explicitly.
 
 - **`make ship` could report a release as failed while it succeeded.**
     `release-watch` took the newest release run with `--limit 1`, but `ship`
