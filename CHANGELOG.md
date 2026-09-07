@@ -54,6 +54,13 @@
 
 ### Fixed
 
+- **`make bump-version` was broken, so no release could be cut.** The
+    `jb.toml` → `bootstrap.toml` rename updated the file but not the
+    `[[tool.bumpversion.files]]` entry pointing at it, so every bump died with
+    `FileNotFoundError: File not found: 'jb.toml'`. Nothing caught it because
+    no release had been attempted since the rename — `version-check` compares
+    the manifests to each other, which cannot detect a bump that never ran.
+
 - **`toml.sh` silently parsed a CRLF file as empty.** `read` strips the
     newline but not the carriage return, and both places that recognise a
     section header are exact matches — `[[ "$line" == "$target" ]]` in
