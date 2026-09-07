@@ -76,6 +76,21 @@ LOCAL_TARGETS += docs-coverage
 docs-coverage: ## Verify every shipped script is documented and in the nav
 	@bash scripts/docs_coverage.sh
 
+# ── bumpversion coverage ──────────────────────────────────────────────────────
+# Dispatched from .pre-commit-config.yaml for the same reason docs-coverage is:
+# CI runs `make lint`, so a gate reachable only from a release target would run
+# on no PR — and this one guards the release path itself, which is exactly the
+# thing nobody exercises until the day they need it.
+#
+# Deliberately NOT a prerequisite of version-check. That target answers "do the
+# manifests agree?" AFTER a bump; this one answers "will the bump reach every
+# file?" BEFORE one. Folding them together would hide the second question
+# behind a target only run at release time.
+LOCAL_TARGETS += version-files-check
+
+version-files-check: ## Verify bumpversion covers every version-declaring line
+	@bash scripts/version_files_check.sh
+
 # ── all ───────────────────────────────────────────────────────────────────────
 # Lint first: shellcheck and shfmt are seconds, the bats suite is minutes.
 #

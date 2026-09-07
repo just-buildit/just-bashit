@@ -41,3 +41,10 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+
+      - id: version-files-check
+        name: version-files-check
+        entry: make -s version-files-check
+        language: system
+        pass_filenames: false
+        always_run: true
