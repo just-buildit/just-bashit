@@ -657,8 +657,14 @@ _fake_uid() {
 	dir="${BATS_TEST_TMPDIR}/nosudo"
 	mkdir -p "${dir}"
 	cp "${bin}/id" "${dir}/id"
+	local path
 	for tool in bash cat dirname head pwd tr uname; do
-		ln -sf "$(command -v "${tool}")" "${dir}/${tool}"
+		path="$(command -v "${tool}")"
+		# pwd is a shell builtin, so `command -v` answers with the bare name
+		# and there is nothing to link. Linking it anyway makes a dangling
+		# symlink, which Linux accepts silently and MSYS2 refuses outright.
+		[[ "${path}" == /* ]] || continue
+		ln -sf "${path}" "${dir}/${tool}"
 	done
 	run env -i PATH="${dir}" HOME="${HOME}" \
 		"${dir}/bash" "${PROJECT_ROOT}/src/just_bashit/install-deps.sh" \
