@@ -649,26 +649,32 @@ _fake_uid() {
 }
 
 @test 'auto: non-root without sudo warns and runs bare' {
-	local bin dir tool
+	local bin dir tool path
 	bin="$(_fake_uid 1000)"
-	# A PATH holding only what the script itself needs -- and no sudo -- so
-	# the `command -v sudo` probe genuinely fails. Emptying PATH instead
-	# would lose bash and test nothing.
-	dir="${BATS_TEST_TMPDIR}/nosudo"
-	mkdir -p "${dir}"
-	cp "${bin}/id" "${dir}/id"
-	local path
-	for tool in bash cat dirname head pwd tr uname; do
-		path="$(command -v "${tool}")"
-		# pwd is a shell builtin, so `command -v` answers with the bare name
-		# and there is nothing to link. Linking it anyway makes a dangling
-		# symlink, which Linux accepts silently and MSYS2 refuses outright.
-		[[ "${path}" == /* ]] || continue
-		ln -sf "${path}" "${dir}/${tool}"
-	done
-	run env -i PATH="${dir}" HOME="${HOME}" \
-		"${dir}/bash" "${PROJECT_ROOT}/src/just_bashit/install-deps.sh" \
-		-n -s apt "${ALL_PM_FILE}"
+	if command -v sudo >/dev/null 2>&1; then
+		# This host has sudo, so it has to be kept off PATH deliberately: a
+		# PATH holding only what the script itself needs. Emptying PATH
+		# instead would lose bash and test nothing.
+		dir="${BATS_TEST_TMPDIR}/nosudo"
+		mkdir -p "${dir}"
+		cp "${bin}/id" "${dir}/id"
+		for tool in bash cat dirname head pwd tr uname; do
+			path="$(command -v "${tool}")"
+			# pwd is a shell builtin: `command -v` answers with the bare
+			# name, and linking that makes a dangling symlink.
+			[[ "${path}" == /* ]] || continue
+			ln -sf "${path}" "${dir}/${tool}"
+		done
+		run env -i PATH="${dir}" HOME="${HOME}" \
+			"${dir}/bash" "${PROJECT_ROOT}/src/just_bashit/install-deps.sh" \
+			-n -s apt "${ALL_PM_FILE}"
+	else
+		# MSYS2 and Alpine ship no sudo at all, so the ambient environment
+		# already IS the case under test. Stripping PATH there would be
+		# worse than pointless: on MSYS2 it costs bash its own runtime DLLs
+		# and the interpreter exits 127 before reading a single line.
+		run env PATH="${bin}:${PATH}" install-deps.sh -n -s apt "${ALL_PM_FILE}"
+	fi
 	assert_success
 	assert_output --partial "sudo not found"
 	assert_line "apt-get update"
