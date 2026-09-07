@@ -1,5 +1,38 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **`version-files-check`: a gate on the bumpversion table.** Three releases
+    have now been damaged by the same class of bug — `just-runit`'s `_VERSION`
+    was unregistered and sat at 0.1.4 through two releases, `make-run.sh`
+    shipped in 0.4.0 with no entry, and the `jb.toml` → `bootstrap.toml`
+    rename left an entry pointing at a file that no longer existed, which
+    broke `make bump-version` outright. Each was found by hand, at release
+    time, by someone wondering why a number was wrong.
+
+    `version-check` cannot catch any of them: it compares the manifests to
+    each other *after* a bump, so it is blind to a bump that never ran, an
+    entry that quietly matched nothing, and a line it was never told about.
+
+    The new gate checks three things — every registered `filename` exists,
+    every registered `search` actually matches in its file (a search that
+    matches nothing bumps *silently* and is worse than a missing entry), and
+    every version-declaring **line** is covered, not merely every file. The
+    line-level distinction is the whole point: `just-runit` was registered for
+    its header while its `_VERSION` went unbumped, and a file-level check
+    passes that green. The first draft of this gate was file-level and did
+    exactly that, which is why the gate now has its own tests.
+
+    Declarations are told from prose without an exclusion list to drift: a
+    line counts only if the version is quoted, or the line matches a search
+    shape already in the table. Source and docs narrate releases — `just-runit`
+    itself says "This triggered on jb until 0.5.0" — and bumping those
+    sentences would make them false.
+
+    Runs in `make lint`, so it gates every PR rather than only the release.
+
 ## [0.5.0] - 2026-09-07
 
 ### Added
