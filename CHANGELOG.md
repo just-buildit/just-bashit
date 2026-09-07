@@ -4,6 +4,32 @@
 
 ### Added
 
+- **`install-deps` honours the standard proxy variables, and `--proxy URL`
+    sets them.**
+
+    Exporting `http_proxy` and running `make install-deps` appeared to be
+    ignored. It was: `sudo` resets the environment, so every proxy variable
+    was dropped on the far side of the escalation, and nothing the caller
+    could do from their own shell would fix it.
+
+    The assignments are now re-applied *after* the `sudo` binary rather than
+    before it, surviving `env_reset` without depending on the sudoers
+    `env_keep` list. Order is the whole point — `env http_proxy=… sudo   apt-get` sets the variable for `sudo` itself and has it reset away again.
+
+    No per-manager translation was needed: apt, pacman, dnf, zypper, apk and
+    brew all fetch over libcurl or read these names directly. `--proxy` sets
+    `http_proxy` and `https_proxy` in both spellings, because apt, apk and
+    libcurl read the lowercase names while Homebrew's Ruby reads the
+    uppercase ones. `all_proxy` and `no_proxy` are only ever carried through
+    from the environment: one URL says nothing about which hosts to bypass or
+    how to reach a SOCKS relay, so synthesising them would be a guess.
+
+    A `no_proxy` with no proxy beside it is left alone rather than wrapping
+    every command in `env` — it describes exceptions to a configuration that
+    does not exist. The variables are also exported into the script's own
+    environment, so a verbatim `cmd` array inherits them without being
+    rewritten.
+
 - **`install-deps` derives whether it needs `sudo`, with `--sudo` /
     `--no-sudo` to force it.**
 

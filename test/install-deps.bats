@@ -690,3 +690,136 @@ _fake_uid() {
 	assert_output --partial "--no-sudo"
 	assert_output --partial "--sudo"
 }
+
+# ---------------------------------------------------------------------------
+# proxy
+#
+# Every test here clears the ambient proxy variables first: a developer
+# machine behind a corporate proxy would otherwise pass or fail these for
+# reasons that have nothing to do with the code.
+# ---------------------------------------------------------------------------
+
+_no_proxy_env() {
+	printf '%s\n' -u http_proxy -u https_proxy -u all_proxy -u no_proxy \
+		-u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u NO_PROXY
+}
+
+# Run install-deps.sh with every proxy variable unset, plus any NAME=VALUE
+# assignments given as leading arguments.
+_run_clean() {
+	local clear=()
+	while IFS= read -r _a; do clear+=("${_a}"); done < <(_no_proxy_env)
+	local assigns=()
+	while [[ $# -gt 0 && "$1" == *=* ]]; do
+		assigns+=("$1")
+		shift
+	done
+	if [ "${#assigns[@]}" -gt 0 ]; then
+		run env "${clear[@]}" "${assigns[@]}" install-deps.sh "$@"
+	else
+		run env "${clear[@]}" install-deps.sh "$@"
+	fi
+}
+
+@test 'no proxy anywhere leaves the command untouched' {
+	_run_clean -n --sudo -s apt "${ALL_PM_FILE}"
+	assert_success
+	assert_line "sudo apt-get update"
+	refute_output --partial "env "
+}
+
+@test '--proxy lands on the far side of sudo, where env_reset cannot drop it' {
+	_run_clean -n --sudo --proxy http://p.example:3128 -s apt "${ALL_PM_FILE}"
+	assert_success
+	# Order matters: `env A=B sudo cmd` would set the variable for sudo and
+	# then have it reset away again.
+	assert_line --regexp '^sudo env .*apt-get update$'
+}
+
+@test '--proxy sets both spellings of http and https' {
+	_run_clean -n --no-sudo --proxy http://p.example:3128 -s apt "${ALL_PM_FILE}"
+	assert_success
+	assert_output --partial "http_proxy=http://p.example:3128"
+	assert_output --partial "https_proxy=http://p.example:3128"
+	assert_output --partial "HTTP_PROXY=http://p.example:3128"
+	assert_output --partial "HTTPS_PROXY=http://p.example:3128"
+}
+
+@test '--proxy applies to every root-needing manager' {
+	local pm
+	for pm in apt pacman dnf zypper apk; do
+		_run_clean -n --no-sudo --proxy http://p.example:3128 -s "${pm}" \
+			"${ALL_PM_FILE}"
+		assert_success
+		assert_output --partial "env http_proxy=http://p.example:3128"
+	done
+}
+
+@test '--proxy applies to brew, which still gets no sudo' {
+	_run_clean -n --sudo --proxy http://p.example:3128 -s brew "${ALL_PM_FILE}"
+	assert_success
+	assert_line --regexp '^env .*brew install curl$'
+	refute_output --partial "sudo"
+}
+
+@test 'ambient http_proxy is carried through with no flag' {
+	_run_clean http_proxy=http://ambient:8080 -n --sudo -s apt "${ALL_PM_FILE}"
+	assert_success
+	assert_output --partial "http_proxy=http://ambient:8080"
+}
+
+@test 'ambient no_proxy and all_proxy are carried through too' {
+	_run_clean http_proxy=http://ambient:8080 no_proxy=localhost,.internal \
+		all_proxy=socks5://s:1080 -n --sudo -s apt "${ALL_PM_FILE}"
+	assert_success
+	assert_output --partial "no_proxy=localhost,.internal"
+	assert_output --partial "all_proxy=socks5://s:1080"
+}
+
+@test 'no_proxy on its own does not wrap the command in env' {
+	# Exceptions to a proxy that is not configured describe nothing, and
+	# wrapping for them would change every command on a machine that merely
+	# has no_proxy set in a shell profile.
+	_run_clean no_proxy=localhost -n --sudo -s apt "${ALL_PM_FILE}"
+	assert_success
+	refute_output --partial "env "
+	assert_line "sudo apt-get update"
+}
+
+@test '--proxy overrides an ambient value' {
+	_run_clean http_proxy=http://ambient:8080 \
+		-n --no-sudo --proxy http://flag:3128 -s apt "${ALL_PM_FILE}"
+	assert_success
+	assert_output --partial "http_proxy=http://flag:3128"
+	refute_output --partial "ambient:8080"
+}
+
+@test 'a verbatim cmd array inherits the exported proxy' {
+	local f="${BATS_TEST_TMPDIR}/cmd_proxy.toml"
+	# shellcheck disable=SC2016  # $https_proxy is read by the cmd's shell
+	printf '[runtime.apt]\ncmd = ["sh", "-c", "echo saw:$https_proxy"]\n' >"${f}"
+	_run_clean --no-sudo --proxy http://inherited:9 -s apt "${f}"
+	assert_success
+	assert_output --partial "saw:http://inherited:9"
+}
+
+@test 'verbose reports the resolved proxy variables' {
+	_run_clean -n -v --no-sudo --proxy http://p.example:3128 -s apt \
+		"${ALL_PM_FILE}"
+	assert_success
+	assert_output --partial "proxy:"
+	assert_output --partial "http_proxy=http://p.example:3128"
+}
+
+@test '--proxy requires an argument' {
+	_run_clean -n -s apt --proxy
+	assert_failure
+}
+
+@test 'help documents --proxy and the standard variables' {
+	run install-deps.sh --help
+	assert_success
+	assert_output --partial "--proxy"
+	assert_output --partial "http_proxy"
+	assert_output --partial "no_proxy"
+}
