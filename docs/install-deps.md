@@ -237,6 +237,7 @@ ______________________________________________________________________
 | `-g GROUP`   | `--groups GROUP`    | Comma-separated groups to install (overrides all defaults) |
 |              | `--no-sudo`         | Never prefix `sudo` (root containers, images without it)   |
 |              | `--sudo`            | Always prefix `sudo`, even when already root               |
+|              | `--proxy URL`       | Proxy for package downloads; overrides the environment     |
 |              | `--template [PATH]` | Write scaffold deps.toml to PATH, or stdout if omitted     |
 
 ______________________________________________________________________
@@ -294,6 +295,83 @@ tool would only hide the real cause.
     [pinned.apt]
     cmd = ["apt-get", "install", "-y", "libzmq3-dev=4.3.4-1"]
     ```
+
+______________________________________________________________________
+
+## Proxies
+
+Every supported package manager fetches over libcurl or reads the standard
+proxy variables directly, so `install-deps` does not translate a proxy into
+seven different manager-specific flags. It makes sure the variables actually
+arrive:
+
+| Variable                      | Set by `--proxy` | Carried from the environment |
+| ----------------------------- | ---------------- | ---------------------------- |
+| `http_proxy` / `HTTP_PROXY`   | yes              | yes                          |
+| `https_proxy` / `HTTPS_PROXY` | yes              | yes                          |
+| `all_proxy` / `ALL_PROXY`     | no               | yes                          |
+| `no_proxy` / `NO_PROXY`       | no               | yes                          |
+
+Both spellings are set because the managers disagree: apt, apk and libcurl
+read the lowercase names, Homebrew's Ruby reads the uppercase ones. A single
+URL says nothing about which hosts to bypass or how to reach a SOCKS relay,
+so `all_proxy` and `no_proxy` are only ever carried through from the
+environment — never synthesised.
+
+### Why setting the variable yourself was not enough
+
+`sudo` resets the environment. Exporting `http_proxy` in your shell and then
+running a command that escalates drops it on the far side, which is why
+
+```bash
+http_proxy=http://proxy.internal:3128 make install-deps   # used to be ignored
+```
+
+appeared to do nothing. The assignments are now re-applied *after* the `sudo`
+binary rather than before it, so they survive `env_reset` without depending
+on the sudoers `env_keep` list:
+
+```bash
+jbx install-deps --dry-run --proxy http://proxy.internal:3128 -s apt
+# sudo env http_proxy=http://proxy.internal:3128 https_proxy=… apt-get update
+# sudo env http_proxy=http://proxy.internal:3128 https_proxy=… apt-get install …
+```
+
+Order matters. `env http_proxy=… sudo apt-get` would set the variable for
+`sudo` itself and have it reset away again — the failure this arrangement
+exists to avoid.
+
+In a root container there is no `sudo` to escape, and the same command is
+correct there too:
+
+```bash
+jbx install-deps --dry-run --no-sudo --proxy http://proxy.internal:3128 -s apt
+# env http_proxy=http://proxy.internal:3128 https_proxy=… apt-get update
+```
+
+### Environment only
+
+With no `--proxy`, whatever is already exported is used as-is — the same
+`bootstrap.toml` and the same command work behind a proxy and off it:
+
+```bash
+export http_proxy=http://proxy.internal:3128
+export no_proxy=localhost,.internal
+jbx install-deps
+```
+
+A `no_proxy` with no proxy alongside it is left alone: it describes
+exceptions to a configuration that does not exist, so it never wraps the
+install command.
+
+`--proxy` overrides an ambient value rather than merging with it.
+
+!!! note "`cmd` arrays get the proxy too"
+
+    The variables are exported into the script's own environment, not only
+    injected into the managers' argv, so a verbatim `cmd` array inherits
+    them like any other child process. This is the one thing that reaches a
+    `cmd` without rewriting it.
 
 ______________________________________________________________________
 
