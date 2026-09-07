@@ -103,8 +103,11 @@ filename = "src/just_bashit/just-runit"
 search = "_VERSION=\"{current_version}\""
 replace = "_VERSION=\"{new_version}\""
 
+# Renamed from jb.toml in the same change that renamed the file itself, but
+# this entry was missed -- so `bump-version` died with FileNotFoundError and
+# the release path stayed broken until the next release was attempted.
 [[tool.bumpversion.files]]
-filename = "jb.toml"
+filename = "bootstrap.toml"
 search = "version = \"{current_version}\""
 replace = "version = \"{new_version}\""
 
