@@ -133,15 +133,33 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
+      # Checkout comes first here, unlike every other job: the package list
+      # below is read out of the repo. The windows runner ships git and Git
+      # Bash, so neither this step nor the next needs MSYS2 to exist yet.
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      # setup-msys2 takes its packages as an action input, which is evaluated
+      # before any step of its own could read a file — so this is the one job
+      # that cannot simply run install-deps.sh after checkout. Lifting the
+      # list out of bootstrap.toml with this repo's own toml reader keeps it
+      # single-sourced anyway; writing it a second time in YAML is what let
+      # the other distro lists drift.
+      - name: Read [dev.msys2] from bootstrap.toml
+        id: deps
+        shell: bash
+        run: |
+          source src/just_bashit/toml.sh
+          pkgs=$(toml_get_packages dev msys2 <bootstrap.toml | tr '\n' ' ')
+          [ -n "${pkgs% }" ] || { echo "no [dev.msys2] packages found" >&2; exit 1; }
+          echo "packages=${pkgs% }" >> "$GITHUB_OUTPUT"
+
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
           update: true
-          install: git make diffutils curl openssh
-
-      - uses: actions/checkout@v7
-        with:
-          submodules: recursive
+          install: ${{ steps.deps.outputs.packages }}
 
       - name: Run tests
         run: make test
