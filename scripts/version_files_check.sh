@@ -32,7 +32,7 @@
 # Telling a DECLARATION from PROSE, without an exclusion list to drift:      #
 # source and docs both narrate releases -- just-runit itself says "This      #
 # triggered on jb until 0.5.0" -- and bumping those would make them false.   #
-# A line counts as declaring only if the version is QUOTED ("0.5.0"), or the #
+# A line counts as declaring only if the version is QUOTED ("1.2.3"), or the #
 # line matches one of the search shapes already in the table. Prose names a  #
 # version bare and in passing; a declaration quotes it or is a header this   #
 # table already describes. That is derived from the config, so adding a new  #
