@@ -516,3 +516,144 @@ ssh-keygen removal is not reproducible under MSYS2"
 	assert_success
 	assert_output --partial "installing packages from jb-deps.toml"
 }
+
+# ---------------------------------------------------------------------------
+# ssh permissions
+#
+# The case these cover is a ~/.ssh that arrived from somewhere unable to
+# carry POSIX modes -- a Windows filesystem under WSL, a FAT stick, a zip, a
+# git checkout. rsync -a and tar preserve modes, so a Linux-to-Linux copy
+# needs none of this; these are the crossings where no copy command helps.
+# ---------------------------------------------------------------------------
+
+# `stat -c` is GNU; BSD stat (macOS) wants -f '%Lp'. Both are tried rather
+# than branching on OSTYPE, which would guess where it can measure.
+_mode() {
+	stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"
+}
+
+# Skip where the filesystem does not honour chmod at all -- MSYS2 on NTFS
+# reports what it likes. Probing beats naming platforms: it skips exactly
+# where the assertion is meaningless, and nowhere else.
+_require_modes() {
+	local probe="${BATS_TEST_TMPDIR}/mode-probe"
+	: >"${probe}"
+	chmod 0600 "${probe}" 2>/dev/null || skip "chmod unavailable"
+	[[ "$(_mode "${probe}")" == "600" ]] || skip "filesystem ignores chmod"
+}
+
+# A private key is identified by its PEM header, so the fixture needs one.
+_write_key() {
+	{
+		echo '-----BEGIN OPENSSH PRIVATE KEY-----'
+		echo 'b3BlbnNzaA=='
+		echo '-----END OPENSSH PRIVATE KEY-----'
+	} >"$1"
+}
+
+@test 'ssh step strips group and other from a world-readable private key' {
+	_require_modes
+	mkdir -p "${HOME}/.ssh"
+	_write_key "${HOME}/.ssh/id_ed25519"
+	touch "${HOME}/.ssh/id_ed25519.pub"
+	chmod 0777 "${HOME}/.ssh/id_ed25519"
+	run setup-system.sh -s ssh
+	assert_success
+	assert_equal "$(_mode "${HOME}/.ssh/id_ed25519")" "700"
+}
+
+@test 'ssh step hardens a key that has no matching .pub' {
+	# Name-based detection would miss this one; the PEM header does not.
+	_require_modes
+	mkdir -p "${HOME}/.ssh"
+	_write_key "${HOME}/.ssh/some-odd-name"
+	touch "${HOME}/.ssh/other.pub" "${HOME}/.ssh/other"
+	chmod 0644 "${HOME}/.ssh/some-odd-name"
+	run setup-system.sh -s ssh
+	assert_success
+	assert_equal "$(_mode "${HOME}/.ssh/some-odd-name")" "600"
+}
+
+@test 'ssh step hardens config and authorized_keys' {
+	_require_modes
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
+	printf 'Host x\n' >"${HOME}/.ssh/config"
+	printf 'ssh-ed25519 AAAA\n' >"${HOME}/.ssh/authorized_keys"
+	chmod 0666 "${HOME}/.ssh/config" "${HOME}/.ssh/authorized_keys"
+	run setup-system.sh -s ssh
+	assert_success
+	assert_equal "$(_mode "${HOME}/.ssh/config")" "600"
+	assert_equal "$(_mode "${HOME}/.ssh/authorized_keys")" "600"
+}
+
+@test 'ssh step only tightens: a 0400 key keeps 0400' {
+	# A literal `chmod 600` would hand this key owner-write it did not ask
+	# for. go-rwx leaves the owner bits alone.
+	_require_modes
+	mkdir -p "${HOME}/.ssh"
+	_write_key "${HOME}/.ssh/id_ed25519"
+	touch "${HOME}/.ssh/id_ed25519.pub"
+	chmod 0400 "${HOME}/.ssh/id_ed25519"
+	run setup-system.sh -s ssh
+	assert_success
+	assert_equal "$(_mode "${HOME}/.ssh/id_ed25519")" "400"
+}
+
+@test 'ssh step leaves a .pub file alone' {
+	_require_modes
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
+	chmod 0644 "${HOME}/.ssh/id_ed25519.pub"
+	run setup-system.sh -s ssh
+	assert_success
+	assert_equal "$(_mode "${HOME}/.ssh/id_ed25519.pub")" "644"
+}
+
+@test 'ssh step does not touch a file that is neither a key nor named' {
+	# known_hosts is not secret and not a key; rewriting it would be churn.
+	_require_modes
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
+	printf 'host ssh-ed25519 AAAA\n' >"${HOME}/.ssh/known_hosts"
+	chmod 0644 "${HOME}/.ssh/known_hosts"
+	run setup-system.sh -s ssh
+	assert_success
+	assert_equal "$(_mode "${HOME}/.ssh/known_hosts")" "644"
+}
+
+@test 'ssh step hardens a subdirectory' {
+	_require_modes
+	mkdir -p "${HOME}/.ssh/sockets"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
+	chmod 0777 "${HOME}/.ssh/sockets"
+	run setup-system.sh -s ssh
+	assert_success
+	assert_equal "$(_mode "${HOME}/.ssh/sockets")" "700"
+}
+
+@test 'ssh step hardening is idempotent' {
+	_require_modes
+	mkdir -p "${HOME}/.ssh"
+	_write_key "${HOME}/.ssh/id_ed25519"
+	touch "${HOME}/.ssh/id_ed25519.pub"
+	chmod 0777 "${HOME}/.ssh/id_ed25519"
+	run setup-system.sh -s ssh
+	assert_success
+	local first
+	first="$(_mode "${HOME}/.ssh/id_ed25519")"
+	run setup-system.sh -s ssh
+	assert_success
+	assert_equal "$(_mode "${HOME}/.ssh/id_ed25519")" "${first}"
+}
+
+@test 'ssh step changes no mode on disk during a dry run' {
+	_require_modes
+	mkdir -p "${HOME}/.ssh"
+	_write_key "${HOME}/.ssh/id_ed25519"
+	touch "${HOME}/.ssh/id_ed25519.pub"
+	chmod 0777 "${HOME}/.ssh/id_ed25519"
+	run setup-system.sh -n -s ssh
+	assert_success
+	assert_equal "$(_mode "${HOME}/.ssh/id_ed25519")" "777"
+}

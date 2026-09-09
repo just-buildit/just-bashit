@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+### Added
+
+- **The `ssh` step repairs a `~/.ssh` that lost its permissions, not just the
+    directory.** It set `0700` on `~/.ssh` and `0600` on a key it generated
+    itself, so a directory whose contents were *synced into place* kept
+    whatever modes it arrived with — and `ssh` then refuses the key with
+    `UNPROTECTED PRIVATE KEY FILE` without saying how to fix it.
+
+    `jbx setup-system -s ssh` now sweeps the whole directory. This is not a
+    substitute for copying properly: `rsync -a` and `tar` both carry POSIX
+    modes, so a Linux-to-Linux move loses nothing. It is for the crossings
+    that have nowhere to record them — a Windows filesystem under WSL (DrvFs
+    reports `0777`), FAT, a zip, or a git checkout, which keeps only the exec
+    bit.
+
+    Private keys are found by their `-----BEGIN … PRIVATE KEY-----` header
+    rather than by name, so a key with no matching `.pub` is still repaired.
+    `config` and `authorized_keys` are covered; `*.pub` and `known_hosts` are
+    left alone.
+
+    The sweep uses `go-rwx`, so it only ever tightens: a key deliberately at
+    `0400` keeps `0400` instead of gaining owner-write, and a second run
+    changes nothing. It reads first lines with the `read` builtin, so it adds
+    no command to the set a PATH-restricted machine needs to reach this step.
+
 ### Changed
 
 - **`make install-deps` runs this repo's own script instead of the published
