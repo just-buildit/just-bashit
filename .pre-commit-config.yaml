@@ -48,3 +48,10 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+
+      - id: workflow-check
+        name: workflow-check
+        entry: make -s workflow-check
+        language: system
+        pass_filenames: false
+        always_run: true
