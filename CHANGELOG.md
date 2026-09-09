@@ -1,6 +1,23 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.0] - 2026-09-09
+
+### Fixed
+
+- **`deploy-docs` waits for the job whose artifact it downloads.** It pulled
+    `test-report-xml`, which the primary test job uploads as its last step,
+    while declaring only `needs: [coverage, lint]` — consuming an artifact
+    from a job it never waited for. It worked purely because the test job
+    happened to finish first, and stopped when the container jobs began
+    installing from `bootstrap.toml` and grew slower: `deploy-docs` then
+    asked for the artifact 35 seconds before it existed, and `main` went red
+    on two commits whose pull requests were both green.
+
+    It is not the action version skew it resembles: `upload-artifact` tops
+    out at v7.0.1 and `download-artifact` at v8.0.1, so that pairing is
+    correct. No pull request could have caught it either — `deploy-docs` is
+    gated on `refs/heads/main` and is skipped on every PR, so it has no
+    pre-merge execution home at all.
 
 ### Added
 
