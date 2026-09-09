@@ -218,6 +218,17 @@ matching `.pub`, or not called `id_*`, is still repaired.
     owner-write. Running it twice changes nothing the second time, and
     `--dry-run` changes nothing at all.
 
+!!! warning "No effect on Windows / MSYS2"
+
+    MSYS2 on NTFS does not honour `chmod`, so the sweep is a no-op there —
+    it neither helps nor harms. Windows OpenSSH reads ACLs rather than mode
+    bits, and repairing those needs `icacls`, which this step does not do.
+
+    The suite states this rather than hiding it: the permission tests probe
+    whether `chmod` sticks and **skip on the Windows runner**, where they
+    would otherwise assert nothing while reporting green. They run for real
+    on Linux and macOS.
+
 !!! warning "`--yes` creates the key with an empty passphrase"
 
     Without `--yes`, `ssh-keygen` prompts for a passphrase as usual. With
