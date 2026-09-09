@@ -254,7 +254,18 @@ jobs:
           echo "All required jobs passed"
 
   deploy-docs:
-    needs: [coverage, lint]
+    # `test` is here because this job DOWNLOADS test-report-xml, which the
+    # primary test job uploads as its last step. Listing only coverage and
+    # lint made that a race: the artifact was consumed from a job that was
+    # not waited for, and it only ever worked because the test job happened
+    # to finish first.
+    #
+    # It stopped happening to finish first when the container jobs began
+    # installing from bootstrap.toml, which made them slower. deploy-docs
+    # then started 70s before the upload and failed with "Artifact not found
+    # for name: test-report-xml" -- on main only, since this job is skipped
+    # on pull requests, so no PR could have caught it.
+    needs: [test, coverage, lint]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
