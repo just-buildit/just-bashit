@@ -1,5 +1,34 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **`workflow-check`: `gates-home-check`, one level up.** `gates-home-check`
+    asks whether every gate is reached by a CI target. Nothing asked the same
+    of the workflow itself, and the gap shipped: `deploy-docs` downloaded
+    `test-report-xml` while declaring only `needs: [coverage, lint]`, so it
+    consumed an artifact from a job it never waited for. It passed on timing
+    until the container jobs grew slower, then turned `main` red on two
+    commits whose pull requests were both green.
+
+    Four invariants, each replayed as a test: every downloaded artifact is
+    uploaded by a job in the consumer's `needs` closure (transitive waits
+    count); every downloaded artifact is uploaded by *something*, since a
+    renamed upload fails identically and reads the same in the log; every job
+    with no pre-merge run is declared in `.github/no-pre-merge-run`; and a
+    stale declaration fails, so that list may only shrink.
+
+    It parses with `awk` rather than a YAML library so it runs in the same
+    containers as the suite, which carry no Python. A parser that reads
+    nothing would bless any workflow, so finding no jobs, uploads or
+    downloads is an error rather than a pass.
+
+    `deploy-docs` is the one declared entry: it publishes to Pages, which a
+    pull request must not do. Its fallible half — building the site — could
+    move to a PR-visible job, and until it does a broken deploy is found on
+    `main` or not at all.
+
 ## [0.6.0] - 2026-09-09
 
 ### Fixed

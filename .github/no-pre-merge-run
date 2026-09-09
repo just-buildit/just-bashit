@@ -1,0 +1,9 @@
+# Jobs with no pre-merge run. See scripts/workflow_check.sh.
+#
+# This list may only SHRINK. A job here can only fail AFTER a merge, so
+# adding one is a decision, not a default.
+#
+# deploy-docs publishes to GitHub Pages, which a pull request must not do.
+# Its fallible half -- building the site -- could move to a PR-visible job;
+# until it does, a broken deploy is found on main or not at all.
+deploy-docs

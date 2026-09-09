@@ -91,6 +91,19 @@ LOCAL_TARGETS += version-files-check
 version-files-check: ## Verify bumpversion covers every version-declaring line
 	@bash scripts/version_files_check.sh
 
+# ── workflow coverage ─────────────────────────────────────────────────────────
+# gates-home-check asks whether every gate is reached by a CI target. This
+# asks the same question of the workflow itself: does every artifact hand-off
+# have a `needs` behind it, and is every job with no pre-merge run declared.
+#
+# Dispatched from .pre-commit-config.yaml like the other two, so it runs in
+# `make lint` and therefore on every PR — which matters more here than
+# elsewhere, since the bug it exists to catch could ONLY appear after a merge.
+LOCAL_TARGETS += workflow-check
+
+workflow-check: ## Verify workflow artifact hand-offs and pre-merge coverage
+	@bash scripts/workflow_check.sh
+
 # ── all ───────────────────────────────────────────────────────────────────────
 # Lint first: shellcheck and shfmt are seconds, the bats suite is minutes.
 #
