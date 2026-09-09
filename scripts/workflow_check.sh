@@ -77,7 +77,7 @@ _shape() {
 			v = $0; sub(/^    needs:[ \t]*/, "", v); v = trim(v)
 			inneeds = 0
             if (v == "") { inneeds = 1; next }
-			gsub(/[\[\]]/, "", v); gsub(/,/, " ", v)
+			gsub(/[][]/, "", v); gsub(/,/, " ", v)
 			n = split(v, parts, /[ \t]+/)
 			for (i = 1; i <= n; i++)
 				if (parts[i] != "") print "needs\t" job "\t" parts[i]
