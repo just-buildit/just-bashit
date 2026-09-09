@@ -197,4 +197,20 @@ define RELEASE_WATCH_CMD
  gh run watch --exit-status "$$id"
 endef
 
+# ── install-deps ──────────────────────────────────────────────────────────────
+# This repo OWNS install-deps.sh, so it must run the source, not the copy the
+# CDN happens to be serving. Without this the target fetched the PUBLISHED
+# script via jbx while CI ran src/just_bashit/install-deps.sh -- one step with
+# two execution homes, where the version under development was never the one
+# exercised locally, and a change could not be tried without releasing it.
+#
+# Set BEFORE the include: standard.mk declares INSTALL_DEPS_CMD with `?=`, so
+# a value assigned after it would lose to the default.
+#
+# CI still invokes the script directly rather than through this target: the
+# container jobs install `make` FROM bootstrap.toml, so it does not exist yet
+# at that point. Both callers now run the same command, which is the property
+# that matters.
+INSTALL_DEPS_CMD = bash src/just_bashit/install-deps.sh
+
 include standard.mk

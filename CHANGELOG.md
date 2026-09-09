@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **`make install-deps` runs this repo's own script instead of the published
+    one.** The target fetched `install-deps.sh` from the CDN via `jbx`, while
+    CI ran `src/just_bashit/install-deps.sh` — one step with two execution
+    homes, in the one repo that owns the script. The version under development
+    was never what ran locally, so a change could not be tried without
+    releasing it first.
+
+    `standard.mk` gained an `INSTALL_DEPS_CMD` hook upstream (defaulting to
+    the existing fetch, so no other repo changes), and this repo sets it to
+    the local script. CI still invokes the script directly, because the
+    container jobs install `make` *from* `bootstrap.toml` and it does not
+    exist yet at that point — but both callers now run the same command.
+
 ## [0.5.1] - 2026-09-08
 
 ### Added
