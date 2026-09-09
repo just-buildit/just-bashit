@@ -18,14 +18,14 @@ ______________________________________________________________________
 
 ## Steps
 
-| Step     | What it does                                                                                                                                                         |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `deps`   | Installs system packages from `bootstrap.toml` / `jb-deps.toml` in the current directory, via [`install-deps`](install-deps.md). Skipped when there is no deps file. |
-| `shell`  | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                                |
-| `ssh`    | Fixes `~/.ssh` permissions and creates an ed25519 key named after this host if there is no key at all. Prints the public key.                                        |
-| `git`    | Sets global git defaults that are not already set. Never touches `user.name` or `user.email`.                                                                        |
-| `tools`  | Installs `uv` if missing; installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.                                             |
-| `claude` | Installs Claude Code if the `claude` command is missing.                                                                                                             |
+| Step     | What it does                                                                                                                                                                                              |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deps`   | Installs system packages from `bootstrap.toml` / `jb-deps.toml` in the current directory, via [`install-deps`](install-deps.md). Skipped when there is no deps file.                                      |
+| `shell`  | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                                                                     |
+| `ssh`    | Tightens permissions across `~/.ssh` — repairing a directory copied from Windows, FAT, a zip or git — then creates an ed25519 key named after this host if there is no key at all. Prints the public key. |
+| `git`    | Sets global git defaults that are not already set. Never touches `user.name` or `user.email`.                                                                                                             |
+| `tools`  | Installs `uv` if missing; installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.                                                                                  |
+| `claude` | Installs Claude Code if the `claude` command is missing.                                                                                                                                                  |
 
 They always run in that order, whatever order you list them in — packages
 land before the steps that need `git`, `curl` and `ssh-keygen`.
@@ -164,6 +164,59 @@ jbx setup-system -s ssh
 ```
 
 `--key-name NAME` overrides the filename.
+
+### Repairing a `~/.ssh` that lost its permissions
+
+The step also tightens permissions on everything already in `~/.ssh`, before
+it considers generating anything — so it doubles as the repair for a
+directory that arrived from somewhere unable to carry POSIX modes. Run it on
+its own:
+
+```bash
+jbx setup-system -s ssh
+```
+
+**First, check whether you need it at all.** A Linux-to-Linux copy loses
+nothing if the transport carries modes, and then no repair is required:
+
+```bash
+rsync -a  ~/.ssh/  newhost:~/.ssh/           # -a preserves permissions
+tar cf - ~/.ssh | ssh newhost 'tar xf -'     # tar stores them too
+```
+
+Modes cannot survive a crossing that has nowhere to record them, and no
+choice of copy command changes that:
+
+| Crossing                                  | Why it loses them                              |
+| ----------------------------------------- | ---------------------------------------------- |
+| Windows filesystem under WSL (`/mnt/c/…`) | DrvFs has no POSIX modes; files read as `0777` |
+| FAT / exFAT stick                         | the filesystem has no mode bits                |
+| zip                                       | modes are optional and routinely dropped       |
+| a git repo                                | git records only the exec bit                  |
+
+Those are the cases this step is for. `ssh` refuses a key it considers
+readable by anyone else, with `UNPROTECTED PRIVATE KEY FILE` and no hint as
+to the fix.
+
+What it does, and deliberately does not do:
+
+| Target                                                             | Action                                            |
+| ------------------------------------------------------------------ | ------------------------------------------------- |
+| `~/.ssh` and any subdirectory                                      | owner gets `rwx`, group and other lose everything |
+| a private key, found by its `-----BEGIN … PRIVATE KEY-----` header | group and other lose everything                   |
+| `config`, `authorized_keys`, `authorized_keys2`                    | group and other lose everything                   |
+| `*.pub`                                                            | left alone — public by definition                 |
+| anything else, `known_hosts` included                              | left alone                                        |
+
+A key is recognised by that header rather than by its name, so one with no
+matching `.pub`, or not called `id_*`, is still repaired.
+
+!!! note "It only ever tightens"
+
+    The sweep removes group and other bits and never adds owner bits, so a
+    key deliberately kept at `0400` stays `0400` instead of gaining
+    owner-write. Running it twice changes nothing the second time, and
+    `--dry-run` changes nothing at all.
 
 !!! warning "`--yes` creates the key with an empty passphrase"
 
