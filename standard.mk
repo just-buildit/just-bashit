@@ -228,10 +228,28 @@ format: ## Auto-fix formatting with every configured formatter
 
 # System packages, from bootstrap.toml. A repo that declares none still gets a
 # working target — `jbx install-deps` is a no-op there.
+#
+# INSTALL_DEPS_CMD exists for the repo that OWNS the script this target
+# fetches. just-bashit runs `bash src/just_bashit/install-deps.sh` in CI and
+# the published copy from `make install-deps`, so one step had two execution
+# homes and the source under development was never the thing exercised
+# locally. Overriding the command is the fix; a private copy of this target
+# would be the same drift in a different file.
+#
+# The default is the fetch, so every repo that does not set it is unchanged.
+# A canned recipe rather than a one-liner, like RELEASE_WATCH_CMD: joining the
+# two commands with `;` would put them in one shell and silence the second,
+# changing what every repo sees for no reason.
+define _STD_INSTALL_DEPS_CMD
+@command -v jbx >/dev/null 2>&1 \
+    || curl -sSL https://just-buildit.github.io/get-jb.sh | bash
+PATH="$$HOME/.local/bin:$$PATH" jbx install-deps
+endef
+
+INSTALL_DEPS_CMD ?= $(_STD_INSTALL_DEPS_CMD)
+
 install-deps: ## Install system build dependencies (bootstrap.toml)
-	@command -v jbx >/dev/null 2>&1 \
-	    || curl -sSL https://just-buildit.github.io/get-jb.sh | bash
-	PATH="$$HOME/.local/bin:$$PATH" jbx install-deps
+	$(INSTALL_DEPS_CMD)
 
 # Project dependencies plus the git hook. There is deliberately no second
 # deps-ish target: `install` was a strict subset of this and has been folded in.
@@ -727,6 +745,13 @@ RELEASE_WATCH_CMD ?=
 # string. `version-check` requires every probe to agree — and to equal
 # VERSION= when one is given. Exported so the recipe's shell can read it.
 VERSION_PROBES ?=
+
+# The aggregate check a release commit must not have FAILED, read by
+# `tag-release`. Named rather than hard-coded because it is a workflow's job
+# name: a repo that calls its aggregator something else gets the check
+# skipped, not a spurious refusal.
+CI_CHECK_NAME ?= CI passed
+
 export VERSION_PROBES
 # Extra guidance echoed after `release-branch`, repo-specific by nature.
 RELEASE_BRANCH_NOTES ?=
@@ -869,6 +894,45 @@ endif
 # An existing tag on a DIFFERENT commit is still refused. That is the case
 # worth failing on: the artifacts were built from wherever the tag pointed when
 # the workflow ran, so moving it makes the tag disagree with what was published.
+# Refuse to tag a commit whose CI has already FAILED.
+#
+# `tag-release` checked everything about the TAG -- on main, in sync with
+# origin, versions agreeing, not moving an existing tag -- and nothing about
+# the tree it points at. A release tag must not move (see below), so a tag
+# pushed onto a known-red commit cannot be walked back: the only way out is
+# to burn a version number.
+#
+# ADVISORY when CI has not concluded, deliberately. Tagging ahead of CI is
+# legitimate and is now the normal flow: a bump-only release commit skips the
+# matrix and has nothing that can fail, and `release.yml`'s verify job waits
+# for the result either way and refuses to publish a tree CI did not certify.
+# So the cost of tagging early and being wrong is one pre-publish rerun, not
+# a bad publish -- not a reason to block.
+#
+# FAIL-OPEN on everything else. No `gh`, no auth, no such check, an API that
+# does not answer: the check is skipped and the release proceeds. A release
+# must not become un-cuttable because a convenience check could not run, and
+# the publish-side gate is the one that actually protects users.
+# >>> ci-guard (extracted verbatim by ci.yml — keep the markers)
+	@if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then \
+	    slug=$$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null); \
+	    if [ -n "$$slug" ]; then \
+	        concl=$$(gh api --paginate "repos/$$slug/commits/$$(git rev-parse HEAD)/check-runs" \
+	            --jq '[.check_runs[]|select(.name=="$(CI_CHECK_NAME)")][0]|select(.status=="completed")|.conclusion' \
+	            2>/dev/null | head -n1); \
+	        case "$$concl" in \
+	            failure|timed_out|cancelled|action_required) \
+	                echo "ERROR: '$(CI_CHECK_NAME)' concluded '$$concl' for HEAD."; \
+	                echo "  A release tag must not move, so tagging this commit"; \
+	                echo "  spends a version number. Fix main and cut the next one."; \
+	                exit 1 ;; \
+	            success) ;; \
+	            *) echo "tag-release: '$(CI_CHECK_NAME)' has not concluded for HEAD" \
+	                    "— tagging ahead of it; the release will wait for it." ;; \
+	        esac; \
+	    fi; \
+	fi
+# <<< ci-guard
 	@if git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null 2>&1; then \
 	    test "$$(git rev-parse "v$(VERSION)^{commit}")" = "$$(git rev-parse HEAD)" || \
 	        { echo "ERROR: v$(VERSION) exists and points at another commit."; \
@@ -999,7 +1063,7 @@ _STD_SECTION = case "$$t" in \
     all|help|setup|clean|test|test-fast|lint|format|install-deps) \
         tsec="Core";; \
     lint-*) tsec="Lint";; \
-    test-all|gates|gates-check) tsec="Aggregates";; \
+    test-all|gates|gates-check|gates-home-check) tsec="Aggregates";; \
     build|debug|release|pyext|compile-commands|tidy) tsec="C";; \
     wheel|test-python) tsec="Python";; \
     test-rust) tsec="Rust";; \
@@ -1129,6 +1193,20 @@ standard-check: ## Verify every vendored file matches canonical
 # The case that DOES happen is the reverse: a rule gets added without being
 # named in STD_TARGETS/LOCAL_TARGETS, so `help` silently omits it. Whether the
 # targets `help` lists actually do anything is ghost-check's job.
+#
+# The THIRD direction is the section menu. `gates-home-check` was added to
+# STD_TARGETS and given a recipe and a description, and every check above
+# passed -- it is a real target, it is documented, and help lists it. It was
+# listed under "Local", because _STD_SECTION never got a matching arm and the
+# fallthrough is Local by design. So the standard shipped a shared target that
+# every adopter's `make help` advertised as repo-specific, which is precisely
+# backwards: just-makeit's own CLAUDE.md tells readers that `make help`'s Local
+# section is the authoritative answer to which targets are that repo's alone.
+#
+# One direction only. A menu arm with no STD_TARGETS member is NOT an error --
+# most arms name feature-gated targets (`build`, `test-rust`, `doxygen`) that a
+# repo with that HAS_* flag off never defines, so the reverse check would fire
+# in almost every repo for nothing.
 help-check: ## Verify help documents every target, and every target is listed
 	@rc=0; \
 	 db=$$($(_STD_TMP)); trap 'rm -f "$$db"' EXIT; \
@@ -1139,6 +1217,18 @@ help-check: ## Verify help documents every target, and every target is listed
 	         echo "ERROR: '$$t' has no '## description', so help omits it"; \
 	         rc=1; \
 	     fi; \
+	 done; \
+	 nsec=0; \
+	 for t in $(STD_TARGETS); do \
+	     $(_STD_SECTION); \
+	     if [ "$$tsec" = "Local" ]; then \
+	         echo "ERROR: '$$t' is a STANDARD target, but help files it under"; \
+	         echo "  Local. A shared target advertised as repo-local is the"; \
+	         echo "  drift this file exists to prevent, and it is how a repo"; \
+	         echo "  comes to believe it owns something it merely vendors."; \
+	         echo "  Give it an arm in _STD_SECTION, beside its siblings."; \
+	         rc=1; \
+	     else nsec=$$((nsec + 1)); fi; \
 	 done; \
 	 withrecipe=$$(awk '/^[a-zA-Z0-9_.-]+:/ { n = $$0; sub(/:.*/, "", n); \
 	                                          b = 1; r = 0; next } \
@@ -1159,7 +1249,8 @@ help-check: ## Verify help documents every target, and every target is listed
 	     rc=1; \
 	 done; \
 	 if [ $$rc -eq 0 ]; then \
-	     echo "help-check: $(words $(ALL_TARGETS)) targets documented"; \
+	     echo "help-check: $(words $(ALL_TARGETS)) targets documented,"\
+	          "$$nsec standard target(s) filed"; \
 	 fi; \
 	 exit $$rc
 
