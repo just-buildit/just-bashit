@@ -46,7 +46,16 @@ TEST_FAST_CMD = $(BATS) --abort test
 # as pinned. shellcheck and shfmt are binaries with no PyPI-locked version to
 # own, so they keep their pinned `rev:` in .pre-commit-config.yaml, the same
 # exception clang-format takes.
-LINT_TOOLS = mdformat
+LINT_TOOLS = mdformat psscriptanalyzer
+
+# The PowerShell template is the one file here no Linux or macOS machine can
+# run, and CI's Windows leg does not execute it either -- it is a template, not
+# a test subject. So it gets a linter rather than a careful reader.
+# scripts/lint-powershell.sh owns finding a usable pwsh (native, or WSL's
+# pwsh.exe with wslpath translation); see scripts/pwsh-lib.sh for why that is
+# the hard part. Check-only, so NOT in FORMAT_TOOLS.
+PS_FILES = $(shell git ls-files '*.ps1' 2>/dev/null)
+LINT_psscriptanalyzer = ./scripts/lint-powershell.sh $(PS_FILES)
 
 # Markdown that is not ours: the bats submodules under test/ ship their own.
 MD_EXCLUDE_RE = ^test/
