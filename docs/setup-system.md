@@ -224,6 +224,10 @@ matching `.pub`, or not called `id_*`, is still repaired.
     it neither helps nor harms. Windows OpenSSH reads ACLs rather than mode
     bits, and repairing those needs `icacls`, which this step does not do.
 
+    That is what [`ssh-to-windows`](ssh-to-windows.md) is for: it publishes
+    WSL2's keys to `%USERPROFILE%\.ssh` and sets the ACLs Windows
+    OpenSSH requires.
+
     The suite states this rather than hiding it: the permission tests probe
     whether `chmod` sticks and **skip on the Windows runner**, where they
     would otherwise assert nothing while reporting green. They run for real
