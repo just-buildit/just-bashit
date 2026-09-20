@@ -211,7 +211,9 @@ RELEASE_WATCH_CMD = REPO=just-buildit/just-bashit RW_PKG=just-bashit \
 # ── Vendored from canonical ──────────────────────────────────────────────────
 # Verbatim copies the drift gate holds to canonical, alongside standard.mk
 # itself. Edit canonical and re-vendor; never edit these in place.
-VENDORED_FILES = scripts/release-watch.sh
+VENDORED_FILES = scripts/release-watch.sh \
+                 scripts/pwsh-lib.sh \
+                 scripts/lint-powershell.sh
 
 # ── install-deps ──────────────────────────────────────────────────────────────
 # This repo OWNS install-deps.sh, so it must run the source, not the copy the
