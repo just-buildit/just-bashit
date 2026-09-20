@@ -1,7 +1,8 @@
 # Templates
 
 Source: `src/just_bashit/function-template.sh`, `src/just_bashit/script-template`,
-`src/just_bashit/bashrc-template.sh`, `src/just_bashit/profile-template.sh`
+`src/just_bashit/bashrc-template.sh`, `src/just_bashit/profile-template.sh`,
+`src/just_bashit/profile-template.ps1`
 
 Copy-paste starting points for new bash functions and scripts, plus the
 opinionated shell configuration [`setup-system`](setup-system.md) installs.
@@ -97,3 +98,47 @@ jbx setup-system --template-profile
 
 Exports live here rather than in `bashrc-template.sh` so that the whole login
 session inherits them, not just interactive terminals.
+
+______________________________________________________________________
+
+## profile-template.ps1
+
+The PowerShell half. `bashrc-template.sh` makes bash behave; this makes
+`pwsh` behave the same way, so moving between WSL and Windows on one machine
+does not mean holding two sets of key bindings in your head.
+
+```powershell
+Copy-Item profile-template.ps1 $PROFILE.CurrentUserAllHosts
+```
+
+**The headline is Up/Down.** In bash, `history-search-backward` on the arrow
+keys means typing a prefix and pressing Up walks only the commands that
+*start* with it. PowerShell walks the whole history instead, ignoring what you
+typed — the biggest day-to-day difference between the two shells. PSReadLine
+can do exactly what bash does; it simply is not wired that way by default.
+
+Alongside it: 100,000 lines of de-duplicated history saved incrementally (the
+same three decisions as `HISTSIZE`/`erasedups`/`histappend`), `Tab` menu
+completion, `Ctrl-D` to exit on an empty line, and inline history predictions
+where the host supports them.
+
+`Ctrl-Left`/`Right`, `Home`/`End` and `Ctrl-U`/`K` already match bash in
+PSReadLine's defaults and are deliberately **not** re-bound — a binding
+restated is a binding that can drift from the default it was copying.
+
+!!! warning "`$PROFILE` may live in OneDrive"
+
+    With OneDrive's Known Folder Move enabled — the default on many Windows
+    installs — `Documents` is redirected and `$PROFILE` resolves to something
+    like `C:\Users\you\OneDrive\Documents\PowerShell\profile.ps1`. Your
+    profile then syncs between machines outside whatever version control you
+    chose. Run `$PROFILE.CurrentUserAllHosts` to see where yours actually is
+    before editing anything.
+
+!!! note "Nothing here is load-bearing"
+
+    A profile that throws paints a red wall over every new session, so every
+    block is guarded: no PSReadLine, or one too old, leaves a plain shell
+    rather than a broken one. Inline predictions additionally need a console
+    with virtual-terminal support — a *host* fact no version check can see —
+    so they are attempted and dropped rather than tested for.

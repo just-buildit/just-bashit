@@ -33,6 +33,12 @@ repos:
   # via uv.lock, so there is no additional_dependencies list to drift.
   - repo: local
     hooks:
+      - id: psscriptanalyzer
+        name: PSScriptAnalyzer
+        entry: make -s lint-psscriptanalyzer
+        language: system
+        pass_filenames: false
+        files: \.ps1$
       - id: mdformat
         name: mdformat
         entry: make -s lint-mdformat
