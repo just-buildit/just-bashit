@@ -80,6 +80,21 @@ endef
 # runs `make test`, `make coverage` and `make lint` — not `make docs-check` —
 # so a docs gate hung off docs-check would be local-only, which is how a rule
 # nobody enforces sits on main indefinitely.
+LOCAL_TARGETS += vendored-exclude
+
+# The vendored list lived in two places: VENDORED_FILES here, and a regex in
+# .pre-commit-config.yaml keeping shfmt away from those files. They had
+# already disagreed -- two files were vendored and the regex still named only
+# the first, so shfmt was free to rewrite them and they survived by nothing
+# better than having been formatted in this repo's style before they were
+# published. The Makefile declares; this generates.
+#
+# WRITES, like every other fixer-gate here: pre-commit fails on "files were
+# modified by this hook", so the fixer and the check cannot disagree about
+# what correct looks like.
+vendored-exclude: ## Generate the shfmt exclude from VENDORED_FILES
+	@./scripts/vendored_exclude.sh .pre-commit-config.yaml $(VENDORED_FILES)
+
 LOCAL_TARGETS += docs-coverage
 
 docs-coverage: ## Verify every shipped script is documented and in the nav

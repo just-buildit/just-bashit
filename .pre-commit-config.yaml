@@ -26,7 +26,7 @@ repos:
         # the drift gate guarantees the formatter reports a diff. Neither is
         # wrong on its own -- the vendored copy simply is not this repo's code
         # to format. Change it at canonical and re-vendor.
-        exclude: ^scripts/release-watch\.sh$
+        exclude: ^(scripts/release-watch\.sh|scripts/pwsh-lib\.sh|scripts/lint-powershell\.sh)$
 
   # Dispatches inward so the hook cannot format differently from `make format`.
   # Versions — mdformat and every plugin — come from pyproject.toml's dev group
@@ -49,6 +49,13 @@ repos:
       # always_run, not types: [markdown] — what breaks this gate is adding a
       # script under src/just_bashit/, and that commit touches no markdown at
       # all. A markdown-scoped hook would have stayed silent for make-run.
+      - id: vendored-exclude
+        name: shfmt's exclude matches VENDORED_FILES
+        entry: make -s vendored-exclude
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: docs-coverage
         name: docs-coverage
         entry: make -s docs-coverage
