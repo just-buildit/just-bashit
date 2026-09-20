@@ -18,6 +18,7 @@ nav = [
     {"bootstrap.toml" = "bootstrap-toml.md"},
     {"install-deps" = "install-deps.md"},
     {"setup-system" = "setup-system.md"},
+    {"ssh-to-windows" = "ssh-to-windows.md"},
     {"inspect" = "inspect.md"},
   ]},
   {"Libraries" = [

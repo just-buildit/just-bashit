@@ -25,3 +25,7 @@ def jb_inspect() -> None:
 
 def jb_setup_system() -> None:
     _exec("setup-system.sh")
+
+
+def jb_ssh_to_windows() -> None:
+    _exec("ssh-to-windows.sh")
