@@ -106,6 +106,35 @@ decision to make, not a failure to fix. Nothing is overwritten until you say so.
     mistake worth hearing about rather than a silent success. A caller that
     wants it optional can test `/proc/version` itself.
 
+## Publishing a key is not the same as selecting it
+
+This tool puts the key where Windows can read it. It does not decide which key
+ssh offers, and for a key whose name is not one of the defaults (`id_rsa`,
+`id_ed25519`, ...) ssh will never offer it at all. In WSL that is usually
+invisible, because the key is in your agent; Windows has no access to that
+agent, so the same key that works in the shell is simply not tried.
+
+The symptom is an authentication failure that looks like the key never
+arrived:
+
+```text
+git@github.com: Permission denied (publickey).
+```
+
+Point at it explicitly in `%USERPROFILE%\.ssh\config`:
+
+```ssh-config
+Host github.com
+    User git
+    IdentityFile ~/.ssh/your-key-name
+    IdentitiesOnly yes
+```
+
+Windows OpenSSH expands a leading `~` to `%USERPROFILE%`, so that path is
+portable between machines. If your config has a managed or generated block in
+it, put this **after** that block: ssh takes the first value it finds for a
+keyword, so an earlier `Host` entry wins.
+
 ## Verifying it worked
 
 From Windows, not from WSL — the whole point is the Windows side:
