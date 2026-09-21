@@ -25,7 +25,7 @@ ______________________________________________________________________
 | `ssh`    | Tightens permissions across `~/.ssh` — repairing a directory copied from Windows, FAT, a zip or git — then creates an ed25519 key named after this host if there is no key at all. Prints the public key.       |
 | `git`    | Sets global git defaults that are not already set, and an unset `user.name` / `user.email` from the environment or a prompt.                                                                                    |
 | `tools`  | Installs `uv` if missing; installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.                                                                                        |
-| `pwsh`   | Installs PowerShell 7 and the PSScriptAnalyzer module, so `.ps1` files can be linted on this machine. Linux and macOS only — see below.                                                                   |
+| `pwsh`   | Installs PowerShell 7 and the PSScriptAnalyzer module, so `.ps1` files can be linted on this machine. Linux and macOS only — see below.                                                                         |
 | `claude` | Installs Claude Code if the `claude` command is missing.                                                                                                                                                        |
 
 They always run in that order, whatever order you list them in — packages

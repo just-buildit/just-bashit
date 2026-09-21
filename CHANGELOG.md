@@ -89,7 +89,11 @@
     `tar`, with a message naming neither the architecture nor the download.
     Four tests pin a platform through `JB_UNAME_S`/`JB_UNAME_M` and assert
     the tarball that comes out; hiding `pwsh` from `PATH` instead would prove
-    nothing, since `/bin` is a symlink to `/usr/bin` on Debian.
+    nothing, since `/bin` is a symlink to `/usr/bin` on Debian. The
+    interpreter is named through `JB_PWSH` for the same reason, and for one
+    more: GitHub's macOS and Windows images ship `pwsh`, so on those runners
+    every install test would have taken the "already installed" path and
+    checked nothing.
 
     The version is pinned in the script, so an upgrade is one you chose. The
     URL is asserted against that one declaration rather than against a copy

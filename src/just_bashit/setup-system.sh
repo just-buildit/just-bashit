@@ -718,6 +718,15 @@ _PS_VER="7.6.6"
 _PWSH_DIR="/opt/microsoft/powershell/7"
 _PWSH_LINK="/usr/bin/pwsh"
 
+# The interpreter this step looks for and then drives. Named through a
+# variable so a test can point it at an interpreter that is not there, or at
+# a stub that is: PATH cannot express either, since /bin is a symlink to
+# /usr/bin on Debian and a name removed from one is still found through the
+# other. Every runner that already ships pwsh — GitHub's macOS and Windows
+# images do — would otherwise take the "already installed" path and test
+# nothing.
+_PWSH_BIN="${JB_PWSH:-pwsh}"
+
 # Why the step could not install anything here, phrased for the summary. An
 # install helper returns 2 and sets this when the machine cannot have pwsh
 # (no upstream build, no downloader, no Homebrew), and 1 when it tried and
@@ -848,14 +857,14 @@ _pwsh_install_darwin() {
 # time it is asked, however recent the copy on disk.
 # ---------------------------------------------------------------------------
 _pwsh_analyzer() {
-	if _have pwsh && pwsh -NoProfile -Command \
+	if _have "${_PWSH_BIN}" && "${_PWSH_BIN}" -NoProfile -Command \
 		'if (Get-Module -ListAvailable -Name PSScriptAnalyzer) { exit 0 } else { exit 1 }' \
 		>/dev/null 2>&1; then
 		_info "PSScriptAnalyzer already installed"
 		return 0
 	fi
 	_info "installing PSScriptAnalyzer"
-	_run pwsh -NoProfile -Command \
+	_run "${_PWSH_BIN}" -NoProfile -Command \
 		"Install-Module PSScriptAnalyzer -Scope CurrentUser -Force"
 }
 
@@ -864,8 +873,8 @@ step_pwsh() {
 	_pwsh_uname_init
 
 	local rc=0
-	if _have pwsh; then
-		_info "pwsh already installed ($(pwsh --version 2>/dev/null || echo ok))"
+	if _have "${_PWSH_BIN}"; then
+		_info "pwsh already installed ($("${_PWSH_BIN}" --version 2>/dev/null || echo ok))"
 	else
 		case "${_UNAME_S}" in
 		Linux) _pwsh_install_linux || rc=$? ;;

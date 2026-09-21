@@ -729,10 +729,15 @@ _write_key() {
 # ---------------------------------------------------------------------------
 # pwsh step
 #
-# Every case pins the platform with JB_UNAME_S/JB_UNAME_M rather than by
-# editing PATH. PATH cannot do this job: /bin is a symlink to /usr/bin on
-# Debian, so a command hidden from one is still found through the other, and
-# a test that "passed" that way would pass with the step deleted.
+# Every case pins the platform with JB_UNAME_S/JB_UNAME_M, and the
+# interpreter with JB_PWSH, rather than by editing PATH. PATH cannot do
+# either job: /bin is a symlink to /usr/bin on Debian, so a command hidden
+# from one is still found through the other, and a test that "passed" that
+# way would pass with the step deleted.
+#
+# JB_PWSH matters beyond that: GitHub's macOS and Windows images ship pwsh,
+# so on those runners the step would take its "already installed" path and
+# the install would never be exercised at all.
 #
 # All of them are dry runs. The real step writes to /opt and /usr/bin, which
 # is not something a test suite may do to the machine running it.
@@ -750,33 +755,33 @@ _ps_ver() {
 	local ver
 	ver="$(_ps_ver)"
 	assert [ -n "${ver}" ]
-	run env JB_UNAME_S=Linux JB_UNAME_M=x86_64 setup-system.sh -n -s pwsh
+	run env JB_PWSH=no-pwsh-here JB_UNAME_S=Linux JB_UNAME_M=x86_64 setup-system.sh -n -s pwsh
 	assert_success
 	assert_output --partial "powershell-${ver}-linux-x64.tar.gz"
 	assert_output --partial "/releases/download/v${ver}/"
 }
 
 @test 'pwsh step derives the arm64 tarball on aarch64' {
-	run env JB_UNAME_S=Linux JB_UNAME_M=aarch64 setup-system.sh -n -s pwsh
+	run env JB_PWSH=no-pwsh-here JB_UNAME_S=Linux JB_UNAME_M=aarch64 setup-system.sh -n -s pwsh
 	assert_success
 	assert_output --partial "linux-arm64.tar.gz"
 	refute_output --partial "linux-x64.tar.gz"
 }
 
 @test 'pwsh step derives the arm64 tarball when uname says arm64' {
-	run env JB_UNAME_S=Linux JB_UNAME_M=arm64 setup-system.sh -n -s pwsh
+	run env JB_PWSH=no-pwsh-here JB_UNAME_S=Linux JB_UNAME_M=arm64 setup-system.sh -n -s pwsh
 	assert_success
 	assert_output --partial "linux-arm64.tar.gz"
 }
 
 @test 'pwsh step derives the arm32 tarball on armv7l' {
-	run env JB_UNAME_S=Linux JB_UNAME_M=armv7l setup-system.sh -n -s pwsh
+	run env JB_PWSH=no-pwsh-here JB_UNAME_S=Linux JB_UNAME_M=armv7l setup-system.sh -n -s pwsh
 	assert_success
 	assert_output --partial "linux-arm32.tar.gz"
 }
 
 @test 'pwsh step downloads nothing for an architecture with no build' {
-	run env JB_UNAME_S=Linux JB_UNAME_M=riscv64 setup-system.sh -n -s pwsh
+	run env JB_PWSH=no-pwsh-here JB_UNAME_S=Linux JB_UNAME_M=riscv64 setup-system.sh -n -s pwsh
 	assert_success
 	assert_output --partial "no PowerShell build for riscv64"
 	assert_output --partial "pwsh:    skipped"
@@ -784,7 +789,7 @@ _ps_ver() {
 }
 
 @test 'pwsh step links the unpacked tree onto PATH' {
-	run env JB_UNAME_S=Linux JB_UNAME_M=x86_64 setup-system.sh -n -s pwsh
+	run env JB_PWSH=no-pwsh-here JB_UNAME_S=Linux JB_UNAME_M=x86_64 setup-system.sh -n -s pwsh
 	assert_success
 	assert_output --partial "/opt/microsoft/powershell/7"
 	# -f, not a bare ln: re-running the step is how an upgrade lands, and a
@@ -793,22 +798,22 @@ _ps_ver() {
 }
 
 @test 'pwsh step never fetches a linux tarball on macOS' {
-	run env JB_UNAME_S=Darwin JB_UNAME_M=arm64 setup-system.sh -n -s pwsh
+	run env JB_PWSH=no-pwsh-here JB_UNAME_S=Darwin JB_UNAME_M=arm64 setup-system.sh -n -s pwsh
 	assert_success
 	refute_output --partial "linux-arm64.tar.gz"
 	refute_output --partial "releases/download"
 }
 
 @test 'pwsh step skips a platform it cannot provision' {
-	run env JB_UNAME_S=MINGW64_NT-10.0 JB_UNAME_M=x86_64 \
-		setup-system.sh -n -s pwsh
+	run env JB_PWSH=no-pwsh-here JB_UNAME_S=MINGW64_NT-10.0 \
+		JB_UNAME_M=x86_64 setup-system.sh -n -s pwsh
 	assert_success
 	assert_output --partial "pwsh:    skipped"
 	refute_output --partial "releases/download"
 }
 
 @test 'pwsh step installs PSScriptAnalyzer for the current user only' {
-	run env JB_UNAME_S=Linux JB_UNAME_M=x86_64 setup-system.sh -n -s pwsh
+	run env JB_PWSH=no-pwsh-here JB_UNAME_S=Linux JB_UNAME_M=x86_64 setup-system.sh -n -s pwsh
 	assert_success
 	assert_output --partial "Install-Module PSScriptAnalyzer -Scope CurrentUser -Force"
 }
@@ -816,11 +821,47 @@ _ps_ver() {
 @test 'pwsh step downloads nothing during a dry run' {
 	# TMPDIR is where the tarball would land, pointed somewhere this test
 	# can inspect — otherwise "no file appeared" proves nothing.
-	run env TMPDIR="${BATS_TEST_TMPDIR}" JB_UNAME_S=Linux JB_UNAME_M=x86_64 \
+	run env TMPDIR="${BATS_TEST_TMPDIR}" JB_PWSH=no-pwsh-here JB_UNAME_S=Linux JB_UNAME_M=x86_64 \
 		setup-system.sh -n -s pwsh
 	assert_success
 	assert_output --partial "${BATS_TEST_TMPDIR}/powershell-$(_ps_ver)-linux-x64.tar.gz"
 	assert [ ! -e "${BATS_TEST_TMPDIR}/powershell-$(_ps_ver)-linux-x64.tar.gz" ]
+}
+
+# A stub standing in for an interpreter that is already on the machine.
+# EXIT decides what its PSScriptAnalyzer probe answers, which is the only
+# thing the step asks it.
+_pwsh_stub() {
+	local path="${BATS_TEST_TMPDIR}/pwsh-stub" exit_code="$1"
+	cat >"${path}" <<-EOF
+		#!/usr/bin/env bash
+		[ "\$1" = "--version" ] && { echo "PowerShell 7.9.9"; exit 0; }
+		exit ${exit_code}
+	EOF
+	chmod +x "${path}"
+	printf '%s\n' "${path}"
+}
+
+@test 'pwsh step installs nothing when an interpreter is already there' {
+	local stub
+	stub="$(_pwsh_stub 0)"
+	run env JB_PWSH="${stub}" JB_UNAME_S=Linux JB_UNAME_M=x86_64 \
+		setup-system.sh -n -s pwsh
+	assert_success
+	assert_output --partial "pwsh already installed (PowerShell 7.9.9)"
+	assert_output --partial "PSScriptAnalyzer already installed"
+	refute_output --partial "releases/download"
+	assert_output --partial "pwsh:    ok"
+}
+
+@test 'pwsh step adds the module to an interpreter that lacks it' {
+	local stub
+	stub="$(_pwsh_stub 1)"
+	run env JB_PWSH="${stub}" JB_UNAME_S=Linux JB_UNAME_M=x86_64 \
+		setup-system.sh -n -s pwsh
+	assert_success
+	refute_output --partial "releases/download"
+	assert_output --partial "Install-Module PSScriptAnalyzer -Scope CurrentUser -Force"
 }
 
 # ---------------------------------------------------------------------------
