@@ -21,11 +21,13 @@ source "${_SCRIPT_DIR}/file.sh"
 _JBS_BASE="${JB_JBS_BASE:-https://just-buildit.github.io/jbs}"
 
 # Order matters: packages first (later steps want git, curl and ssh), shell
-# before ssh (the agent lives in the shell config), tools before claude.
+# before ssh (the agent lives in the shell config), tools and pwsh before
+# claude. pwsh comes after deps because it downloads with curl and unpacks
+# with tar, both of which the deps step is what puts on a bare machine.
 # Kept as an array as well as a string because IFS is newline+tab here, so
 # a space-separated string does not word-split.
-_STEPS_ALL=(deps shell ssh git tools claude)
-_STEPS_ALL_STR="deps shell ssh git tools claude"
+_STEPS_ALL=(deps shell ssh git tools pwsh claude)
+_STEPS_ALL_STR="deps shell ssh git tools pwsh claude"
 
 DRY_RUN=0
 VERBOSE=0
@@ -59,6 +61,8 @@ read -r -d '' HELP <<-'EOF' || true
 	          GIT_AUTHOR_EMAIL, else is asked for at a terminal.
 	  tools   Install uv if missing; install pre-commit hooks when the
 	          current directory is a repo with .pre-commit-config.yaml.
+	  pwsh    Install PowerShell 7 and the PSScriptAnalyzer module, so
+	          .ps1 files can be linted here. Linux and macOS only.
 	  claude  Install Claude Code if the claude command is missing.
 
 	Options:
@@ -693,6 +697,206 @@ step_tools() {
 	fi
 
 	_result "tools:   ok"
+}
+
+# ---------------------------------------------------------------------------
+# pwsh — native PowerShell 7, plus the PSScriptAnalyzer module the .ps1 lint
+# gate needs.
+#
+# Unix side only, for now: install-deps has a winget section (#60), but this
+# step does not route through it yet (#59), so on Windows it reports that it
+# skipped rather than pretending to have done something.
+#
+# A native interpreter is what removes the WSL path-translation problem
+# wholesale: with pwsh on PATH, Linux paths are passed through untouched
+# instead of being rewritten with `wslpath -w` for pwsh.exe.
+#
+# The version is PINNED so an upgrade is one you chose, not whatever was
+# released this morning. Bump it here.
+# ---------------------------------------------------------------------------
+_PS_VER="7.6.6"
+_PWSH_DIR="/opt/microsoft/powershell/7"
+_PWSH_LINK="/usr/bin/pwsh"
+
+# Why the step could not install anything here, phrased for the summary. An
+# install helper returns 2 and sets this when the machine cannot have pwsh
+# (no upstream build, no downloader, no Homebrew), and 1 when it tried and
+# the install itself failed — the summary must not call the first a failure.
+_PWSH_SKIP=""
+
+# uname is read through these so a test can pin a platform. PATH cannot do
+# that job: hiding `pwsh` by editing PATH would hide it from the check AND
+# from the install, so the test would pass with the feature deleted.
+#
+# Read inside the step, never at file scope: every other step — and --help —
+# would otherwise die under `set -e` on a machine with no uname, which is
+# what a PATH-restricted run is. An absent uname leaves the platform
+# "unknown", and the step says so rather than guessing Linux.
+_UNAME_S=""
+_UNAME_M=""
+_pwsh_uname_init() {
+	_UNAME_S="${JB_UNAME_S:-$(uname -s 2>/dev/null || echo unknown)}"
+	_UNAME_M="${JB_UNAME_M:-$(uname -m 2>/dev/null || echo unknown)}"
+}
+
+# ---------------------------------------------------------------------------
+# _pwsh_arch — the PowerShell build name for this machine, DERIVED from
+# uname rather than typed. Several of these boxes are arm64, and a hardcoded
+# x64 tarball fails inside tar with a message that names neither the
+# architecture nor the download.
+# ---------------------------------------------------------------------------
+_pwsh_arch() {
+	case "${_UNAME_M}" in
+	x86_64) printf 'x64\n' ;;
+	aarch64 | arm64) printf 'arm64\n' ;;
+	armv7l) printf 'arm32\n' ;;
+	*) return 1 ;;
+	esac
+}
+
+# ---------------------------------------------------------------------------
+# _pwsh_sudo_init — the privilege prefix, derived the same way install-deps
+# derives its own: nothing when already root, sudo when it exists, and bare
+# otherwise so the failure comes from the command that actually needed root.
+#
+# An ARRAY, because IFS is newline+tab here: an empty string variable would
+# expand to one empty argument rather than to nothing.
+# ---------------------------------------------------------------------------
+_PWSH_SUDO=()
+_pwsh_sudo_init() {
+	if [[ $(id -u) -ne 0 ]] && _have sudo; then
+		_PWSH_SUDO=(sudo)
+	fi
+}
+
+# _pwsh_priv CMD... — _run with that prefix in front, so --dry-run prints
+# exactly the command a real run would execute, sudo included.
+_pwsh_priv() {
+	_run "${_PWSH_SUDO[@]+"${_PWSH_SUDO[@]}"}" "$@"
+}
+
+# ---------------------------------------------------------------------------
+# _pwsh_install_linux — the pinned tarball into /opt, symlinked onto PATH.
+# ---------------------------------------------------------------------------
+_pwsh_install_linux() {
+	local arch url tarball
+	if ! arch="$(_pwsh_arch)"; then
+		_warn "no PowerShell build for ${_UNAME_M}"
+		_PWSH_SKIP="no build for ${_UNAME_M}"
+		return 2
+	fi
+	if ! _have curl; then
+		_warn "curl not installed — cannot download PowerShell"
+		_PWSH_SKIP="no curl"
+		return 2
+	fi
+	if ! _have tar; then
+		_warn "tar not installed — cannot unpack PowerShell"
+		_PWSH_SKIP="no tar"
+		return 2
+	fi
+
+	url="https://github.com/PowerShell/PowerShell/releases/download/v${_PS_VER}/powershell-${_PS_VER}-linux-${arch}.tar.gz"
+	tarball="${TMPDIR:-/tmp}/powershell-${_PS_VER}-linux-${arch}.tar.gz"
+
+	_info "installing PowerShell ${_PS_VER} (linux-${arch}) into ${_PWSH_DIR}"
+	_curl_retry_opts_init
+	if ! _run curl -sSL --fail "${_CURL_RETRY_OPTS[@]}" --connect-timeout 30 \
+		-o "${tarball}" "${url}"; then
+		_warn "could not download ${url}"
+		return 1
+	fi
+
+	_pwsh_sudo_init
+	# -f on the symlink, not a bare ln: re-running this step is how an
+	# upgrade lands, and a second ln over an existing link is an error
+	# rather than a no-op.
+	if _pwsh_priv mkdir -p "${_PWSH_DIR}" &&
+		_pwsh_priv tar zxf "${tarball}" -C "${_PWSH_DIR}" &&
+		_pwsh_priv chmod +x "${_PWSH_DIR}/pwsh" &&
+		_pwsh_priv ln -sf "${_PWSH_DIR}/pwsh" "${_PWSH_LINK}"; then
+		_run rm -f "${tarball}"
+		return 0
+	fi
+	_warn "unpacking PowerShell failed"
+	_run rm -f "${tarball}"
+	return 1
+}
+
+# ---------------------------------------------------------------------------
+# _pwsh_install_darwin — Homebrew, because the tarball above is a LINUX
+# build. Downloading it on a Mac would install something that cannot run,
+# and the first sign of it would be an exec format error from the lint gate.
+# ---------------------------------------------------------------------------
+_pwsh_install_darwin() {
+	if ! _have brew; then
+		_warn "Homebrew not installed — cannot install PowerShell here"
+		_PWSH_SKIP="no brew"
+		return 2
+	fi
+	_info "installing PowerShell via Homebrew"
+	_run brew install --cask powershell
+}
+
+# ---------------------------------------------------------------------------
+# _pwsh_analyzer — the module `make lint-psscriptanalyzer` requires. It fails
+# loudly when the module is absent, deliberately: an analyzer that never ran
+# has checked nothing.
+#
+# -Scope CurrentUser needs no elevation. The Get-Module probe is what keeps
+# this idempotent — Install-Module -Force reinstalls over the network every
+# time it is asked, however recent the copy on disk.
+# ---------------------------------------------------------------------------
+_pwsh_analyzer() {
+	if _have pwsh && pwsh -NoProfile -Command \
+		'if (Get-Module -ListAvailable -Name PSScriptAnalyzer) { exit 0 } else { exit 1 }' \
+		>/dev/null 2>&1; then
+		_info "PSScriptAnalyzer already installed"
+		return 0
+	fi
+	_info "installing PSScriptAnalyzer"
+	_run pwsh -NoProfile -Command \
+		"Install-Module PSScriptAnalyzer -Scope CurrentUser -Force"
+}
+
+step_pwsh() {
+	_head "pwsh — PowerShell and PSScriptAnalyzer"
+	_pwsh_uname_init
+
+	local rc=0
+	if _have pwsh; then
+		_info "pwsh already installed ($(pwsh --version 2>/dev/null || echo ok))"
+	else
+		case "${_UNAME_S}" in
+		Linux) _pwsh_install_linux || rc=$? ;;
+		Darwin) _pwsh_install_darwin || rc=$? ;;
+		*)
+			# Not wired to install-deps' winget section yet (#59), so
+			# there is nothing honest to do here but say so.
+			_warn "no PowerShell recipe for ${_UNAME_S} — provision it with that system's own package manager"
+			_PWSH_SKIP="${_UNAME_S}"
+			rc=2
+			;;
+		esac
+		case ${rc} in
+		0) ;;
+		2)
+			_result "pwsh:    skipped (${_PWSH_SKIP})"
+			return 0
+			;;
+		*)
+			_result "pwsh:    failed"
+			return 0
+			;;
+		esac
+	fi
+
+	if _pwsh_analyzer; then
+		_result "pwsh:    ok"
+	else
+		_warn "PSScriptAnalyzer was not installed"
+		_result "pwsh:    failed (PSScriptAnalyzer)"
+	fi
 }
 
 # claude — Anthropic's own installer; it puts the binary in ~/.local/bin,

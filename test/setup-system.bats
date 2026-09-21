@@ -1,4 +1,4 @@
-# shellcheck disable=SC2154  # BATS_TEST_TMPDIR, HELP_REGEX set by bats/common-setup
+# shellcheck disable=SC2154  # BATS_TEST_TMPDIR, HELP_REGEX, PROJECT_ROOT set by bats/common-setup
 # shellcheck disable=SC2016  # $HOME stays unexpanded on purpose in RC_LINE/PF_LINE
 # shellcheck disable=SC2012  # ls -ld is the portable way to read a mode string
 load 'test_helper/common-setup'
@@ -157,6 +157,7 @@ _write_deps_toml() {
 	assert_output --partial "ssh —"
 	assert_output --partial "git —"
 	assert_output --partial "tools —"
+	assert_output --partial "pwsh —"
 	assert_output --partial "claude —"
 }
 
@@ -723,4 +724,135 @@ _write_key() {
 	run setup-system.sh -n -s ssh
 	assert_success
 	assert_equal "$(_mode "${HOME}/.ssh/id_ed25519")" "777"
+}
+
+# ---------------------------------------------------------------------------
+# pwsh step
+#
+# Every case pins the platform with JB_UNAME_S/JB_UNAME_M rather than by
+# editing PATH. PATH cannot do this job: /bin is a symlink to /usr/bin on
+# Debian, so a command hidden from one is still found through the other, and
+# a test that "passed" that way would pass with the step deleted.
+#
+# All of them are dry runs. The real step writes to /opt and /usr/bin, which
+# is not something a test suite may do to the machine running it.
+# ---------------------------------------------------------------------------
+
+# The pinned version, read from the script rather than restated here: a test
+# carrying its own copy would keep passing after a bump that touched only the
+# URL, which is the drift worth catching.
+_ps_ver() {
+	sed -n 's/^_PS_VER="\(.*\)"$/\1/p' \
+		"${PROJECT_ROOT}/src/just_bashit/setup-system.sh"
+}
+
+@test 'pwsh step derives the x64 tarball on x86_64' {
+	local ver
+	ver="$(_ps_ver)"
+	assert [ -n "${ver}" ]
+	run env JB_UNAME_S=Linux JB_UNAME_M=x86_64 setup-system.sh -n -s pwsh
+	assert_success
+	assert_output --partial "powershell-${ver}-linux-x64.tar.gz"
+	assert_output --partial "/releases/download/v${ver}/"
+}
+
+@test 'pwsh step derives the arm64 tarball on aarch64' {
+	run env JB_UNAME_S=Linux JB_UNAME_M=aarch64 setup-system.sh -n -s pwsh
+	assert_success
+	assert_output --partial "linux-arm64.tar.gz"
+	refute_output --partial "linux-x64.tar.gz"
+}
+
+@test 'pwsh step derives the arm64 tarball when uname says arm64' {
+	run env JB_UNAME_S=Linux JB_UNAME_M=arm64 setup-system.sh -n -s pwsh
+	assert_success
+	assert_output --partial "linux-arm64.tar.gz"
+}
+
+@test 'pwsh step derives the arm32 tarball on armv7l' {
+	run env JB_UNAME_S=Linux JB_UNAME_M=armv7l setup-system.sh -n -s pwsh
+	assert_success
+	assert_output --partial "linux-arm32.tar.gz"
+}
+
+@test 'pwsh step downloads nothing for an architecture with no build' {
+	run env JB_UNAME_S=Linux JB_UNAME_M=riscv64 setup-system.sh -n -s pwsh
+	assert_success
+	assert_output --partial "no PowerShell build for riscv64"
+	assert_output --partial "pwsh:    skipped"
+	refute_output --partial "releases/download"
+}
+
+@test 'pwsh step links the unpacked tree onto PATH' {
+	run env JB_UNAME_S=Linux JB_UNAME_M=x86_64 setup-system.sh -n -s pwsh
+	assert_success
+	assert_output --partial "/opt/microsoft/powershell/7"
+	# -f, not a bare ln: re-running the step is how an upgrade lands, and a
+	# second ln over the existing link is an error rather than a no-op.
+	assert_output --regexp "ln -sf .*/pwsh /usr/bin/pwsh"
+}
+
+@test 'pwsh step never fetches a linux tarball on macOS' {
+	run env JB_UNAME_S=Darwin JB_UNAME_M=arm64 setup-system.sh -n -s pwsh
+	assert_success
+	refute_output --partial "linux-arm64.tar.gz"
+	refute_output --partial "releases/download"
+}
+
+@test 'pwsh step skips a platform it cannot provision' {
+	run env JB_UNAME_S=MINGW64_NT-10.0 JB_UNAME_M=x86_64 \
+		setup-system.sh -n -s pwsh
+	assert_success
+	assert_output --partial "pwsh:    skipped"
+	refute_output --partial "releases/download"
+}
+
+@test 'pwsh step installs PSScriptAnalyzer for the current user only' {
+	run env JB_UNAME_S=Linux JB_UNAME_M=x86_64 setup-system.sh -n -s pwsh
+	assert_success
+	assert_output --partial "Install-Module PSScriptAnalyzer -Scope CurrentUser -Force"
+}
+
+@test 'pwsh step downloads nothing during a dry run' {
+	# TMPDIR is where the tarball would land, pointed somewhere this test
+	# can inspect — otherwise "no file appeared" proves nothing.
+	run env TMPDIR="${BATS_TEST_TMPDIR}" JB_UNAME_S=Linux JB_UNAME_M=x86_64 \
+		setup-system.sh -n -s pwsh
+	assert_success
+	assert_output --partial "${BATS_TEST_TMPDIR}/powershell-$(_ps_ver)-linux-x64.tar.gz"
+	assert [ ! -e "${BATS_TEST_TMPDIR}/powershell-$(_ps_ver)-linux-x64.tar.gz" ]
+}
+
+# ---------------------------------------------------------------------------
+# The step list is declared in four places — the array, the string, --help
+# and the docs table. These two keep them from drifting apart; the array and
+# the string are already covered by every step running above.
+# ---------------------------------------------------------------------------
+
+# The steps this build actually knows, taken from the error the validator
+# prints rather than restated here.
+_known_steps() {
+	setup-system.sh -n -s bogus 2>&1 | sed -n 's/.*known steps: //p'
+}
+
+@test 'every known step is described in --help' {
+	local steps help_out step
+	steps="$(_known_steps)"
+	assert [ -n "${steps}" ]
+	help_out="$(setup-system.sh --help)"
+	for step in ${steps}; do
+		echo "${help_out}" | grep -qE "^  ${step}[[:space:]]+[A-Z]" ||
+			fail "step '${step}' has no entry in the --help step list"
+	done
+}
+
+@test 'every known step is in the docs steps table' {
+	local steps step
+	steps="$(_known_steps)"
+	assert [ -n "${steps}" ]
+	for step in ${steps}; do
+		grep -qE "^\| \`${step}\`" \
+			"${PROJECT_ROOT}/docs/setup-system.md" ||
+			fail "step '${step}' has no row in docs/setup-system.md"
+	done
 }
