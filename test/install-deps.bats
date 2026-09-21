@@ -1,8 +1,13 @@
-# shellcheck disable=SC2154  # BATS_TEST_TMPDIR, HELP_REGEX set by bats/common-setup
+# shellcheck disable=SC2154  # BATS_TEST_TMPDIR, HELP_REGEX, PROJECT_ROOT set by bats/common-setup
 load 'test_helper/common-setup'
 _common_setup
 
 setup() {
+	# Where the winget stub records its calls. Set here rather than by the
+	# stub factory: that runs inside a command substitution, so anything it
+	# assigns dies with the subshell and the test body reads an empty path.
+	WINGET_LOG="${BATS_TEST_TMPDIR}/winget.log"
+
 	GROUPED_FILE="${BATS_TEST_TMPDIR}/grouped.toml"
 	INLINE_FILE="${BATS_TEST_TMPDIR}/inline.toml"
 	EMPTY_FILE="${BATS_TEST_TMPDIR}/empty.toml"
@@ -907,4 +912,192 @@ EOF
 		PATH="${shim}:${PATH}" run install-deps.sh -s apt "${INLINE_FILE}"
 	assert_success
 	refute_output --partial "reported errors"
+}
+
+# ---------------------------------------------------------------------------
+# winget
+#
+# Driven through a stub named by JB_WINGET. PATH cannot express "no winget
+# here": the WindowsApps interop directory is on PATH under both MSYS2 and
+# WSL, and a name removed from one spelling is still reachable by the other.
+# ---------------------------------------------------------------------------
+
+# A stub standing in for winget. LIST_RC decides what its `list` probe
+# answers — 0 for "already installed", 20 for "not installed", which is what
+# the real winget returns (0x8A150014 truncated to its low byte). Every call
+# is appended to a log, so a test can assert what was invoked and how often.
+_winget_stub() {
+	local path="${BATS_TEST_TMPDIR}/winget-stub" rc="$1"
+	cat >"${path}" <<-EOF
+		#!/usr/bin/env bash
+		printf '%s\n' "\$*" >>"${WINGET_LOG}"
+		[ "\$1" = "list" ] && exit ${rc}
+		exit 0
+	EOF
+	chmod +x "${path}"
+	printf '%s\n' "${path}"
+}
+
+_winget_toml() {
+	local f="${BATS_TEST_TMPDIR}/winget.toml"
+	printf '[runtime.winget]\npackages = [%s]\n' "$1" >"${f}"
+	printf '%s\n' "${f}"
+}
+
+@test 'winget section installs one package per invocation' {
+	local stub f
+	stub="$(_winget_stub 20)"
+	f="$(_winget_toml '"Python.Python.3.13", "GitHub.cli"')"
+	run env JB_WINGET="${stub}" install-deps.sh -s winget "${f}"
+	assert_success
+	# winget install takes a single query: a second id on the same line is
+	# read as an argument to the first, and the install silently covers less
+	# than the manifest asked for.
+	assert [ "$(grep -c '^install ' "${WINGET_LOG}")" -eq 2 ]
+	assert [ "$(grep -c 'Python.Python.3.13' "${WINGET_LOG}")" -ge 1 ]
+	assert [ "$(grep -c 'GitHub.cli' "${WINGET_LOG}")" -ge 1 ]
+	# Exactly one --id per line. A whole-output regexp would match across
+	# two correct lines and prove nothing, so this counts per line.
+	run awk '/^install /{
+		n = 0
+		for (i = 1; i <= NF; i++) if ($i == "--id") n++
+		if (n != 1) print NR ": " n " ids on one line"
+	}' "${WINGET_LOG}"
+	assert_success
+	assert_output ''
+}
+
+@test 'winget section skips a package winget already lists' {
+	local stub f
+	stub="$(_winget_stub 0)"
+	f="$(_winget_toml '"Python.Python.3.13"')"
+	run env JB_WINGET="${stub}" install-deps.sh -s winget "${f}"
+	assert_success
+	assert_output --partial "Python.Python.3.13 already installed"
+	assert [ "$(grep -c '^install ' "${WINGET_LOG}")" -eq 0 ]
+}
+
+@test 'winget install carries the non-interactive agreement flags' {
+	local stub f
+	stub="$(_winget_stub 20)"
+	f="$(_winget_toml '"Python.Python.3.13"')"
+	run env JB_WINGET="${stub}" install-deps.sh -s winget "${f}"
+	assert_success
+	run cat "${WINGET_LOG}"
+	assert_output --partial "--accept-package-agreements"
+	assert_output --partial "--accept-source-agreements"
+	assert_output --partial "--disable-interactivity"
+	assert_output --partial "--exact"
+	assert_output --partial "--silent"
+}
+
+@test 'winget dry run prints the install and probes nothing' {
+	local stub f
+	stub="$(_winget_stub 0)"
+	f="$(_winget_toml '"Python.Python.3.13"')"
+	run env JB_WINGET="${stub}" install-deps.sh -n -s winget "${f}"
+	assert_success
+	assert_output --partial "install --id Python.Python.3.13"
+	# -n has to print the same plan on a machine with no winget at all,
+	# which is where a manifest is usually checked — so it does not probe.
+	assert [ ! -e "${WINGET_LOG}" ]
+}
+
+@test 'winget never gets a sudo prefix, even with --sudo' {
+	local stub f
+	stub="$(_winget_stub 20)"
+	f="$(_winget_toml '"Python.Python.3.13"')"
+	run env JB_WINGET="${stub}" install-deps.sh -n --sudo -s winget "${f}"
+	assert_success
+	refute_output --partial "sudo"
+}
+
+@test 'winget reports a proxy rather than passing one it would refuse' {
+	local stub f
+	stub="$(_winget_stub 20)"
+	f="$(_winget_toml '"Python.Python.3.13"')"
+	run env JB_WINGET="${stub}" http_proxy="http://proxy.example:3128" \
+		install-deps.sh -n -s winget "${f}"
+	assert_success
+	assert_output --partial "winget settings --enable ProxyCommandLineOptions"
+	# `env http_proxy=...` would be a prefix winget ignores, and --proxy is
+	# refused outright until an administrator enables it.
+	refute_output --partial "env http_proxy"
+	refute_output --partial "--proxy"
+}
+
+@test 'a missing winget fails by name, in both spellings' {
+	local f
+	f="$(_winget_toml '"Python.Python.3.13"')"
+	run env JB_WINGET="" install-deps.sh -s winget "${f}"
+	assert_failure
+	assert_output --partial "winget not found"
+	assert_output --partial "winget.exe"
+}
+
+# ---------------------------------------------------------------------------
+# The package-manager list
+#
+# TOML_KNOWN_PMS in toml.sh is the declaration: a section whose second
+# component is not in it is not recognised as a group at all, so a manager
+# added everywhere else produces "no packages or cmd found" — a message about
+# the manifest, for a bug in the code. That is exactly how winget first
+# failed, and this is the gate for it.
+# ---------------------------------------------------------------------------
+
+_known_pms() {
+	# shellcheck disable=SC1091
+	(
+		source "${PROJECT_ROOT}/src/just_bashit/toml.sh"
+		printf '%s\n' "${TOML_KNOWN_PMS[@]}"
+	)
+}
+
+# The "Supported package managers:" block of --help, and nothing else in it.
+# Matching the name anywhere in the help would pass on a mention in prose
+# while the list itself had lost the manager — which is how the first
+# version of this test failed to notice a deleted docs row.
+_help_supported_block() {
+	install-deps.sh --help | awk '
+		/Supported package managers:/ { inblock = 1 }
+		inblock && /^[[:space:]]*$/ { exit }
+		inblock { print }
+	'
+}
+
+@test 'every known package manager is installable and documented' {
+	local pm supported
+	supported="$(_help_supported_block)"
+	assert [ -n "${supported}" ]
+	assert [ -n "$(_known_pms)" ]
+	for pm in $(_known_pms); do
+		# an arm in _do_install, not just a name in a list
+		grep -qE "^	${pm}\)\$" \
+			"${PROJECT_ROOT}/src/just_bashit/install-deps.sh" ||
+			fail "'${pm}' has no _do_install arm in install-deps.sh"
+		printf '%s\n' "${supported}" | grep -q "${pm}" ||
+			fail "'${pm}' is missing from --help's supported managers list"
+		grep -q "One of: .*${pm}" "${PROJECT_ROOT}/src/just_bashit/pkg.sh" ||
+			fail "'${pm}' is missing from get-pkg-mgr's help"
+		# A ROW of the manager table, anchored, not a mention in prose.
+		grep -qE "^\| \`${pm}\`" \
+			"${PROJECT_ROOT}/docs/install-deps.md" ||
+			fail "'${pm}' has no row in the docs manager table"
+		grep -q "\.${pm}\]" "${PROJECT_ROOT}/src/just_bashit/template.toml" ||
+			fail "'${pm}' has no section in template.toml"
+	done
+}
+
+@test 'no package manager is offered that the manifest parser would drop' {
+	local arm known
+	known="$(_known_pms)"
+	# Every _do_install arm, read back out of the script. One that is not in
+	# TOML_KNOWN_PMS can be selected with -s and will then find no packages,
+	# because group discovery never recognised its sections.
+	while IFS= read -r arm; do
+		[ -z "${arm}" ] && continue
+		printf '%s\n' "${known}" | grep -qx "${arm}" ||
+			fail "install-deps handles '${arm}' but TOML_KNOWN_PMS omits it"
+	done < <(sed -n 's/^	\([a-z0-9]*\))$/\1/p' \
+		"${PROJECT_ROOT}/src/just_bashit/install-deps.sh")
 }

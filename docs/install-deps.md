@@ -110,6 +110,7 @@ requires — `test`, `ci`, `docs`, etc.
 | `zypper`    | zypper          | openSUSE                  |
 | `apk`       | apk             | Alpine                    |
 | `msys2`     | pacman (UCRT64) | Windows / MSYS2           |
+| `winget`    | winget          | Windows, natively         |
 
 Both multiline and inline array syntax are supported:
 
@@ -445,10 +446,58 @@ supported section. Delete the sections you don't need, fill in the rest.
 
 ______________________________________________________________________
 
-## Windows / MSYS2
+## Windows
 
-`msys2` sections are never executed directly — the script always prints
-the equivalent `pacman` command for you to run manually in a UCRT64 shell:
+Windows has two sections, because it has two package managers that answer
+different questions. `msys2` provides the UCRT64 toolchain a project is built
+*with*; `winget` provides the software a machine is set *up* with — Python,
+Git, the GitHub CLI.
+
+### `winget` — installs, natively
+
+```toml
+[runtime.winget]
+packages = ["Python.Python.3.13"]
+
+[dev.winget]
+packages = ["Kitware.CMake", "GitHub.cli"]
+```
+
+Names are winget **ids**, not display names. Find one with
+`winget search python` and read the `Id` column; `Python.Python.3.13` is an
+id, `Python 3.13` is not.
+
+Three things follow from winget itself rather than from any choice here:
+
+- **One package per invocation.** `winget install` takes a single query — a
+    second id on the same line is read as an argument to the first. Every other
+    manager here takes a list; this one is called once per package.
+- **An id `winget list` already finds is skipped**, which is what makes
+    re-running the manifest a no-op rather than a reinstall. The probe reads
+    `list`'s 0 / non-zero answer instead of the install's exit code, because
+    winget returns HRESULTs and a shell sees only the low byte: an absent
+    package's `0x8A150014` arrives as plain `20`, indistinguishable from any
+    other tool's 20.
+- **No `sudo`.** There is none on that side, and a machine-scope package
+    raises Windows' own elevation prompt. Reached from WSL as `winget.exe`, a
+    sudo prefix would only run the interop call as Linux root.
+
+!!! warning "winget ignores `http_proxy`"
+
+    It fetches through WinHTTP and takes the **system** proxy. Its own
+    `--proxy` flag is refused until an administrator runs
+    `winget settings --enable ProxyCommandLineOptions`, so `install-deps`
+    reports a configured proxy rather than passing a flag that would fail
+    on a stock machine.
+
+The executable is found as `winget` first and `winget.exe` second: MSYS2,
+Cygwin and Git Bash resolve the bare name because the Windows loader appends
+`PATHEXT`, while a WSL `PATH` lookup has no `PATHEXT` and needs the full one.
+
+### `msys2` — prints, never runs
+
+`msys2` sections are never executed — the script always prints the equivalent
+`pacman` command for you to run manually in a UCRT64 shell:
 
 ```toml
 [runtime.msys2]
@@ -470,6 +519,13 @@ install-deps.sh deps.toml
     headers. Always launch from the **UCRT64** shortcut so `/ucrt64/bin`
     is first on `PATH`.
 
+### Which one is detected
+
+`pacman` decides. MSYS2 and Git Bash report the same `uname`, so `uname`
+alone cannot tell them apart. MSYS2 has `pacman` and keeps `msys2`; Git Bash
+has no `pacman` at all and — until now — was handed a `pacman` line it had no
+way to run, so it gets `winget`. Either way `--section` overrides.
+
 ______________________________________________________________________
 
 ## Platform detection
@@ -477,15 +533,16 @@ ______________________________________________________________________
 The package manager is inferred from `/etc/os-release` on Linux and
 `uname -s` elsewhere. The mapping:
 
-| `ID` / `ID_LIKE` contains                   | Section  |
-| ------------------------------------------- | -------- |
-| `debian`, `ubuntu`                          | `apt`    |
-| `arch`, `cachyos`, `manjaro`                | `pacman` |
-| `fedora`, `rhel`, `centos`, `rocky`, `alma` | `dnf`    |
-| `suse`                                      | `zypper` |
-| `alpine`                                    | `apk`    |
-| Darwin (`uname`)                            | `brew`   |
-| MINGW / MSYS / CYGWIN (`uname`)             | `msys2`  |
+| `ID` / `ID_LIKE` contains                         | Section  |
+| ------------------------------------------------- | -------- |
+| `debian`, `ubuntu`                                | `apt`    |
+| `arch`, `cachyos`, `manjaro`                      | `pacman` |
+| `fedora`, `rhel`, `centos`, `rocky`, `alma`       | `dnf`    |
+| `suse`                                            | `zypper` |
+| `alpine`                                          | `apk`    |
+| Darwin (`uname`)                                  | `brew`   |
+| MINGW / MSYS / CYGWIN (`uname`), `pacman` present | `msys2`  |
+| MINGW / MSYS / CYGWIN (`uname`), no `pacman`      | `winget` |
 
 If detection fails, use `--section` to specify the package manager explicitly.
 
