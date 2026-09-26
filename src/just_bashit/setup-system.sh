@@ -313,24 +313,32 @@ _find_bootstrap_toml() {
 # own bootstrap.toml, which this step still installs afterwards.
 read -r -d '' _BASELINE_TOML <<-'EOF' || true
 	[baseline.apt]
-	packages = ["build-essential", "cmake", "pkg-config", "git", "curl", "ca-certificates", "openssh-client"]
+	packages = ["build-essential", "cmake", "pkg-config", "git", "curl", "ca-certificates", "openssh-client", "tar"]
 
 	[baseline.pacman]
-	packages = ["base-devel", "cmake", "pkgconf", "git", "curl", "openssh"]
+	packages = ["base-devel", "cmake", "pkgconf", "git", "curl", "openssh", "tar"]
 
 	[baseline.dnf]
-	packages = ["gcc", "make", "cmake", "pkgconf-pkg-config", "diffutils", "git", "curl", "openssh-clients"]
+	packages = ["gcc", "make", "cmake", "pkgconf-pkg-config", "diffutils", "git", "curl", "openssh-clients", "tar"]
 
 	[baseline.zypper]
-	packages = ["gcc", "make", "cmake", "pkg-config", "diffutils", "git", "curl", "openssh"]
+	packages = ["gcc", "make", "cmake", "pkg-config", "diffutils", "git", "curl", "openssh", "tar"]
 
 	[baseline.apk]
-	packages = ["build-base", "cmake", "pkgconf", "bash", "git", "curl", "openssh-keygen"]
+	packages = ["build-base", "cmake", "pkgconf", "bash", "git", "curl", "openssh-keygen", "tar"]
 
 	# The compiler on macOS is the Xcode Command Line Tools, which brew itself
 	# requires, so brew has only the build tools to add.
 	[baseline.brew]
 	packages = ["cmake", "pkg-config"]
+
+	# Git Bash with no pacman (install-deps' winget section, #60). The
+	# compiler is clang-cl, the toolchain just-makeit builds Windows with; it
+	# also needs the MSVC Build Tools' C++ workload, which winget installs
+	# only with an --override this manifest has no way to pass yet -- see
+	# #67. Windows 10+ ships tar.exe and curl.exe itself.
+	[baseline.winget]
+	packages = ["Kitware.CMake", "Git.Git", "LLVM.LLVM"]
 
 	[baseline.msys2]
 	packages = ["mingw-w64-ucrt-x86_64-gcc", "mingw-w64-ucrt-x86_64-cmake", "make", "pkg-config", "git", "curl", "openssh"]

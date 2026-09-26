@@ -54,8 +54,11 @@
     fresh-machine run — from `$HOME`, where there is none — installed no
     packages, and the first C build on a new box failed with no compiler.
     `deps` now always installs a C compiler, `make`, `cmake`, `pkg-config`,
-    `git`, `curl` and ssh for the detected package manager, then a project's
-    `bootstrap.toml` as before. The baseline is a manifest in
+    `git`, `curl`, `tar` and ssh for the detected package manager, then a
+    project's `bootstrap.toml` as before. On winget (Git Bash, #60) the
+    baseline is CMake, Git and LLVM (clang-cl); the MSVC Build Tools'
+    C++ workload needs an installer override winget packages cannot carry
+    yet (#67). The baseline is a manifest in
     `bootstrap.toml`'s own format, handed to the same `install-deps` call, and
     embedded in the script because the jbs mirror serves only `*.sh`. A test
     reads the manager list from `install-deps`' own dispatch and fails on any
