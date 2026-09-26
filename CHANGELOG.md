@@ -49,6 +49,18 @@
     a second fails on any `_do_install` arm the array omits. Both directions,
     one declaration.
 
+- **`setup-system`: the `deps` step installs a baseline toolchain.** It
+    used to read only a `bootstrap.toml` in the current directory, so the
+    fresh-machine run — from `$HOME`, where there is none — installed no
+    packages, and the first C build on a new box failed with no compiler.
+    `deps` now always installs a C compiler, `make`, `cmake`, `pkg-config`,
+    `git`, `curl` and ssh for the detected package manager, then a project's
+    `bootstrap.toml` as before. The baseline is a manifest in
+    `bootstrap.toml`'s own format, handed to the same `install-deps` call, and
+    embedded in the script because the jbs mirror serves only `*.sh`. A test
+    reads the manager list from `install-deps`' own dispatch and fails on any
+    manager without a baseline.
+
 - **`workflow-check`: `gates-home-check`, one level up.** `gates-home-check`
     asks whether every gate is reached by a CI target. Nothing asked the same
     of the workflow itself, and the gap shipped: `deploy-docs` downloaded

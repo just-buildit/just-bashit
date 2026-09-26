@@ -45,9 +45,10 @@ read -r -d '' HELP <<-'EOF' || true
 	  and every step is safe to re-run — nothing is duplicated or clobbered.
 
 	Steps:
-	  deps    Install system packages from bootstrap.toml in the
-	          current directory (delegates to install-deps). Skipped when no
-	          deps file is present.
+	  deps    Install a baseline toolchain (C compiler, make, cmake,
+	          pkg-config, git, curl, ssh), then the packages of any
+	          bootstrap.toml in the current directory (delegates to
+	          install-deps).
 	  shell   Install the opinionated bash configuration to
 	          ~/.config/just-bashit/{bashrc,profile}.sh and add one source
 	          line to ~/.bashrc and ~/.profile. Your files stay yours.
@@ -294,16 +295,64 @@ _find_bootstrap_toml() {
 	return 1
 }
 
-step_deps() {
-	_head "deps — system packages"
+# The toolchain every machine gets, whatever directory this runs from: a C
+# compiler, make, cmake, pkg-config, and the git/curl/ssh the later steps
+# lean on. Before this existed, deps read only a bootstrap.toml in the
+# current directory, so the documented fresh-machine run -- from $HOME --
+# installed nothing, and the first C build on a new box failed with no
+# compiler at all.
+#
+# It is a manifest in bootstrap.toml's own format and goes through the same
+# install-deps call as a project's, so there is one installer and one
+# per-manager naming scheme, not a second list with its own rules. It lives
+# in this file rather than beside it because the jbs Pages mirror copies
+# only *.sh: a sibling .toml would never reach a standalone jbx run.
+#
+# Deliberately a toolchain and nothing more. Language runtimes and project
+# libraries (python3-dev, numpy, rust) are a project's to declare, in its
+# own bootstrap.toml, which this step still installs afterwards.
+read -r -d '' _BASELINE_TOML <<-'EOF' || true
+	[baseline.apt]
+	packages = ["build-essential", "cmake", "pkg-config", "git", "curl", "ca-certificates", "openssh-client"]
 
-	local deps_file=""
-	deps_file="$(_find_bootstrap_toml || true)"
-	if [[ -z ${deps_file} ]]; then
-		_info "no bootstrap.toml in $(pwd) — nothing to install"
-		_result "deps:    skipped (no deps file)"
+	[baseline.pacman]
+	packages = ["base-devel", "cmake", "pkgconf", "git", "curl", "openssh"]
+
+	[baseline.dnf]
+	packages = ["gcc", "make", "cmake", "pkgconf-pkg-config", "diffutils", "git", "curl", "openssh-clients"]
+
+	[baseline.zypper]
+	packages = ["gcc", "make", "cmake", "pkg-config", "diffutils", "git", "curl", "openssh"]
+
+	[baseline.apk]
+	packages = ["build-base", "cmake", "pkgconf", "bash", "git", "curl", "openssh-keygen"]
+
+	# The compiler on macOS is the Xcode Command Line Tools, which brew itself
+	# requires, so brew has only the build tools to add.
+	[baseline.brew]
+	packages = ["cmake", "pkg-config"]
+
+	[baseline.msys2]
+	packages = ["mingw-w64-ucrt-x86_64-gcc", "mingw-w64-ucrt-x86_64-cmake", "make", "pkg-config", "git", "curl", "openssh"]
+EOF
+
+# _install_manifest INSTALLER FILE LABEL — one install-deps run over FILE,
+# reported under LABEL. Returns install-deps' own status.
+_install_manifest() {
+	local installer="$1" file="$2" label="$3"
+	local args=()
+	[[ ${DRY_RUN} -eq 1 ]] && args+=("--dry-run")
+	[[ ${VERBOSE} -eq 1 ]] && args+=("--verbose")
+	_info "installing packages from ${label}"
+	if bash "${installer}" "${args[@]+"${args[@]}"}" "${file}"; then
 		return 0
 	fi
+	_warn "install-deps reported a failure for ${label}"
+	return 1
+}
+
+step_deps() {
+	_head "deps — system packages"
 
 	local installer
 	installer="$(_asset install-deps.sh)" || {
@@ -312,15 +361,26 @@ step_deps() {
 		return 0
 	}
 
-	_info "installing packages from ${deps_file}"
-	local args=()
-	[[ ${DRY_RUN} -eq 1 ]] && args+=("--dry-run")
-	[[ ${VERBOSE} -eq 1 ]] && args+=("--verbose")
-	if bash "${installer}" "${args[@]+"${args[@]}"}" "${deps_file}"; then
-		_result "deps:    ok (${deps_file})"
+	local baseline ok=1 done_list="baseline toolchain"
+	baseline="$(mktemp "${TMPDIR:-/tmp}/jb-baseline.XXXXXX")"
+	printf '%s\n' "${_BASELINE_TOML}" >"${baseline}"
+	_install_manifest "${installer}" "${baseline}" "the baseline toolchain" ||
+		ok=0
+	rm -f "${baseline}"
+
+	local deps_file=""
+	deps_file="$(_find_bootstrap_toml || true)"
+	if [[ -n ${deps_file} ]]; then
+		_install_manifest "${installer}" "${deps_file}" "${deps_file}" || ok=0
+		done_list="${done_list} + ${deps_file}"
 	else
-		_warn "install-deps reported a failure"
-		_result "deps:    failed"
+		_log "no bootstrap.toml in $(pwd) — baseline only"
+	fi
+
+	if [[ ${ok} -eq 1 ]]; then
+		_result "deps:    ok (${done_list})"
+	else
+		_result "deps:    failed (${done_list})"
 	fi
 }
 
