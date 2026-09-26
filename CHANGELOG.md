@@ -36,19 +36,6 @@
     the version beside the matching id — the Name column holds spaces, so it
     is not a fixed field number, and `winget.exe` writes CRLF.
 
-### Fixed
-
-- **The package-manager list had five copies and no gate.** `TOML_KNOWN_PMS`
-    in `toml.sh` decides whether a `[group.pm]` section is recognised as a
-    group at all, so a manager added to `install-deps` but not to that array
-    fails with `no packages or cmd found` — a message about the manifest, for
-    a bug in the code. That is how `winget` first failed here. One test now
-    derives the set from that array and requires a `_do_install` arm, an
-    entry in `--help`'s supported list, the `One of:` line in `get-pkg-mgr`'s
-    help, a row in the docs manager table and a section in `template.toml`;
-    a second fails on any `_do_install` arm the array omits. Both directions,
-    one declaration.
-
 - **`setup-system`: the `deps` step installs a baseline toolchain.** It
     used to read only a `bootstrap.toml` in the current directory, so the
     fresh-machine run — from `$HOME`, where there is none — installed no
@@ -88,6 +75,19 @@
     pull request must not do. Its fallible half — building the site — could
     move to a PR-visible job, and until it does a broken deploy is found on
     `main` or not at all.
+
+### Fixed
+
+- **The package-manager list had five copies and no gate.** `TOML_KNOWN_PMS`
+    in `toml.sh` decides whether a `[group.pm]` section is recognised as a
+    group at all, so a manager added to `install-deps` but not to that array
+    fails with `no packages or cmd found` — a message about the manifest, for
+    a bug in the code. That is how `winget` first failed here. One test now
+    derives the set from that array and requires a `_do_install` arm, an
+    entry in `--help`'s supported list, the `One of:` line in `get-pkg-mgr`'s
+    help, a row in the docs manager table and a section in `template.toml`;
+    a second fails on any `_do_install` arm the array omits. Both directions,
+    one declaration.
 
 ### Changed
 
