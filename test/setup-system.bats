@@ -458,34 +458,67 @@ ssh-keygen removal is not reproducible under MSYS2"
 
 @test 'git step sets the defaults' {
 	command -v git >/dev/null 2>&1 || skip "git not installed"
-	run setup-system.sh -s git
+	run setup-system.sh -s git </dev/null
 	assert_success
 	assert_equal "$(git config --global --get init.defaultBranch)" "main"
 	assert_equal "$(git config --global --get pull.rebase)" "true"
 	assert_equal "$(git config --global --get fetch.prune)" "true"
 }
 
-@test 'git step never sets an identity' {
+@test 'git step takes the identity from GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL' {
 	command -v git >/dev/null 2>&1 || skip "git not installed"
-	run setup-system.sh -s git
+	GIT_AUTHOR_NAME="Ada" GIT_AUTHOR_EMAIL="ada@example.com" \
+		run setup-system.sh -s git </dev/null
 	assert_success
-	assert_output --partial "user.name / user.email deliberately untouched"
+	assert_equal "$(git config --global --get user.name)" "Ada"
+	assert_equal "$(git config --global --get user.email)" "ada@example.com"
+}
+
+@test 'git step never overwrites an existing identity' {
+	command -v git >/dev/null 2>&1 || skip "git not installed"
+	git config --global user.email mine@example.com
+	GIT_AUTHOR_EMAIL="other@example.com" run setup-system.sh -s git </dev/null
+	assert_success
+	assert_equal "$(git config --global --get user.email)" "mine@example.com"
+}
+
+# Not a terminal and nothing in the environment: say so, never guess. This is
+# also the path every CI run takes, so it must not block on a read.
+@test 'git step warns rather than guesses when it cannot ask' {
+	command -v git >/dev/null 2>&1 || skip "git not installed"
+	unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL
+	run setup-system.sh -s git </dev/null
+	assert_success
+	assert_output --partial "user.email is not set — run: git config --global user.email"
 	run git config --global --get user.email
 	assert_failure
+}
+
+# The prompt needs a real terminal, which `script` supplies. util-linux's
+# `-c` form; BSD script differs, so it is skipped there rather than faked.
+@test 'git step asks for an unset identity at a terminal' {
+	command -v git >/dev/null 2>&1 || skip "git not installed"
+	script -qec true /dev/null >/dev/null 2>&1 || skip "no util-linux script"
+	unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL
+	run script -qec "setup-system.sh -s git" /dev/null \
+		< <(printf 'Ada\nada@example.com\n')
+	assert_success
+	assert_equal "$(git config --global --get user.name)" "Ada"
+	assert_equal "$(git config --global --get user.email)" "ada@example.com"
 }
 
 @test 'git step does not overwrite an existing value' {
 	command -v git >/dev/null 2>&1 || skip "git not installed"
 	git config --global pull.rebase false
-	run setup-system.sh -s git
+	run setup-system.sh -s git </dev/null
 	assert_success
 	assert_equal "$(git config --global --get pull.rebase)" "false"
 }
 
 @test 'git step is idempotent' {
 	command -v git >/dev/null 2>&1 || skip "git not installed"
-	setup-system.sh -s git >/dev/null
-	run setup-system.sh -s git
+	setup-system.sh -s git </dev/null >/dev/null
+	run setup-system.sh -s git </dev/null
 	assert_success
 	assert_output --partial "0 default(s) set"
 }

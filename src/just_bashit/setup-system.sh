@@ -53,8 +53,9 @@ read -r -d '' HELP <<-'EOF' || true
 	          line to ~/.bashrc and ~/.profile. Your files stay yours.
 	  ssh     Ensure ~/.ssh permissions and an ed25519 key named after this
 	          host; print the public key to register with GitHub.
-	  git     Set global git defaults that are not already set. Never touches
-	          user.name or user.email — those are per-repo identity.
+	  git     Set global git defaults that are not already set. An unset
+	          user.name / user.email comes from GIT_AUTHOR_NAME /
+	          GIT_AUTHOR_EMAIL, else is asked for at a terminal.
 	  tools   Install uv if missing; install pre-commit hooks when the
 	          current directory is a repo with .pre-commit-config.yaml.
 	  claude  Install Claude Code if the claude command is missing.
@@ -535,8 +536,62 @@ step_git() {
 		set_count=$((set_count + 1))
 	done
 
-	_info "user.name / user.email deliberately untouched — set them per repo"
-	_result "git:     ok (${set_count} default(s) set)"
+	local who_count=0
+	_git_identity user.name "${GIT_AUTHOR_NAME:-}" "your name" &&
+		who_count=$((who_count + 1))
+	_git_identity user.email "${GIT_AUTHOR_EMAIL:-}" "your email" &&
+		who_count=$((who_count + 1))
+	_result "git:     ok (${set_count} default(s) set, ${who_count} identity value(s) set)"
+}
+
+# _git_identity KEY FROM_ENV LABEL — set a global identity value that is
+# absent, taking it from the environment or, failing that, from the person.
+#
+# A fresh machine with no identity is not neutral: tools that decide what a
+# machine is FOR from `git config --global user.email` see nothing and quietly
+# do nothing, and the first commit fails or goes out under a guessed
+# `user@host` address. So an unset value is filled rather than left for later,
+# in this order:
+#
+#   1. already set globally -> left alone, like every default above;
+#   2. GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL set -> used as-is (git's own names
+#      for these, so a CI job or provisioning script already exporting them
+#      needs nothing new);
+#   3. stdin is a terminal and --yes was not given -> asked; an empty answer
+#      skips, because a blank identity is worse than none;
+#   4. otherwise -> a warning naming the exact command, never a guess.
+#
+# Global, not per-repo: a per-repo identity still overrides it wherever one
+# is set, so this only fills the gap no repo covers.
+#
+# Returns 0 when it set a value, 1 otherwise, so the caller can count.
+_git_identity() {
+	local key="$1" value="$2" label="$3" current
+	current="$(git config --global --get "${key}" 2>/dev/null || true)"
+	if [[ -n ${current} ]]; then
+		_log "${key} already set to ${current} — left alone"
+		return 1
+	fi
+
+	if [[ -z ${value} ]]; then
+		if [[ ${ASSUME_YES} -eq 1 || ! -t 0 ]]; then
+			_warn "${key} is not set — run: git config --global ${key} \"${label}\""
+			return 1
+		fi
+		if [[ ${DRY_RUN} -eq 1 ]]; then
+			_info "would ask for ${label} (git ${key} is not set)"
+			return 1
+		fi
+		read -r -p "    git ${key} is not set — ${label} (empty to skip): " \
+			value || true
+		if [[ -z ${value} ]]; then
+			_warn "${key} left unset"
+			return 1
+		fi
+	fi
+
+	_info "git config --global ${key} ${value}"
+	_run git config --global "${key}" "${value}"
 }
 
 # tools — uv, then this repo's pre-commit hooks if that applies here.
