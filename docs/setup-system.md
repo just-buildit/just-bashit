@@ -23,7 +23,7 @@ ______________________________________________________________________
 | `deps`   | Installs system packages from `bootstrap.toml` / `jb-deps.toml` in the current directory, via [`install-deps`](install-deps.md). Skipped when there is no deps file.                                      |
 | `shell`  | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                                                                     |
 | `ssh`    | Tightens permissions across `~/.ssh` — repairing a directory copied from Windows, FAT, a zip or git — then creates an ed25519 key named after this host if there is no key at all. Prints the public key. |
-| `git`    | Sets global git defaults that are not already set. Never touches `user.name` or `user.email`.                                                                                                             |
+| `git`    | Sets global git defaults that are not already set, and an unset `user.name` / `user.email` from the environment or a prompt.                                                                              |
 | `tools`  | Installs `uv` if missing; installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.                                                                                  |
 | `claude` | Installs Claude Code if the `claude` command is missing.                                                                                                                                                  |
 
@@ -258,9 +258,19 @@ chosen is overwritten:
 | `color.ui`             | `auto`    |
 | `core.editor`          | `$EDITOR` |
 
-`user.name` and `user.email` are deliberately absent: identity belongs to
-the repository, not the machine. Set it per repo with
-`git config user.email you@example.com`.
+Then `user.name` and `user.email`, again only when unset globally:
+
+1. from `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` when those are exported;
+1. otherwise asked for, when stdin is a terminal and `--yes` was not given
+    (an empty answer skips it);
+1. otherwise a warning naming the command to run — never a guessed value.
+
+A per-repo `git config user.email ...` still overrides the global value
+wherever one is set.
+
+```bash
+GIT_AUTHOR_NAME="Ada" GIT_AUTHOR_EMAIL="ada@example.com" jbx setup-system -s git
+```
 
 ______________________________________________________________________
 

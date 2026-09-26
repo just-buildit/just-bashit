@@ -29,6 +29,17 @@
     move to a PR-visible job, and until it does a broken deploy is found on
     `main` or not at all.
 
+### Changed
+
+- **`setup-system`'s `git` step now sets a missing `user.name` /
+    `user.email`.** It used to leave identity alone on principle, which left
+    a fresh machine with none at all: anything deciding what a machine is for
+    from `git config --global user.email` saw nothing and silently did
+    nothing. An unset value now comes from `GIT_AUTHOR_NAME` /
+    `GIT_AUTHOR_EMAIL`, or is asked for when stdin is a terminal and `--yes`
+    was not given; with neither, the step warns and names the command. A
+    value already set is never touched, and a per-repo identity still wins.
+
 ## [0.6.0] - 2026-09-09
 
 ### Fixed
