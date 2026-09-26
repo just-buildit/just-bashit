@@ -527,19 +527,53 @@ ssh-keygen removal is not reproducible under MSYS2"
 # deps step
 # ---------------------------------------------------------------------------
 
-@test 'deps step skips when there is no deps file' {
+# The fresh-machine case: run from a directory with no manifest, as from
+# $HOME. It used to install nothing, which left a new box with no compiler.
+# cmake is in every manager's baseline, so it is the host-independent tell.
+@test 'deps step installs the baseline toolchain with no deps file' {
 	run setup-system.sh -n -s deps
 	assert_success
-	assert_output --partial "nothing to install"
-	assert_output --partial "skipped"
+	assert_output --partial "installing packages from the baseline toolchain"
+	assert_output --partial "cmake"
+	assert_output --partial "deps:    ok (baseline toolchain)"
+	refute_output --partial "skipped"
 }
 
 @test 'deps step delegates to install-deps' {
 	_write_deps_toml jb.toml
 	run setup-system.sh -n -s deps
 	assert_success
+	assert_output --partial "installing packages from the baseline toolchain"
 	assert_output --partial "installing packages from jb.toml"
 	assert_output --partial "curl"
+	assert_output --partial "deps:    ok (baseline toolchain + jb.toml)"
+}
+
+# Every manager install-deps can drive must have a baseline, or the fresh
+# machine on that manager is back to installing nothing. The manager list is
+# read from install-deps' own dispatch, so adding a manager there without a
+# baseline here fails this test rather than needing someone to remember.
+@test 'baseline covers every package manager install-deps supports' {
+	local src="${BATS_TEST_DIRNAME}/../src/just_bashit"
+	local managers baseline m pkgs
+	managers=$(sed -n '/^_do_install()/,/^}/p' "${src}/install-deps.sh" |
+		sed -n 's/^\t\([a-z0-9]*\))$/\1/p')
+	# A parser that finds nothing would pass the loop below vacuously.
+	[ "$(wc -w <<<"${managers}")" -ge 7 ]
+
+	baseline=$(sed -n "/^read -r -d '' _BASELINE_TOML/,/^EOF/p" \
+		"${src}/setup-system.sh" | sed '1d;$d' | sed 's/^\t//')
+	[ -n "${baseline}" ]
+
+	# shellcheck source=/dev/null
+	source "${src}/toml.sh"
+	for m in ${managers}; do
+		pkgs=$(toml_get_array baseline "${m}" packages <<<"${baseline}")
+		[ -n "${pkgs}" ] || {
+			echo "no [baseline.${m}] packages in setup-system.sh" >&2
+			return 1
+		}
+	done
 }
 
 @test 'deps step prefers jb-deps.toml over jb.toml' {

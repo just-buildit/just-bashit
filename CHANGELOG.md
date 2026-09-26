@@ -36,18 +36,20 @@
     the version beside the matching id — the Name column holds spaces, so it
     is not a fixed field number, and `winget.exe` writes CRLF.
 
-### Fixed
-
-- **The package-manager list had five copies and no gate.** `TOML_KNOWN_PMS`
-    in `toml.sh` decides whether a `[group.pm]` section is recognised as a
-    group at all, so a manager added to `install-deps` but not to that array
-    fails with `no packages or cmd found` — a message about the manifest, for
-    a bug in the code. That is how `winget` first failed here. One test now
-    derives the set from that array and requires a `_do_install` arm, an
-    entry in `--help`'s supported list, the `One of:` line in `get-pkg-mgr`'s
-    help, a row in the docs manager table and a section in `template.toml`;
-    a second fails on any `_do_install` arm the array omits. Both directions,
-    one declaration.
+- **`setup-system`: the `deps` step installs a baseline toolchain.** It
+    used to read only a `bootstrap.toml` in the current directory, so the
+    fresh-machine run — from `$HOME`, where there is none — installed no
+    packages, and the first C build on a new box failed with no compiler.
+    `deps` now always installs a C compiler, `make`, `cmake`, `pkg-config`,
+    `git`, `curl`, `tar` and ssh for the detected package manager, then a
+    project's `bootstrap.toml` as before. On winget (Git Bash, #60) the
+    baseline is CMake, Git and LLVM (clang-cl); the MSVC Build Tools'
+    C++ workload needs an installer override winget packages cannot carry
+    yet (#67). The baseline is a manifest in
+    `bootstrap.toml`'s own format, handed to the same `install-deps` call, and
+    embedded in the script because the jbs mirror serves only `*.sh`. A test
+    reads the manager list from `install-deps`' own dispatch and fails on any
+    manager without a baseline.
 
 - **`workflow-check`: `gates-home-check`, one level up.** `gates-home-check`
     asks whether every gate is reached by a CI target. Nothing asked the same
@@ -73,6 +75,19 @@
     pull request must not do. Its fallible half — building the site — could
     move to a PR-visible job, and until it does a broken deploy is found on
     `main` or not at all.
+
+### Fixed
+
+- **The package-manager list had five copies and no gate.** `TOML_KNOWN_PMS`
+    in `toml.sh` decides whether a `[group.pm]` section is recognised as a
+    group at all, so a manager added to `install-deps` but not to that array
+    fails with `no packages or cmd found` — a message about the manifest, for
+    a bug in the code. That is how `winget` first failed here. One test now
+    derives the set from that array and requires a `_do_install` arm, an
+    entry in `--help`'s supported list, the `One of:` line in `get-pkg-mgr`'s
+    help, a row in the docs manager table and a section in `template.toml`;
+    a second fails on any `_do_install` arm the array omits. Both directions,
+    one declaration.
 
 ### Changed
 
