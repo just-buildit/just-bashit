@@ -25,6 +25,7 @@ ______________________________________________________________________
 | `ssh`    | Tightens permissions across `~/.ssh` — repairing a directory copied from Windows, FAT, a zip or git — then creates an ed25519 key named after this host if there is no key at all. Prints the public key.       |
 | `git`    | Sets global git defaults that are not already set, and an unset `user.name` / `user.email` from the environment or a prompt.                                                                                    |
 | `tools`  | Installs `uv` if missing; installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.                                                                                        |
+| `pwsh`   | Installs PowerShell 7 and the PSScriptAnalyzer module, so `.ps1` files can be linted on this machine. Linux and macOS only — see below.                                                                         |
 | `claude` | Installs Claude Code if the `claude` command is missing.                                                                                                                                                        |
 
 They always run in that order, whatever order you list them in — packages
@@ -271,6 +272,51 @@ wherever one is set.
 ```bash
 GIT_AUTHOR_NAME="Ada" GIT_AUTHOR_EMAIL="ada@example.com" jbx setup-system -s git
 ```
+
+______________________________________________________________________
+
+## The pwsh step
+
+Installs a **native** PowerShell 7 and the `PSScriptAnalyzer` module, which is
+what `make lint-psscriptanalyzer` needs to check a repo's `.ps1` files. That
+target fails loudly when the module is absent, deliberately: an analyzer that
+never ran has checked nothing.
+
+On **Linux** it installs a pinned release tarball:
+
+```
+/opt/microsoft/powershell/7/pwsh     the unpacked release
+/usr/bin/pwsh                        the symlink that puts it on PATH
+```
+
+The architecture is derived from `uname -m` — `x86_64` → `x64`, `aarch64` or
+`arm64` → `arm64`, `armv7l` → `arm32` — because these machines are not all
+x86. A hardcoded `x64` URL fails on an arm box inside `tar`, with a message
+naming neither the architecture nor the download.
+
+The version is pinned in the script, so picking up a newer PowerShell is an
+upgrade you chose rather than whatever was released this morning. Re-running
+the step after a bump replaces the tree in place.
+
+On **macOS** it installs the Homebrew cask instead — the tarball above is a
+Linux build, and unpacking it on a Mac would produce a `pwsh` that cannot
+execute.
+
+On **Windows** it does nothing but say so, and reports `skipped` rather than
+pretending otherwise. `install-deps` has a `winget` section, but this step
+does not use it yet — that is
+[#59](https://github.com/just-buildit/just-bashit/issues/59) — so for now
+install PowerShell there with `winget install Microsoft.PowerShell`.
+
+A machine that already has `pwsh` on `PATH` keeps it; only the module install
+runs, and that is skipped too when `Get-Module -ListAvailable` already finds
+it. `Install-Module` runs with `-Scope CurrentUser`, so it needs no
+elevation. The tarball install does, and uses `sudo` only when you are not
+already root — a root container needs neither the flag nor the package.
+
+Under WSL this is also what removes the path-translation problem: with a
+native interpreter present, Linux paths are handed to `pwsh` untouched
+instead of being rewritten with `wslpath -w` for `pwsh.exe`.
 
 ______________________________________________________________________
 

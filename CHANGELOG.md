@@ -76,6 +76,42 @@
     move to a PR-visible job, and until it does a broken deploy is found on
     `main` or not at all.
 
+- **`setup-system`: a `pwsh` step.** Installs native PowerShell 7 and the
+    `PSScriptAnalyzer` module, so `make lint-psscriptanalyzer` has something
+    to run. Until now the analyzer gate depended on a Windows interpreter
+    reached through WSL interop, which meant translating every path with
+    `wslpath -w` and left a Linux-only machine with a gate that could not run
+    at all.
+
+    The architecture is DERIVED from `uname -m` — `x86_64` → `x64`,
+    `aarch64`/`arm64` → `arm64`, `armv7l` → `arm32` — because these machines
+    are not all x86, and a hardcoded `x64` URL fails on an arm box inside
+    `tar`, with a message naming neither the architecture nor the download.
+    Four tests pin a platform through `JB_UNAME_S`/`JB_UNAME_M` and assert
+    the tarball that comes out; hiding `pwsh` from `PATH` instead would prove
+    nothing, since `/bin` is a symlink to `/usr/bin` on Debian. The
+    interpreter is named through `JB_PWSH` for the same reason, and for one
+    more: GitHub's macOS and Windows images ship `pwsh`, so on those runners
+    every install test would have taken the "already installed" path and
+    checked nothing.
+
+    The version is pinned in the script, so an upgrade is one you chose. The
+    URL is asserted against that one declaration rather than against a copy
+    in the test, which is the drift worth catching.
+
+    macOS takes the Homebrew cask, since the tarball is a Linux build that
+    would unpack into a `pwsh` that cannot execute. Windows is reported as
+    `skipped`: `install-deps` has a `winget` section now (#60), and wiring
+    this step through it is #59; until then there is nothing honest to do
+    from here. A missing prerequisite reads as `skipped`, never
+    as `failed` — only an install that was attempted and did not finish is a
+    failure.
+
+    The step list is declared in four places — the array, the string,
+    `--help` and the docs table — so two tests now read the validator's own
+    "known steps" list and fail on any step missing from the help text or
+    from `docs/setup-system.md`.
+
 ### Fixed
 
 - **The package-manager list had five copies and no gate.** `TOML_KNOWN_PMS`
