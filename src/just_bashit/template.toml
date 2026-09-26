@@ -44,6 +44,14 @@ packages = [
     # e.g. "mingw-w64-ucrt-x86_64-zeromq",
 ]
 
+# Windows, natively. Names are winget ids, not display names — find one with
+# `winget search <name>`. Installed one per invocation, and any id winget
+# already lists is skipped.
+[runtime.winget]
+packages = [
+    # e.g. "Python.Python.3.13",
+]
+
 [dev.apt]
 packages = [
     # e.g. "build-essential",
@@ -77,4 +85,9 @@ packages = [
 [dev.msys2]
 packages = [
     # e.g. "mingw-w64-ucrt-x86_64-gcc",
+]
+
+[dev.winget]
+packages = [
+    # e.g. "Kitware.CMake", "GitHub.cli",
 ]

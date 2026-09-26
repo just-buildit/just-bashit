@@ -4,6 +4,51 @@
 
 ### Added
 
+- **`install-deps`: a `winget` section, so Windows installs rather than
+    prints.** `msys2` has only ever printed a `pacman` line to run by hand,
+    so nothing in this repo could provision a Windows machine. `winget` does
+    install: `[runtime.winget] packages = ["Python.Python.3.13"]` installs
+    Python. Names are winget **ids** — `winget search python` shows them.
+
+    Three things follow from winget itself. It takes **one query per
+    invocation**, unlike every other manager here, so a second id on the same
+    line is read as an argument to the first and the install silently covers
+    less than the manifest asked for — it is called once per package, and a
+    test counts `--id` per line. An id `winget list` already finds is
+    **skipped**, which is what makes re-running a manifest a no-op; the probe
+    reads `list`'s 0 / non-zero rather than the install's exit code, because
+    winget returns HRESULTs and a shell sees only the low byte — an absent
+    package's `0x8A150014` arrives as plain `20`. And it gets **no `sudo`**:
+    there is none on that side, and from WSL a prefix would only run the
+    interop call as Linux root.
+
+    **winget ignores `http_proxy`** — it fetches through WinHTTP and takes the
+    system proxy. Its own `--proxy` is refused until an administrator runs
+    `winget settings --enable ProxyCommandLineOptions`, so a configured proxy
+    is reported rather than passed as a flag that would fail on a stock
+    machine. Measured 2026-09-20 against winget v1.29.290, which exits 2 with
+    exactly that sentence.
+
+    Detection: `pacman` decides. MSYS2 and Git Bash report the same `uname`,
+    so `uname` alone cannot separate them. MSYS2 has `pacman` and keeps
+    `msys2`; **Git Bash has none and was being handed a `pacman` line it
+    could not run**, so it now gets `winget`. `get-pkg-version winget` reads
+    the version beside the matching id — the Name column holds spaces, so it
+    is not a fixed field number, and `winget.exe` writes CRLF.
+
+### Fixed
+
+- **The package-manager list had five copies and no gate.** `TOML_KNOWN_PMS`
+    in `toml.sh` decides whether a `[group.pm]` section is recognised as a
+    group at all, so a manager added to `install-deps` but not to that array
+    fails with `no packages or cmd found` — a message about the manifest, for
+    a bug in the code. That is how `winget` first failed here. One test now
+    derives the set from that array and requires a `_do_install` arm, an
+    entry in `--help`'s supported list, the `One of:` line in `get-pkg-mgr`'s
+    help, a row in the docs manager table and a section in `template.toml`;
+    a second fails on any `_do_install` arm the array omits. Both directions,
+    one declaration.
+
 - **`workflow-check`: `gates-home-check`, one level up.** `gates-home-check`
     asks whether every gate is reached by a CI target. Nothing asked the same
     of the workflow itself, and the gap shipped: `deploy-docs` downloaded
