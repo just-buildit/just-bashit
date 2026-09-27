@@ -78,6 +78,11 @@ search = "# PACKAGE: just-bashit version {current_version}                      
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"
 
 [[tool.bumpversion.files]]
+filename = "src/just_bashit/windows.sh"
+search = "# PACKAGE: just-bashit version {current_version}                                         #"
+replace = "# PACKAGE: just-bashit version {new_version}                                         #"
+
+[[tool.bumpversion.files]]
 filename = "src/just_bashit/format.sh"
 search = "# PACKAGE: just-bashit version {current_version}                                         #"
 replace = "# PACKAGE: just-bashit version {new_version}                                         #"

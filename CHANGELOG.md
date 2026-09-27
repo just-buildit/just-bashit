@@ -4,6 +4,15 @@
 
 ### Added
 
+- **`windows.sh`: `win-exe`, one lookup for a Windows program from WSL.**
+    Windows' directories are on a WSL shell's `PATH` only when WSL launched
+    that shell; one reached over ssh (Tailscale SSH, VS Code Remote-SSH) has
+    none, though interop still runs a program by full path. `win-exe` tries
+    `PATH`, then `System32`, Windows PowerShell and PowerShell 7 under the
+    `C:` mount read from the mount table. `setup-system` had this inline;
+    `ssh-to-windows` did not and died from an ssh'd-in shell (#68). Both use
+    the library now, and `jbx` fetches it with them.
+
 - **`setup-system -s sshd`: Windows' own OpenSSH server as a boot-time
     service, so a Windows machine answers ssh even when WSL is down.** Runs
     from WSL or natively under MSYS2 / Git Bash. An ssh

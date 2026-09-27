@@ -33,6 +33,7 @@ nav = [
     {"path" = "libraries/path.md"},
     {"pkg" = "libraries/pkg.md"},
     {"toml" = "libraries/toml.md"},
+    {"windows" = "libraries/windows.md"},
   ]},
   {"Templates" = "templates.md"},
   {"Developers" = [
