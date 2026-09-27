@@ -903,8 +903,8 @@ _known_steps() {
 # ---------------------------------------------------------------------------
 # sshd — driven entirely through stubs. CI has no Windows desktop to raise a
 # UAC prompt on, so the Windows side is faked the way ssh-to-windows.bats
-# fakes it, and the elevated command is DECODED and recorded rather than
-# assumed: the base64 hop is exactly where a quoting bug would hide.
+# fakes it. The stub records powershell.exe's argv and the run.ps1 the step
+# wrote, so a test reads what Windows would have run rather than assuming it.
 # ---------------------------------------------------------------------------
 _sshd_stubs() {
 	STUBS="${BATS_TEST_TMPDIR}/stubs"
@@ -915,6 +915,9 @@ _sshd_stubs() {
 
 	echo "Linux version 5.15.0-microsoft-standard-WSL2" >"${BATS_TEST_TMPDIR}/proc-version"
 	export JB_PROC_VERSION="${BATS_TEST_TMPDIR}/proc-version"
+	# Pinned, so the windows runner's own MSYS uname does not decide which
+	# platform a test exercises.
+	export JB_UNAME_S=Linux
 
 	cat >"${STUBS}/cmd.exe" <<-'EOF'
 		#!/bin/bash
@@ -925,13 +928,13 @@ _sshd_stubs() {
 		p="\${2//\\\\//}"
 		printf '%s\n' "${WINTEMP}\${p#C:/Users/tester/AppData/Local/Temp}"
 	EOF
-	# Records the decoded elevated command, then plays the elevated script:
-	# writes its log and exits with STUB_RC. STUB_NOLOG plays a declined UAC
-	# prompt, where the elevated process never starts.
+	# Records its argv and the elevated body, then plays the elevated
+	# script: writes its log and exits with STUB_RC. STUB_NOLOG plays a
+	# declined UAC prompt, where the elevated process never starts.
 	cat >"${STUBS}/powershell.exe" <<-EOF
 		#!/bin/bash
-		b64=\$(printf '%s' "\$*" | grep -o "EncodedCommand','[^']*" | cut -d"'" -f3)
-		printf '%s' "\${b64}" | base64 -d | iconv -f UTF-16LE -t UTF-8 >"${CALLS}"
+		printf '%s\n' "\$@" >"${CALLS}.argv"
+		cp "${WINTEMP}/jb-windows-sshd/run.ps1" "${CALLS}"
 		if [ -z "\${STUB_NOLOG:-}" ]; then
 			printf '  ok    sshd running\r\n' >"${WINTEMP}/jb-windows-sshd/log.txt"
 		fi
@@ -950,13 +953,25 @@ _sshd_stubs() {
 	assert_output --partial "sshd —"
 }
 
-@test 'sshd: skipped, not failed, off WSL' {
+@test 'sshd: skipped, not failed, off Windows' {
 	_sshd_stubs
 	echo "Linux version 6.8.0-generic" >"${JB_PROC_VERSION}"
 	run setup-system.sh -s sshd --github-user octocat
 	assert_success
-	assert_output --partial "sshd:    skipped (not WSL)"
+	assert_output --partial "sshd:    skipped (not Windows)"
 	assert [ ! -e "${CALLS}" ]
+}
+
+@test 'sshd: runs on native Windows (MSYS2), translating paths with cygpath' {
+	_sshd_stubs
+	echo "MINGW64_NT-10.0-26100 3.5.4" >"${JB_PROC_VERSION}"
+	export JB_UNAME_S=MINGW64_NT-10.0-26100
+	# No wslpath on native Windows: the step must not need it.
+	mv "${STUBS}/wslpath" "${STUBS}/cygpath"
+	run setup-system.sh -s sshd --github-user octocat
+	assert_success
+	assert_output --partial "sshd:    ok (keys from github.com/octocat.keys)"
+	assert [ -r "${WINTEMP}/jb-windows-sshd/windows-sshd.ps1" ]
 }
 
 @test 'sshd: skipped with no GitHub user to take keys from' {
@@ -1003,7 +1018,32 @@ _sshd_stubs() {
 	# The pin is setup-system's own, so the two platforms cannot drift.
 	pin=$(sed -n 's/^_PS_VER="\(.*\)"$/\1/p' "${PROJECT_ROOT}/src/just_bashit/setup-system.sh")
 	run cat "${CALLS}"
-	assert_output --partial "windows-sshd.ps1' -GitHubUser 'octocat' -PwshVersion '${pin}' -RemoteAddress '100.64.0.0/10'"
+	assert_output --partial "'windows-sshd.ps1') -GitHubUser 'octocat' -PwshVersion '${pin}' -RemoteAddress '100.64.0.0/10'"
+	# powershell.exe gets one script path and no command string to quote.
+	run cat "${CALLS}.argv"
+	assert_output "-NoProfile
+-ExecutionPolicy
+Bypass
+-File
+C:\\Users\\tester\\AppData\\Local\\Temp\\jb-windows-sshd\\launch.ps1"
+}
+
+@test 'sshd: the PowerShell it writes parses, with the address list an array' {
+	command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed (setup-system -s pwsh)"
+	_sshd_stubs
+	run setup-system.sh -s sshd --github-user octocat --sshd-allow 100.64.0.0/10,fd7a:115c:a1e0::/48
+	assert_success
+	local d="${WINTEMP}/jb-windows-sshd" f
+	for f in run.ps1 launch.ps1; do
+		command -v cygpath >/dev/null 2>&1 && f="$(cygpath -w "${d}/${f}")" || f="${d}/${f}"
+		run pwsh -NoProfile -Command "\$e = \$null; [void][System.Management.Automation.Language.Parser]::ParseFile('${f}', [ref]\$null, [ref]\$e); \$e.Count"
+		assert_output "0"
+	done
+	# The value bound to -RemoteAddress is a two-element array literal.
+	f="${d}/run.ps1"
+	command -v cygpath >/dev/null 2>&1 && f="$(cygpath -w "${f}")"
+	run pwsh -NoProfile -Command "\$a = [System.Management.Automation.Language.Parser]::ParseFile('${f}', [ref]\$null, [ref]\$null); \$c = \$a.FindAll({ \$args[0] -is [System.Management.Automation.Language.CommandAst] }, \$true) | Where-Object { \$_.CommandElements.Extent.Text -contains '-RemoteAddress' }; \$i = [array]::IndexOf([string[]]\$c.CommandElements.Extent.Text, '-RemoteAddress'); \$c.CommandElements[\$i + 1].Elements.Value -join '|'"
+	assert_output "100.64.0.0/10|fd7a:115c:a1e0::/48"
 }
 
 @test 'sshd: a declined UAC prompt reports failure, not success' {

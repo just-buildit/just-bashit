@@ -63,8 +63,9 @@ read -r -d '' HELP <<-'EOF' || true
 	          line to ~/.bashrc and ~/.profile. Your files stay yours.
 	  ssh     Ensure ~/.ssh permissions and an ed25519 key named after this
 	          host; print the public key to register with GitHub.
-	  sshd    WSL only, and only when asked for (-s sshd): run Windows'
-	          OpenSSH server as a boot-time service -- key-only, keys from
+	  sshd    Windows only (WSL or native MSYS2 / Git Bash), and only
+	          when asked for (-s sshd): run Windows' OpenSSH server as a
+	          boot-time service -- key-only, keys from
 	          github.com/<user>.keys, pwsh.exe as the login shell -- so
 	          the machine is reachable over ssh even when WSL is not
 	          running. Raises one UAC prompt on the Windows desktop.
@@ -610,9 +611,16 @@ step_ssh() {
 # -Verb RunAs, waits, and relays the script's log -- the elevated window is
 # hidden, so without the log a failure would be invisible.
 #
-# The inner command is passed with -EncodedCommand: it crosses bash, the
-# outer powershell.exe command line and Start-Process's argument list, and
-# base64 is the one encoding that survives all three without a quoting rule.
+# It runs from WSL or from native Windows (MSYS2 / Git Bash); the two differ
+# only in how a Windows path becomes a local one (wslpath, cygpath).
+#
+# Nothing is quoted across a process boundary. The elevated body is written
+# to run.ps1 and the UAC hop to launch.ps1, both beside the copied script;
+# each finds its neighbours through $PSScriptRoot, so no path is spliced
+# into PowerShell, and powershell.exe gets only `-File launch.ps1` -- one
+# plain argument. The alternative, a command string, crosses bash, the
+# outer command line and Start-Process's argument list, and each has its
+# own quoting rule (a bash quirk broke it on macOS, gh-69's CI).
 # WaitForExit rather than Start-Process -Wait: in Windows PowerShell -Wait
 # also waits for every descendant, and the MSI installs this triggers can
 # leave one running -- an outer wait that then never returns.
@@ -661,23 +669,37 @@ _sshd_github_user() {
 step_sshd() {
 	_head "sshd — Windows OpenSSH server, started at boot"
 
-	if ! { [[ -r ${_PROC_VERSION} ]] && grep -qi microsoft "${_PROC_VERSION}"; }; then
-		_info "not WSL — on Windows run windows-sshd.ps1 from an elevated PowerShell;"
-		_info "on Linux enable the distro's own sshd unit"
-		_result "sshd:    skipped (not WSL)"
-		return 0
+	# WSL, or native Windows under MSYS2 / Git Bash: the same Windows
+	# service either way, reached through a different path translator.
+	local topath
+	_pwsh_uname_init
+	if [[ -r ${_PROC_VERSION} ]] && grep -qi microsoft "${_PROC_VERSION}"; then
+		topath=wslpath
+	else
+		case "${_UNAME_S}" in
+		MINGW* | MSYS* | CYGWIN*) topath=cygpath ;;
+		*)
+			_info "not Windows — on Linux enable the distro's own sshd unit"
+			_result "sshd:    skipped (not Windows)"
+			return 0
+			;;
+		esac
 	fi
 
 	local ps_exe cmd_exe c
 	ps_exe="$(_win_exe powershell.exe)" || ps_exe=""
 	cmd_exe="$(_win_exe cmd.exe)" || cmd_exe=""
-	for c in "${ps_exe:-powershell.exe}" "${cmd_exe:-cmd.exe}" wslpath iconv base64; do
+	for c in "${ps_exe:-powershell.exe}" "${cmd_exe:-cmd.exe}" "${topath}"; do
 		if [[ ${c} != */* ]] && ! _have "${c}"; then
-			_warn "${c} not found — WSL interop with Windows must be enabled"
+			_warn "${c} not found — this step drives Windows from here"
 			_result "sshd:    skipped (no ${c})"
 			return 0
 		fi
 	done
+	# MSYS rewrites any argument that looks like a POSIX path before a
+	# Windows program sees it: `cmd /c` would arrive as `cmd C:/`. Off for
+	# every call below; WSL ignores both variables.
+	local -x MSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1
 
 	local user
 	if ! user="$(_sshd_github_user)"; then
@@ -716,21 +738,23 @@ step_sshd() {
 	fi
 	local wdir="${wtemp}\\jb-windows-sshd"
 	local dir
-	dir="$(wslpath -u "${wdir}")"
+	dir="$("${topath}" -u "${wdir}")"
 
 	# The same PowerShell pin the pwsh step installs on Linux, so every
-	# machine this sets up runs one release.
-	local call="& '${wdir}\\windows-sshd.ps1' -GitHubUser '${user}' -PwshVersion '${_PS_VER}'"
+	# machine this sets up runs one release. Both values were checked above
+	# to hold no quote. The list is joined through ${sq} rather than an
+	# escaped quote in the replacement, whose meaning changed across bash
+	# releases.
+	local ps_args="-GitHubUser '${user}' -PwshVersion '${_PS_VER}'"
 	if [[ -n ${SSHD_ALLOW} ]]; then
-		call="${call} -RemoteAddress '${SSHD_ALLOW//,/\',\'}'"
+		local sq="'"
+		ps_args="${ps_args} -RemoteAddress ${sq}${SSHD_ALLOW//,/${sq},${sq}}${sq}"
 	fi
-	local log="${wdir}\\log.txt"
-	local inner="try { ${call} *>&1 | Out-File -FilePath '${log}' -Encoding utf8; exit 0 } catch { \$_ | Out-File -FilePath '${log}' -Append -Encoding utf8; exit 1 }"
 
 	if [[ ${DRY_RUN} -eq 1 ]]; then
 		_info "would copy windows-sshd.ps1 to ${wdir}"
 		_info "would raise a UAC prompt and run, elevated:"
-		_info "  ${call}"
+		_info "  windows-sshd.ps1 ${ps_args}"
 		_result "sshd:    ok (dry run)"
 		return 0
 	fi
@@ -738,15 +762,33 @@ step_sshd() {
 	mkdir -p "${dir}"
 	cp "${ps1}" "${dir}/windows-sshd.ps1"
 	rm -f "${dir}/log.txt"
-
-	local b64
-	b64="$(printf '%s' "${inner}" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)"
+	# The elevated window is hidden, so its whole output goes to log.txt.
+	cat >"${dir}/run.ps1" <<-EOF
+		\$log = Join-Path \$PSScriptRoot 'log.txt'
+		try {
+		    & (Join-Path \$PSScriptRoot 'windows-sshd.ps1') ${ps_args} *>&1 |
+		        Out-File -FilePath \$log -Encoding utf8
+		    exit 0
+		} catch {
+		    \$_ | Out-File -FilePath \$log -Append -Encoding utf8
+		    exit 1
+		}
+	EOF
+	# Start-Process joins -ArgumentList with spaces, so the one path in it
+	# is quoted; a Windows path cannot itself hold a double quote.
+	cat >"${dir}/launch.ps1" <<-'EOF'
+		$run = Join-Path $PSScriptRoot 'run.ps1'
+		$p = Start-Process powershell.exe -Verb RunAs -PassThru -WindowStyle Hidden `
+		    -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$run`""
+		$p.WaitForExit()
+		exit $p.ExitCode
+	EOF
 
 	_info "approve the UAC prompt on the Windows desktop to continue"
 	local rc=0
 	(
 		cd /mnt/c 2>/dev/null || true
-		"${ps_exe}" -NoProfile -Command "\$p = Start-Process powershell.exe -Verb RunAs -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${b64}'; \$p.WaitForExit(); exit \$p.ExitCode"
+		"${ps_exe}" -NoProfile -ExecutionPolicy Bypass -File "${wdir}\\launch.ps1"
 	) || rc=$?
 
 	if [[ -r "${dir}/log.txt" ]]; then
