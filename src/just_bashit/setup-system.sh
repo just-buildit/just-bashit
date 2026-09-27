@@ -26,8 +26,13 @@ _JBS_BASE="${JB_JBS_BASE:-https://just-buildit.github.io/jbs}"
 # with tar, both of which the deps step is what puts on a bare machine.
 # Kept as an array as well as a string because IFS is newline+tab here, so
 # a space-separated string does not word-split.
-_STEPS_ALL=(deps shell ssh git tools pwsh claude)
-_STEPS_ALL_STR="deps shell ssh git tools pwsh claude"
+_STEPS_ALL=(deps shell ssh sshd git tools pwsh claude)
+_STEPS_ALL_STR="deps shell ssh sshd git tools pwsh claude"
+
+# Steps that run only when named with -s or in bootstrap.toml. sshd opens a
+# listening port on the machine, which is not something a default run gets
+# to decide on the user's behalf.
+_STEPS_OPT_IN_STR="sshd"
 
 DRY_RUN=0
 VERBOSE=0
@@ -37,6 +42,8 @@ STEPS_EXPLICIT=0
 SKIP_STR=""
 PREFIX="${JB_CONFIG_DIR:-${XDG_CONFIG_HOME:-${HOME}/.config}/just-bashit}"
 KEY_NAME=""
+SSHD_GITHUB_USER=""
+SSHD_ALLOW=""
 TEMPLATE=""
 TEMPLATE_PATH="-"
 
@@ -56,6 +63,11 @@ read -r -d '' HELP <<-'EOF' || true
 	          line to ~/.bashrc and ~/.profile. Your files stay yours.
 	  ssh     Ensure ~/.ssh permissions and an ed25519 key named after this
 	          host; print the public key to register with GitHub.
+	  sshd    WSL only, and only when asked for (-s sshd): run Windows'
+	          OpenSSH server as a boot-time service -- key-only, keys from
+	          github.com/<user>.keys, pwsh.exe as the login shell -- so
+	          the machine is reachable over ssh even when WSL is not
+	          running. Raises one UAC prompt on the Windows desktop.
 	  git     Set global git defaults that are not already set. An unset
 	          user.name / user.email comes from GIT_AUTHOR_NAME /
 	          GIT_AUTHOR_EMAIL, else is asked for at a terminal.
@@ -77,11 +89,17 @@ read -r -d '' HELP <<-'EOF' || true
 	       --prefix DIR          Config directory to install into
 	                             (default: ~/.config/just-bashit).
 	       --key-name NAME       ssh key filename (default: this hostname).
+	       --github-user NAME    sshd: authorize github.com/NAME.keys
+	                             (default: the account gh is signed in to).
+	       --sshd-allow ADDRS    sshd: comma-separated addresses the
+	                             firewall admits to port 22 (default: any),
+	                             e.g. 100.64.0.0/10,fd7a:115c:a1e0::/48
+	                             for a Tailscale tailnet only.
 	       --template [PATH]     Write the bashrc template to PATH (or stdout).
 	       --template-profile [PATH]
 	                             Write the profile template to PATH (or stdout).
 
-	Default steps: all of them. To restrict the default set, declare
+	Default steps: all of them except sshd. To restrict the default set, declare
 	steps = [...] under [tools.setup-system] in bootstrap.toml.
 
 	Examples:
@@ -126,6 +144,14 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--key-name)
 		KEY_NAME="${2:?Option $1 requires an argument.}"
+		shift 2
+		;;
+	--github-user)
+		SSHD_GITHUB_USER="${2:?Option $1 requires an argument.}"
+		shift 2
+		;;
+	--sshd-allow)
+		SSHD_ALLOW="${2:?Option $1 requires an argument.}"
 		shift 2
 		;;
 	--template | --template-profile)
@@ -570,6 +596,174 @@ step_ssh() {
 	_result "ssh:     ok (created ${key})"
 }
 
+# ---------------------------------------------------------------------------
+# sshd — Windows' own OpenSSH server as a boot-time service, driven from WSL.
+#
+# An ssh server inside WSL2 dies with the WSL VM, and the VM stops on its own
+# when idle or after a crash -- so the machine is unreachable at exactly the
+# moments you need to reach it. Windows' sshd is a service that starts at
+# boot whether or not WSL ever does, and `wsl` is one command away from it.
+#
+# The work is windows-sshd.ps1, which has to run elevated. This step copies
+# it to the Windows temp directory (an elevated process cannot be relied on
+# to read \\wsl.localhost paths), raises the UAC prompt with Start-Process
+# -Verb RunAs, waits, and relays the script's log -- the elevated window is
+# hidden, so without the log a failure would be invisible.
+#
+# The inner command is passed with -EncodedCommand: it crosses bash, the
+# outer powershell.exe command line and Start-Process's argument list, and
+# base64 is the one encoding that survives all three without a quoting rule.
+# WaitForExit rather than Start-Process -Wait: in Windows PowerShell -Wait
+# also waits for every descendant, and the MSI installs this triggers can
+# leave one running -- an outer wait that then never returns.
+# ---------------------------------------------------------------------------
+
+# Overridable so the suite can run this on a Linux runner (as ssh-to-windows
+# does): a WSL-only step tested only by hand is eventually not tested.
+_PROC_VERSION="${JB_PROC_VERSION:-/proc/version}"
+_PROC_MOUNTS="${JB_PROC_MOUNTS:-/proc/mounts}"
+
+# _win_exe NAME — path to a Windows executable. PATH first; then System32
+# under wherever the C: drive is mounted, because WSL can be configured
+# (appendWindowsPath=false) to leave Windows' PATH out entirely, and then
+# `powershell.exe` resolves nowhere even though interop works. The mount
+# point is read from the mount table rather than assumed to be /mnt/c:
+# [automount] root in /etc/wsl.conf moves it.
+_win_exe() {
+	local name="$1" root sys32 p
+	if p="$(command -v "${name}" 2>/dev/null)"; then
+		printf '%s\n' "${p}"
+		return 0
+	fi
+	root="$(awk '$1 ~ /^C:/ && /drvfs/ { print $2; exit }' "${_PROC_MOUNTS}" 2>/dev/null || true)"
+	[[ -n ${root} ]] || return 1
+	sys32="${root}/Windows/System32"
+	for p in "${sys32}/${name}" "${sys32}/WindowsPowerShell/v1.0/${name}"; do
+		if [[ -x ${p} ]]; then
+			printf '%s\n' "${p}"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# _sshd_github_user — whose keys to authorize: --github-user, else the
+# account gh is signed in to. Printed, or return 1 when neither is known.
+_sshd_github_user() {
+	local u="${SSHD_GITHUB_USER}"
+	if [[ -z ${u} ]] && _have gh; then
+		u="$(gh api user --jq .login 2>/dev/null || true)"
+	fi
+	[[ -n ${u} ]] || return 1
+	printf '%s\n' "${u}"
+}
+
+step_sshd() {
+	_head "sshd — Windows OpenSSH server, started at boot"
+
+	if ! { [[ -r ${_PROC_VERSION} ]] && grep -qi microsoft "${_PROC_VERSION}"; }; then
+		_info "not WSL — on Windows run windows-sshd.ps1 from an elevated PowerShell;"
+		_info "on Linux enable the distro's own sshd unit"
+		_result "sshd:    skipped (not WSL)"
+		return 0
+	fi
+
+	local ps_exe cmd_exe c
+	ps_exe="$(_win_exe powershell.exe)" || ps_exe=""
+	cmd_exe="$(_win_exe cmd.exe)" || cmd_exe=""
+	for c in "${ps_exe:-powershell.exe}" "${cmd_exe:-cmd.exe}" wslpath iconv base64; do
+		if [[ ${c} != */* ]] && ! _have "${c}"; then
+			_warn "${c} not found — WSL interop with Windows must be enabled"
+			_result "sshd:    skipped (no ${c})"
+			return 0
+		fi
+	done
+
+	local user
+	if ! user="$(_sshd_github_user)"; then
+		_warn "no GitHub user: pass --github-user NAME, or sign in to gh"
+		_result "sshd:    skipped (no GitHub user)"
+		return 0
+	fi
+	# Both values are spliced into a PowerShell command. Checked against what
+	# they can legitimately contain, so neither can carry a quote into it.
+	if [[ ! ${user} =~ ^[A-Za-z0-9-]+$ ]]; then
+		_warn "not a GitHub user name: ${user}"
+		_result "sshd:    failed (bad --github-user)"
+		return 0
+	fi
+	if [[ -n ${SSHD_ALLOW} && ! ${SSHD_ALLOW} =~ ^[0-9A-Za-z.:/,-]+$ ]]; then
+		_warn "not an address list: ${SSHD_ALLOW}"
+		_result "sshd:    failed (bad --sshd-allow)"
+		return 0
+	fi
+
+	local ps1
+	if ! ps1="$(_asset windows-sshd.ps1)"; then
+		_result "sshd:    failed (windows-sshd.ps1 unavailable)"
+		return 0
+	fi
+
+	local wtemp
+	wtemp="$( (
+		cd /mnt/c 2>/dev/null || true
+		"${cmd_exe}" /c 'echo %TEMP%' 2>/dev/null
+	) | tr -d '\r\n')" || wtemp=""
+	if [[ -z ${wtemp} ]]; then
+		_warn "could not resolve the Windows %TEMP% through cmd.exe"
+		_result "sshd:    failed (no %TEMP%)"
+		return 0
+	fi
+	local wdir="${wtemp}\\jb-windows-sshd"
+	local dir
+	dir="$(wslpath -u "${wdir}")"
+
+	# The same PowerShell pin the pwsh step installs on Linux, so every
+	# machine this sets up runs one release.
+	local call="& '${wdir}\\windows-sshd.ps1' -GitHubUser '${user}' -PwshVersion '${_PS_VER}'"
+	if [[ -n ${SSHD_ALLOW} ]]; then
+		call="${call} -RemoteAddress '${SSHD_ALLOW//,/\',\'}'"
+	fi
+	local log="${wdir}\\log.txt"
+	local inner="try { ${call} *>&1 | Out-File -FilePath '${log}' -Encoding utf8; exit 0 } catch { \$_ | Out-File -FilePath '${log}' -Append -Encoding utf8; exit 1 }"
+
+	if [[ ${DRY_RUN} -eq 1 ]]; then
+		_info "would copy windows-sshd.ps1 to ${wdir}"
+		_info "would raise a UAC prompt and run, elevated:"
+		_info "  ${call}"
+		_result "sshd:    ok (dry run)"
+		return 0
+	fi
+
+	mkdir -p "${dir}"
+	cp "${ps1}" "${dir}/windows-sshd.ps1"
+	rm -f "${dir}/log.txt"
+
+	local b64
+	b64="$(printf '%s' "${inner}" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)"
+
+	_info "approve the UAC prompt on the Windows desktop to continue"
+	local rc=0
+	(
+		cd /mnt/c 2>/dev/null || true
+		"${ps_exe}" -NoProfile -Command "\$p = Start-Process powershell.exe -Verb RunAs -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${b64}'; \$p.WaitForExit(); exit \$p.ExitCode"
+	) || rc=$?
+
+	if [[ -r "${dir}/log.txt" ]]; then
+		# Out-File's utf8 in Windows PowerShell writes a BOM; drop it and the
+		# CRs so the relayed lines read like the rest of this output.
+		sed -e '1s/^\xEF\xBB\xBF//' -e 's/\r$//' "${dir}/log.txt"
+	fi
+	if [[ ${rc} -eq 0 ]]; then
+		_result "sshd:    ok (keys from github.com/${user}.keys)"
+	elif [[ ! -r "${dir}/log.txt" ]]; then
+		_warn "the elevated run did not start — was the UAC prompt declined?"
+		_result "sshd:    failed (not elevated)"
+	else
+		_result "sshd:    failed (see the log above)"
+	fi
+}
+
 # git — opinionated global defaults, none of which overwrite a choice the
 # user has already made.
 step_git() {
@@ -967,7 +1161,13 @@ if [[ ${STEPS_EXPLICIT} -eq 0 ]]; then
 	if [[ -n ${_toml_steps} ]]; then
 		STEPS_STR="${_toml_steps}"
 	else
-		STEPS_STR="${_STEPS_ALL_STR// /,}"
+		STEPS_STR=""
+		for _s in "${_STEPS_ALL[@]}"; do
+			case " ${_STEPS_OPT_IN_STR} " in
+			*" ${_s} "*) continue ;;
+			esac
+			STEPS_STR="${STEPS_STR:+${STEPS_STR},}${_s}"
+		done
 	fi
 fi
 

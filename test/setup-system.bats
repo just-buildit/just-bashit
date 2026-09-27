@@ -159,6 +159,8 @@ _write_deps_toml() {
 	assert_output --partial "tools —"
 	assert_output --partial "pwsh —"
 	assert_output --partial "claude —"
+	# Opt-in: it opens a listening port, so only -s or the toml selects it.
+	refute_output --partial "sshd —"
 }
 
 @test 'dry run prints a summary' {
@@ -896,4 +898,140 @@ _known_steps() {
 			"${PROJECT_ROOT}/docs/setup-system.md" ||
 			fail "step '${step}' has no row in docs/setup-system.md"
 	done
+}
+
+# ---------------------------------------------------------------------------
+# sshd — driven entirely through stubs. CI has no Windows desktop to raise a
+# UAC prompt on, so the Windows side is faked the way ssh-to-windows.bats
+# fakes it, and the elevated command is DECODED and recorded rather than
+# assumed: the base64 hop is exactly where a quoting bug would hide.
+# ---------------------------------------------------------------------------
+_sshd_stubs() {
+	STUBS="${BATS_TEST_TMPDIR}/stubs"
+	WINTEMP="${BATS_TEST_TMPDIR}/wintemp"
+	CALLS="${BATS_TEST_TMPDIR}/elevated.txt"
+	mkdir -p "${STUBS}" "${WINTEMP}"
+	export STUBS WINTEMP CALLS
+
+	echo "Linux version 5.15.0-microsoft-standard-WSL2" >"${BATS_TEST_TMPDIR}/proc-version"
+	export JB_PROC_VERSION="${BATS_TEST_TMPDIR}/proc-version"
+
+	cat >"${STUBS}/cmd.exe" <<-'EOF'
+		#!/bin/bash
+		printf 'C:\\Users\\tester\\AppData\\Local\\Temp\r\n'
+	EOF
+	cat >"${STUBS}/wslpath" <<-EOF
+		#!/bin/bash
+		p="\${2//\\\\//}"
+		printf '%s\n' "${WINTEMP}\${p#C:/Users/tester/AppData/Local/Temp}"
+	EOF
+	# Records the decoded elevated command, then plays the elevated script:
+	# writes its log and exits with STUB_RC. STUB_NOLOG plays a declined UAC
+	# prompt, where the elevated process never starts.
+	cat >"${STUBS}/powershell.exe" <<-EOF
+		#!/bin/bash
+		b64=\$(printf '%s' "\$*" | grep -o "EncodedCommand','[^']*" | cut -d"'" -f3)
+		printf '%s' "\${b64}" | base64 -d | iconv -f UTF-16LE -t UTF-8 >"${CALLS}"
+		if [ -z "\${STUB_NOLOG:-}" ]; then
+			printf '  ok    sshd running\r\n' >"${WINTEMP}/jb-windows-sshd/log.txt"
+		fi
+		exit "\${STUB_RC:-0}"
+	EOF
+	# gh signed in as nobody: the user must come from --github-user.
+	printf '#!/bin/bash\nexit 1\n' >"${STUBS}/gh"
+	chmod +x "${STUBS}"/*
+	PATH="${STUBS}:${PATH}"
+}
+
+@test 'sshd: -s sshd selects the opt-in step' {
+	_sshd_stubs
+	run setup-system.sh -n -s sshd --github-user octocat
+	assert_success
+	assert_output --partial "sshd —"
+}
+
+@test 'sshd: skipped, not failed, off WSL' {
+	_sshd_stubs
+	echo "Linux version 6.8.0-generic" >"${JB_PROC_VERSION}"
+	run setup-system.sh -s sshd --github-user octocat
+	assert_success
+	assert_output --partial "sshd:    skipped (not WSL)"
+	assert [ ! -e "${CALLS}" ]
+}
+
+@test 'sshd: skipped with no GitHub user to take keys from' {
+	_sshd_stubs
+	run setup-system.sh -s sshd
+	assert_success
+	assert_output --partial "sshd:    skipped (no GitHub user)"
+	assert [ ! -e "${CALLS}" ]
+}
+
+@test 'sshd: a user name that could carry a quote is refused' {
+	_sshd_stubs
+	run setup-system.sh -s sshd --github-user "x';Remove-Item C:\\"
+	assert_success
+	assert_output --partial "sshd:    failed (bad --github-user)"
+	assert [ ! -e "${CALLS}" ]
+}
+
+@test 'sshd: an address list that could carry a quote is refused' {
+	_sshd_stubs
+	run setup-system.sh -s sshd --github-user octocat --sshd-allow "1.2.3.4'"
+	assert_success
+	assert_output --partial "sshd:    failed (bad --sshd-allow)"
+}
+
+@test 'sshd: dry run shows the elevated call and elevates nothing' {
+	_sshd_stubs
+	run setup-system.sh -n -s sshd --github-user octocat --sshd-allow 100.64.0.0/10,fd7a:115c:a1e0::/48
+	assert_success
+	assert_output --partial "-GitHubUser 'octocat'"
+	assert_output --partial "-RemoteAddress '100.64.0.0/10','fd7a:115c:a1e0::/48'"
+	assert_output --partial "sshd:    ok (dry run)"
+	assert [ ! -e "${CALLS}" ]
+	assert [ ! -e "${WINTEMP}/jb-windows-sshd" ]
+}
+
+@test 'sshd: runs the script elevated with the pwsh pin, relays its log' {
+	_sshd_stubs
+	run setup-system.sh -s sshd --github-user octocat --sshd-allow 100.64.0.0/10
+	assert_success
+	assert_output --partial "sshd running"
+	assert_output --partial "sshd:    ok (keys from github.com/octocat.keys)"
+	assert [ -r "${WINTEMP}/jb-windows-sshd/windows-sshd.ps1" ]
+	# The pin is setup-system's own, so the two platforms cannot drift.
+	pin=$(sed -n 's/^_PS_VER="\(.*\)"$/\1/p' "${PROJECT_ROOT}/src/just_bashit/setup-system.sh")
+	run cat "${CALLS}"
+	assert_output --partial "windows-sshd.ps1' -GitHubUser 'octocat' -PwshVersion '${pin}' -RemoteAddress '100.64.0.0/10'"
+}
+
+@test 'sshd: a declined UAC prompt reports failure, not success' {
+	_sshd_stubs
+	STUB_RC=1 STUB_NOLOG=1 run setup-system.sh -s sshd --github-user octocat
+	assert_success
+	assert_output --partial "was the UAC prompt declined?"
+	assert_output --partial "sshd:    failed (not elevated)"
+}
+
+@test 'sshd: a failing elevated script reports failure' {
+	_sshd_stubs
+	STUB_RC=1 run setup-system.sh -s sshd --github-user octocat
+	assert_success
+	assert_output --partial "sshd:    failed (see the log above)"
+}
+
+@test 'sshd: finds powershell.exe under the C: mount when PATH lacks it' {
+	_sshd_stubs
+	# appendWindowsPath=false: interop works, Windows PATH is absent.
+	local root="${BATS_TEST_TMPDIR}/c"
+	mkdir -p "${root}/Windows/System32/WindowsPowerShell/v1.0"
+	mv "${STUBS}/powershell.exe" "${root}/Windows/System32/WindowsPowerShell/v1.0/"
+	mv "${STUBS}/cmd.exe" "${root}/Windows/System32/"
+	printf 'C:\\134 %s 9p rw,aname=drvfs;path=C:\\ 0 0\n' "${root}" >"${BATS_TEST_TMPDIR}/mounts"
+	export JB_PROC_MOUNTS="${BATS_TEST_TMPDIR}/mounts"
+	run setup-system.sh -s sshd --github-user octocat
+	assert_success
+	assert_output --partial "sshd:    ok (keys from github.com/octocat.keys)"
+	assert [ -e "${CALLS}" ]
 }

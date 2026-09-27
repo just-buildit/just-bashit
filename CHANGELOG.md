@@ -4,6 +4,20 @@
 
 ### Added
 
+- **`setup-system -s sshd`: Windows' own OpenSSH server as a boot-time
+    service, so a WSL machine answers ssh even when WSL is down.** An ssh
+    server inside WSL2 dies with the VM, which stops on its own when idle or
+    after a crash — the box goes dark exactly when you need it. The new step
+    runs `windows-sshd.ps1` elevated (one UAC prompt): key-only, keys
+    mirrored from `github.com/<user>.keys` into the file sshd actually reads
+    for an admin, `pwsh.exe` as the login shell, installed from the release MSI
+    at the `pwsh` step's pinned version (winget fails with access denied
+    when elevated this way), the firewall limited to `--sshd-allow`, and the service set to
+    start at boot. `sshd_config` edits land above the first `Match`, are
+    validated with `sshd -t`, and roll back if rejected; the script refuses
+    to run with no keys rather than lock the machine. Opt-in: a default run
+    never opens a port.
+
 - **`install-deps`: a `winget` section, so Windows installs rather than
     prints.** `msys2` has only ever printed a `pacman` line to run by hand,
     so nothing in this repo could provision a Windows machine. `winget` does

@@ -18,18 +18,21 @@ ______________________________________________________________________
 
 ## Steps
 
-| Step     | What it does                                                                                                                                                                                                    |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `deps`   | Installs a baseline toolchain — C compiler, `make`, `cmake`, `pkg-config`, `git`, `curl`, ssh — then the packages of any `bootstrap.toml` in the current directory, both via [`install-deps`](install-deps.md). |
-| `shell`  | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                                                                           |
-| `ssh`    | Tightens permissions across `~/.ssh` — repairing a directory copied from Windows, FAT, a zip or git — then creates an ed25519 key named after this host if there is no key at all. Prints the public key.       |
-| `git`    | Sets global git defaults that are not already set, and an unset `user.name` / `user.email` from the environment or a prompt.                                                                                    |
-| `tools`  | Installs `uv` if missing; installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.                                                                                        |
-| `pwsh`   | Installs PowerShell 7 and the PSScriptAnalyzer module, so `.ps1` files can be linted on this machine. Linux and macOS only — see below.                                                                         |
-| `claude` | Installs Claude Code if the `claude` command is missing.                                                                                                                                                        |
+| Step     | What it does                                                                                                                                                                                                               |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deps`   | Installs a baseline toolchain — C compiler, `make`, `cmake`, `pkg-config`, `git`, `curl`, ssh — then the packages of any `bootstrap.toml` in the current directory, both via [`install-deps`](install-deps.md).            |
+| `shell`  | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                                                                                      |
+| `ssh`    | Tightens permissions across `~/.ssh` — repairing a directory copied from Windows, FAT, a zip or git — then creates an ed25519 key named after this host if there is no key at all. Prints the public key.                  |
+| `sshd`   | **Opt-in, WSL only.** Runs Windows' own OpenSSH server as a boot-time service — key-only, keys from `github.com/<user>.keys`, `pwsh.exe` as the login shell — so the machine answers ssh even when WSL is down. See below. |
+| `git`    | Sets global git defaults that are not already set, and an unset `user.name` / `user.email` from the environment or a prompt.                                                                                               |
+| `tools`  | Installs `uv` if missing; installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.                                                                                                   |
+| `pwsh`   | Installs PowerShell 7 and the PSScriptAnalyzer module, so `.ps1` files can be linted on this machine. Linux and macOS only — see below.                                                                                    |
+| `claude` | Installs Claude Code if the `claude` command is missing.                                                                                                                                                                   |
 
 They always run in that order, whatever order you list them in — packages
-land before the steps that need `git`, `curl` and `ssh-keygen`.
+land before the steps that need `git`, `curl` and `ssh-keygen`. Every step
+runs by default except `sshd`, which opens a listening port and so runs only
+when named with `-s` or in `bootstrap.toml`.
 
 ```bash
 jbx setup-system -s shell,ssh      # only these
@@ -320,6 +323,48 @@ instead of being rewritten with `wslpath -w` for `pwsh.exe`.
 
 ______________________________________________________________________
 
+## The sshd step
+
+An ssh server inside WSL2 — or Tailscale SSH running there — dies with the
+WSL VM, and the VM stops on its own when it is idle or after a crash. So the
+machine is unreachable at exactly the moments you most need to reach it.
+Windows' own `sshd` is a service: it starts at boot, before anyone logs in,
+whether or not WSL ever does. From there `wsl` is one command away.
+
+```bash
+jbx setup-system -s sshd --github-user octocat
+jbx setup-system -s sshd --github-user octocat \
+    --sshd-allow 100.64.0.0/10,fd7a:115c:a1e0::/48   # a Tailscale tailnet only
+```
+
+The work is done by `windows-sshd.ps1`, which must run elevated. The step
+copies it to the Windows `%TEMP%`, raises **one UAC prompt on the Windows
+desktop**, waits, and relays the script's log. Declining the prompt is
+reported as a failure, not a success. The script can also be run on its own
+from an elevated PowerShell — `Get-Help .\windows-sshd.ps1 -Full` documents
+it. Every part is idempotent: re-running is how new keys arrive.
+
+What it does, in order:
+
+|          |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Keys     | Mirrors `github.com/<user>.keys` — where the `ssh` step already tells you to register each machine's key — into the file sshd reads for you: `administrators_authorized_keys` for a local admin (sshd **ignores** an admin's `~/.ssh/authorized_keys`), `~/.ssh/authorized_keys` otherwise. The keys sit inside a marked block, so keys you add by hand outside it survive, and the ACL is reset every run. **No keys, no run**: with passwords off and nothing authorized, the server would admit nobody. |
+| Server   | Installs the `OpenSSH.Server` capability if it is missing.                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Auth     | Sets `PasswordAuthentication no` and `PubkeyAuthentication yes` in the global section of `sshd_config`, above the first `Match` (below it, a setting applies only to that match). Validated with `sshd -t`; rejected, the previous file is restored.                                                                                                                                                                                                                                                       |
+| Shell    | `pwsh.exe` as the login shell, installed from the pinned release MSI when missing — the same PowerShell version the `pwsh` step installs on Linux. Not winget: run inside a process elevated this way, winget fails with access denied.                                                                                                                                                                                                                                                                    |
+| Firewall | Limits the port-22 rule to `--sshd-allow` (default: any address).                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Service  | Starts at boot (`Automatic`), restarted so the new configuration is live.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+
+`--github-user` defaults to the account `gh` is signed in to. Off WSL the
+step reports `skipped`: on Windows run the script directly, and on Linux
+enable the distro's own `sshd` unit.
+
+Windows' `PATH` may be absent from WSL (`appendWindowsPath=false`); the step
+then finds `powershell.exe` and `cmd.exe` under `Windows\System32` of
+wherever the mount table says `C:` is mounted.
+
+______________________________________________________________________
+
 ## Options
 
 | Flag       | Long form                   | Description                                        |
@@ -332,6 +377,8 @@ ______________________________________________________________________
 | `-x STEPS` | `--skip STEPS`              | Comma-separated steps to leave out                 |
 |            | `--prefix DIR`              | Config directory (default `~/.config/just-bashit`) |
 |            | `--key-name NAME`           | ssh key filename (default: this hostname)          |
+|            | `--github-user NAME`        | sshd: authorize `github.com/NAME.keys`             |
+|            | `--sshd-allow ADDRS`        | sshd: addresses the firewall admits to port 22     |
 |            | `--template [PATH]`         | Write the bashrc template to PATH, or stdout       |
 |            | `--template-profile [PATH]` | Write the profile template to PATH, or stdout      |
 
