@@ -45,7 +45,9 @@ _exe() { printf '#!/bin/sh\n' >"$1" && chmod +x "$1"; }
 }
 
 @test 'win-exe: a file that is not executable is not an answer' {
-	printf 'x' >"${ROOT}/Windows/System32/jbtest-cmd.exe"
-	run win-exe jbtest-cmd.exe
+	# No .exe suffix: MSYS (the windows runner) calls any *.exe executable
+	# whatever its mode, so the suffix would test MSYS, not the -x check.
+	printf 'x' >"${ROOT}/Windows/System32/jbtest-noexec"
+	run win-exe jbtest-noexec
 	assert_failure
 }
