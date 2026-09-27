@@ -18,16 +18,16 @@ ______________________________________________________________________
 
 ## Steps
 
-| Step     | What it does                                                                                                                                                                                                               |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `deps`   | Installs a baseline toolchain — C compiler, `make`, `cmake`, `pkg-config`, `git`, `curl`, ssh — then the packages of any `bootstrap.toml` in the current directory, both via [`install-deps`](install-deps.md).            |
-| `shell`  | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                                                                                      |
-| `ssh`    | Tightens permissions across `~/.ssh` — repairing a directory copied from Windows, FAT, a zip or git — then creates an ed25519 key named after this host if there is no key at all. Prints the public key.                  |
-| `sshd`   | **Opt-in, WSL only.** Runs Windows' own OpenSSH server as a boot-time service — key-only, keys from `github.com/<user>.keys`, `pwsh.exe` as the login shell — so the machine answers ssh even when WSL is down. See below. |
-| `git`    | Sets global git defaults that are not already set, and an unset `user.name` / `user.email` from the environment or a prompt.                                                                                               |
-| `tools`  | Installs `uv` if missing; installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.                                                                                                   |
-| `pwsh`   | Installs PowerShell 7 and the PSScriptAnalyzer module, so `.ps1` files can be linted on this machine. Linux and macOS only — see below.                                                                                    |
-| `claude` | Installs Claude Code if the `claude` command is missing.                                                                                                                                                                   |
+| Step     | What it does                                                                                                                                                                                                                                                    |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deps`   | Installs a baseline toolchain — C compiler, `make`, `cmake`, `pkg-config`, `git`, `curl`, ssh — then the packages of any `bootstrap.toml` in the current directory, both via [`install-deps`](install-deps.md).                                                 |
+| `shell`  | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                                                                                                                           |
+| `ssh`    | Tightens permissions across `~/.ssh` — repairing a directory copied from Windows, FAT, a zip or git — then creates an ed25519 key named after this host if there is no key at all. Prints the public key.                                                       |
+| `sshd`   | **Opt-in, Windows only** (WSL or native MSYS2 / Git Bash). Runs Windows' own OpenSSH server as a boot-time service — key-only, keys from `github.com/<user>.keys`, `pwsh.exe` as the login shell — so the machine answers ssh even when WSL is down. See below. |
+| `git`    | Sets global git defaults that are not already set, and an unset `user.name` / `user.email` from the environment or a prompt.                                                                                                                                    |
+| `tools`  | Installs `uv` if missing; installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.                                                                                                                                        |
+| `pwsh`   | Installs PowerShell 7 and the PSScriptAnalyzer module, so `.ps1` files can be linted on this machine. Linux and macOS only — see below.                                                                                                                         |
+| `claude` | Installs Claude Code if the `claude` command is missing.                                                                                                                                                                                                        |
 
 They always run in that order, whatever order you list them in — packages
 land before the steps that need `git`, `curl` and `ssh-keygen`. Every step
@@ -355,9 +355,15 @@ What it does, in order:
 | Firewall | Limits the port-22 rule to `--sshd-allow` (default: any address).                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Service  | Starts at boot (`Automatic`), restarted so the new configuration is live.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
-`--github-user` defaults to the account `gh` is signed in to. Off WSL the
-step reports `skipped`: on Windows run the script directly, and on Linux
-enable the distro's own `sshd` unit.
+It runs the same from WSL and from native Windows (MSYS2 or Git Bash): the
+only difference is whether a Windows path is translated with `wslpath` or
+`cygpath`. Nothing is quoted across a process boundary — the elevated body
+is written to `run.ps1` beside the script and `powershell.exe` is handed
+only `-File launch.ps1` — so no `iconv` or `base64` is needed on either.
+
+`--github-user` defaults to the account `gh` is signed in to. On Linux or
+macOS the step reports `skipped`; enable the distro's own `sshd` unit
+instead.
 
 Windows' `PATH` may be absent from WSL (`appendWindowsPath=false`); the step
 then finds `powershell.exe` and `cmd.exe` under `Windows\System32` of

@@ -5,7 +5,8 @@
 ### Added
 
 - **`setup-system -s sshd`: Windows' own OpenSSH server as a boot-time
-    service, so a WSL machine answers ssh even when WSL is down.** An ssh
+    service, so a Windows machine answers ssh even when WSL is down.** Runs
+    from WSL or natively under MSYS2 / Git Bash. An ssh
     server inside WSL2 dies with the VM, which stops on its own when idle or
     after a crash — the box goes dark exactly when you need it. The new step
     runs `windows-sshd.ps1` elevated (one UAC prompt): key-only, keys
