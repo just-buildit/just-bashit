@@ -1046,6 +1046,23 @@ C:\\Users\\tester\\AppData\\Local\\Temp\\jb-windows-sshd\\launch.ps1"
 	assert_output "100.64.0.0/10|fd7a:115c:a1e0::/48"
 }
 
+# The stubbed powershell.exe above never runs launch.ps1, so it cannot see
+# what launch.ps1 does with a declined prompt. This runs the real file under
+# pwsh with Start-Process replaced: declined must exit non-zero, and an
+# elevated run's exit code must come back unchanged.
+@test 'sshd: launch.ps1 fails on a declined UAC prompt and relays the exit code' {
+	command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed (setup-system -s pwsh)"
+	_sshd_stubs
+	run setup-system.sh -s sshd --github-user octocat
+	assert_success
+	local f="${WINTEMP}/jb-windows-sshd/launch.ps1"
+	command -v cygpath >/dev/null 2>&1 && f="$(cygpath -w "${f}")"
+	run pwsh -NoProfile -Command "function Start-Process { Write-Error 'The operation was canceled by the user.' }; & '${f}'; exit \$LASTEXITCODE"
+	assert_failure
+	run pwsh -NoProfile -Command "function Start-Process { [pscustomobject]@{ ExitCode = 3 } | Add-Member -PassThru ScriptMethod WaitForExit { } }; & '${f}'; exit \$LASTEXITCODE"
+	assert_equal "${status}" 3
+}
+
 @test 'sshd: a declined UAC prompt reports failure, not success' {
 	_sshd_stubs
 	STUB_RC=1 STUB_NOLOG=1 run setup-system.sh -s sshd --github-user octocat

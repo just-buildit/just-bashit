@@ -775,8 +775,11 @@ step_sshd() {
 		}
 	EOF
 	# Start-Process joins -ArgumentList with spaces, so the one path in it
-	# is quoted; a Windows path cannot itself hold a double quote.
+	# is quoted; a Windows path cannot itself hold a double quote. A
+	# declined UAC prompt is a NON-terminating error: without Stop the
+	# script runs on to `exit $null.ExitCode`, which is exit 0 -- success.
 	cat >"${dir}/launch.ps1" <<-'EOF'
+		$ErrorActionPreference = 'Stop'
 		$run = Join-Path $PSScriptRoot 'run.ps1'
 		$p = Start-Process powershell.exe -Verb RunAs -PassThru -WindowStyle Hidden `
 		    -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$run`""
