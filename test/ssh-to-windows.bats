@@ -155,6 +155,24 @@ setup() {
 	[ ! -s "${ICACLS_LOG}" ]
 	# The ACL change is the important half; a dry run that hid it would be
 	# worse than useless.
-	[[ ${output} == *"would: icacls.exe"* ]]
+	# By full path: win-exe resolves it, so it runs with or without PATH.
+	[[ ${output} == *"would: "*"/icacls.exe "* ]]
 	[[ ${output} == *"inheritance:r"* ]]
+}
+
+@test "ssh-to-windows: finds cmd, whoami and icacls under the C: mount when PATH lacks them" {
+	# Linux only: this fakes WSL with Windows' PATH left out. On a real
+	# Windows runner the genuine programs are on PATH, so hiding the stubs
+	# would hand the test a real icacls run.
+	[[ $(uname -s) == Linux ]] || skip "fakes WSL; needs a Linux host"
+	# A shell reached over ssh: interop works, Windows' PATH is absent.
+	local root="${BATS_TEST_TMPDIR}/c"
+	mkdir -p "${root}/Windows/System32"
+	mv "${STUBS}/cmd.exe" "${STUBS}/whoami.exe" "${STUBS}/icacls.exe" "${root}/Windows/System32/"
+	printf 'C:\\134 %s 9p rw,aname=drvfs;path=C:\\ 0 0\n' "${root}" >"${BATS_TEST_TMPDIR}/mounts"
+	export JB_PROC_MOUNTS="${BATS_TEST_TMPDIR}/mounts"
+	run bash "${SCRIPT}"
+	[ "${status}" -eq 0 ]
+	[ -f "${WINHOME}/.ssh/id_test" ]
+	grep -q '/inheritance:r' "${ICACLS_LOG}"
 }

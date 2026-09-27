@@ -11,6 +11,10 @@
 set -euo pipefail
 IFS=$'\n\t'
 
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${_SCRIPT_DIR}/windows.sh"
+
 DRY_RUN=0
 VERBOSE=0
 FORCE=0
@@ -108,10 +112,16 @@ if ! { [[ -r ${_PROC_VERSION} ]] && grep -qi microsoft "${_PROC_VERSION}"; }; th
 	_die "not running under WSL — there is no Windows profile to publish to"
 fi
 
-for c in wslpath icacls.exe; do
-	command -v "${c}" >/dev/null 2>&1 ||
-		_die "${c} not found; WSL interop with Windows must be enabled"
-done
+command -v wslpath >/dev/null 2>&1 ||
+	_die "wslpath not found; WSL interop with Windows must be enabled"
+# By full path when PATH lacks Windows' directories, as it does in a shell
+# reached over ssh (windows.sh says why).
+ICACLS="$(win-exe icacls.exe)" ||
+	_die "icacls.exe not found; WSL interop with Windows must be enabled"
+CMD="$(win-exe cmd.exe)" ||
+	_die "cmd.exe not found; WSL interop with Windows must be enabled"
+WHOAMI="$(win-exe whoami.exe)" ||
+	_die "whoami.exe not found; WSL interop with Windows must be enabled"
 
 SRC_DIR="${HOME}/.ssh"
 [[ -d ${SRC_DIR} ]] || _die "${SRC_DIR} does not exist — no keys to publish"
@@ -124,7 +134,7 @@ SRC_DIR="${HOME}/.ssh"
 
 _win_home_raw="$( (
 	cd /mnt/c 2>/dev/null || true
-	cmd.exe /c 'echo %USERPROFILE%' 2>/dev/null
+	"${CMD}" /c 'echo %USERPROFILE%' 2>/dev/null
 ) | tr -d '\r\n')" || _win_home_raw=""
 [[ -n ${_win_home_raw} ]] || _die "could not resolve %USERPROFILE% through cmd.exe"
 
@@ -137,7 +147,7 @@ DEST_DIR="${WIN_HOME}/.ssh"
 # and is correct on a domain-joined machine where %USERNAME% alone is not.
 WIN_USER="$( (
 	cd /mnt/c 2>/dev/null || true
-	whoami.exe 2>/dev/null
+	"${WHOAMI}" 2>/dev/null
 ) | tr -d '\r\n')" || WIN_USER=""
 [[ -n ${WIN_USER} ]] || _die "could not resolve the Windows user through whoami.exe"
 
@@ -184,7 +194,7 @@ fi
 
 DEST_DIR_WIN="$(wslpath -w "${DEST_DIR}" 2>/dev/null || printf '%s\\.ssh' "${_win_home_raw}")"
 _note "acl ${DEST_DIR_WIN}"
-_run icacls.exe "${DEST_DIR_WIN}" /inheritance:r /grant:r "${WIN_USER}:(OI)(CI)F"
+_run "${ICACLS}" "${DEST_DIR_WIN}" /inheritance:r /grant:r "${WIN_USER}:(OI)(CI)F"
 
 # ── Publish ─────────────────────────────────────────────────────────────────
 
@@ -216,7 +226,7 @@ _publish() {
 		win="$(wslpath -w "${dest}" 2>/dev/null || true)"
 		if [[ -n ${win} ]]; then
 			_note "acl   $(basename -- "${dest}")"
-			_run icacls.exe "${win}" /inheritance:r /grant:r "${WIN_USER}:F"
+			_run "${ICACLS}" "${win}" /inheritance:r /grant:r "${WIN_USER}:F"
 		fi
 	fi
 }

@@ -15,6 +15,8 @@ _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_SCRIPT_DIR}/toml.sh"
 # shellcheck source=/dev/null
 source "${_SCRIPT_DIR}/file.sh"
+# shellcheck source=/dev/null
+source "${_SCRIPT_DIR}/windows.sh"
 
 # Pages CDN mirror of src/just_bashit/ — used only when a sibling asset is
 # missing, i.e. when this script was fetched standalone by jbx.
@@ -629,31 +631,6 @@ step_ssh() {
 # Overridable so the suite can run this on a Linux runner (as ssh-to-windows
 # does): a WSL-only step tested only by hand is eventually not tested.
 _PROC_VERSION="${JB_PROC_VERSION:-/proc/version}"
-_PROC_MOUNTS="${JB_PROC_MOUNTS:-/proc/mounts}"
-
-# _win_exe NAME — path to a Windows executable. PATH first; then System32
-# under wherever the C: drive is mounted, because WSL can be configured
-# (appendWindowsPath=false) to leave Windows' PATH out entirely, and then
-# `powershell.exe` resolves nowhere even though interop works. The mount
-# point is read from the mount table rather than assumed to be /mnt/c:
-# [automount] root in /etc/wsl.conf moves it.
-_win_exe() {
-	local name="$1" root sys32 p
-	if p="$(command -v "${name}" 2>/dev/null)"; then
-		printf '%s\n' "${p}"
-		return 0
-	fi
-	root="$(awk '$1 ~ /^C:/ && /drvfs/ { print $2; exit }' "${_PROC_MOUNTS}" 2>/dev/null || true)"
-	[[ -n ${root} ]] || return 1
-	sys32="${root}/Windows/System32"
-	for p in "${sys32}/${name}" "${sys32}/WindowsPowerShell/v1.0/${name}"; do
-		if [[ -x ${p} ]]; then
-			printf '%s\n' "${p}"
-			return 0
-		fi
-	done
-	return 1
-}
 
 # _sshd_github_user — whose keys to authorize: --github-user, else the
 # account gh is signed in to. Printed, or return 1 when neither is known.
@@ -687,8 +664,8 @@ step_sshd() {
 	fi
 
 	local ps_exe cmd_exe c
-	ps_exe="$(_win_exe powershell.exe)" || ps_exe=""
-	cmd_exe="$(_win_exe cmd.exe)" || cmd_exe=""
+	ps_exe="$(win-exe powershell.exe)" || ps_exe=""
+	cmd_exe="$(win-exe cmd.exe)" || cmd_exe=""
 	for c in "${ps_exe:-powershell.exe}" "${cmd_exe:-cmd.exe}" "${topath}"; do
 		if [[ ${c} != */* ]] && ! _have "${c}"; then
 			_warn "${c} not found — this step drives Windows from here"
