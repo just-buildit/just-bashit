@@ -1022,6 +1022,10 @@ _sshd_stubs() {
 }
 
 @test 'sshd: finds powershell.exe under the C: mount when PATH lacks it' {
+	# Linux only: this fakes WSL with Windows' PATH left out. On a real
+	# Windows runner the genuine powershell.exe is on PATH, so hiding the
+	# stub would hand the test a real elevated run of the script.
+	[[ $(uname -s) == Linux ]] || skip "fakes WSL; needs a Linux host"
 	_sshd_stubs
 	# appendWindowsPath=false: interop works, Windows PATH is absent.
 	local root="${BATS_TEST_TMPDIR}/c"

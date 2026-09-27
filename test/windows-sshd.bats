@@ -10,6 +10,11 @@ _common_setup
 setup() {
 	command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed (setup-system -s pwsh)"
 	PS1_FILE="${PROJECT_ROOT}/src/just_bashit/windows-sshd.ps1"
+	# Under MSYS (the windows runner) pwsh is a Windows program and cannot
+	# open /d/a/... paths; hand it the Windows spelling.
+	if command -v cygpath >/dev/null 2>&1; then
+		PS1_FILE="$(cygpath -w "${PS1_FILE}")"
+	fi
 }
 
 _ps() { pwsh -NoProfile -Command ". '${PS1_FILE}'; $1"; }
