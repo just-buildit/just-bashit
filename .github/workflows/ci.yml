@@ -161,8 +161,17 @@ jobs:
           update: true
           install: ${{ steps.deps.outputs.packages }}
 
+      # The .ps1 tests need pwsh, and this is the one platform those scripts
+      # run on. windows-latest ships PowerShell 7, but MSYS2's minimal PATH
+      # leaves its directory out, so every one of them skipped here (#70).
+      # Required rather than hoped for: if an image drops it, this fails
+      # instead of quietly skipping again.
       - name: Run tests
-        run: make test
+        run: |
+          export PATH="${PATH}:/c/Program Files/PowerShell/7"
+          command -v pwsh >/dev/null || { echo "pwsh not found on the windows runner" >&2; exit 1; }
+          pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+          make test
 
   coverage:
     name: coverage
