@@ -337,22 +337,34 @@ jbx setup-system -s sshd --github-user octocat \
     --sshd-allow 100.64.0.0/10,fd7a:115c:a1e0::/48   # a Tailscale tailnet only
 ```
 
-The work is done by `windows-sshd.ps1`, which must run elevated. The step
-copies it to the Windows `%TEMP%`, raises **one UAC prompt on the Windows
-desktop**, waits, and relays the script's log. Declining the prompt is
-reported as a failure, not a success. The script can also be run on its own
-from an elevated PowerShell — `Get-Help .\windows-sshd.ps1 -Full` documents
-it. Every part is idempotent: re-running is how new keys arrive.
+The work is done by `windows-sshd.ps1`, which must run elevated. **Only a
+box's first run needs anyone at the desktop.** The step copies the script to
+the Windows `%TEMP%` and then:
+
+- **With an admin ssh channel — every run after the first:** it runs the
+    script over ssh to this machine's own sshd, from WSL. An admin logged in by
+    key gets an elevated session with no UAC prompt, so this works from
+    anywhere, including a session you reached the box through remotely, and the
+    output streams back live. The channel is `win-admin-channel` in
+    [`windows.sh`](libraries/windows.md), which proves the far end is this
+    machine and elevated before it is trusted.
+- **Without one — the first run:** it raises **one UAC prompt on the Windows
+    desktop**, waits, and relays the script's log. Declining the prompt is
+    reported as a failure, not a success.
+
+The dry run says which of the two it would use. The script can also be run on
+its own from an elevated PowerShell — `Get-Help .\windows-sshd.ps1 -Full`
+documents it. Every part is idempotent: re-running is how new keys arrive.
 
 What it does, in order:
 
 |          |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Keys     | Mirrors `github.com/<user>.keys` — where the `ssh` step already tells you to register each machine's key — into the file sshd reads for you: `administrators_authorized_keys` for a local admin (sshd **ignores** an admin's `~/.ssh/authorized_keys`), `~/.ssh/authorized_keys` otherwise. The keys sit inside a marked block, so keys you add by hand outside it survive, and the ACL is reset every run. **No keys, no run**: with passwords off and nothing authorized, the server would admit nobody. |
-| Server   | Installs the `OpenSSH.Server` capability if it is missing.                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Server   | Installs the `OpenSSH.Server` capability if it is missing. `InstallPending` (Windows finishes it at the next reboot) counts as installed.                                                                                                                                                                                                                                                                                                                                                                  |
 | Auth     | Sets `PasswordAuthentication no` and `PubkeyAuthentication yes` in the global section of `sshd_config`, above the first `Match` (below it, a setting applies only to that match). Validated with `sshd -t`; rejected, the previous file is restored.                                                                                                                                                                                                                                                       |
-| Shell    | `pwsh.exe` as the login shell, installed from the pinned release MSI when missing — the same PowerShell version the `pwsh` step installs on Linux. Not winget: run inside a process elevated this way, winget fails with access denied.                                                                                                                                                                                                                                                                    |
-| Firewall | Limits the port-22 rule to `--sshd-allow` (default: any address).                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Shell    | `pwsh.exe` as the login shell, installed when missing at the pinned version — the same one the `pwsh` step installs on Linux — with winget, or the release MSI in the one context winget refuses (a first run elevated through UAC).                                                                                                                                                                                                                                                                       |
+| Firewall | Limits the port-22 rule to `--sshd-allow` (default: any address), and adds a rule admitting this machine's own WSL by its virtual interface, which is what the admin ssh channel above connects through.                                                                                                                                                                                                                                                                                                   |
 | Service  | Starts at boot (`Automatic`), restarted so the new configuration is live.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 It runs the same from WSL and from native Windows (MSYS2 or Git Bash): the

@@ -37,3 +37,30 @@ Looked up in this order:
 assumed `/mnt/c`: `[automount] root` in `/etc/wsl.conf` moves it.
 `JB_PROC_MOUNTS` points it at another mount table, which is how the test
 suite fakes a Windows drive on a Linux runner.
+
+______________________________________________________________________
+
+## win-admin-channel
+
+Print the ssh destination (`user@host`) of this machine's **own** Windows
+sshd when WSL can reach it as an elevated admin, or return 1. An admin logged
+in by key over Windows OpenSSH gets the full elevated token with no UAC
+prompt, so anything that needs elevation can run over this channel with nobody
+at the desktop.
+
+```bash
+. just-bashit/src/just_bashit/windows.sh
+
+if dest="$(win-admin-channel)"; then
+    ssh "${WIN_SSH_OPTS[@]}" "$dest" 'Get-Service sshd'
+fi
+```
+
+The host is WSL's default gateway (NAT networking; `JB_WIN_HOST` overrides
+it). It is trusted only after one round trip proves the far end's
+`%COMPUTERNAME%` is this machine's and the session is elevated, so a gateway
+that is some other box is never mistaken for the host. `WIN_SSH_OPTS` carries
+batch mode, a connect timeout, and the key named after this host
+(`~/.ssh/<hostname>`) when it exists. The channel exists once
+`setup-system -s sshd` has run once: it adds the firewall rule that admits
+WSL.
