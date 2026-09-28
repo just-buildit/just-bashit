@@ -98,3 +98,15 @@ _channel_stubs() {
 	FAR_RC=255 run win-admin-channel
 	assert_failure
 }
+
+# A box with no hostname command (a minimal Fedora image) and an existing
+# ~/.ssh: sourcing this under `set -e` killed the caller with 127, silently.
+@test 'sourcing survives a missing hostname, and offers no key' {
+	mkdir -p "${BATS_TEST_TMPDIR}/home/.ssh" "${BATS_TEST_TMPDIR}/nohost"
+	printf '#!/bin/sh\nexit 127\n' >"${BATS_TEST_TMPDIR}/nohost/hostname"
+	chmod +x "${BATS_TEST_TMPDIR}/nohost/hostname"
+	HOME="${BATS_TEST_TMPDIR}/home" PATH="${BATS_TEST_TMPDIR}/nohost:${PATH}" \
+		run bash -euo pipefail -c ". '${PROJECT_ROOT}/src/just_bashit/windows.sh'; printf '%s ' \"\${WIN_SSH_OPTS[@]}\""
+	assert_success
+	refute_output --partial "-i"
+}

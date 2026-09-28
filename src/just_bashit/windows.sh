@@ -75,9 +75,15 @@ win-exe() {
 # Built here, at source time, not inside win-admin-channel: callers run that
 # in $(...), a subshell, so an option it added would never reach them.
 WIN_SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new)
-if [[ -r "${HOME}/.ssh/$(hostname 2>/dev/null)" ]]; then
-	WIN_SSH_OPTS+=(-i "${HOME}/.ssh/$(hostname 2>/dev/null)")
+# The same name setup-system's ssh step gives the key. Derived once, with a
+# fallback, and required to be a FILE: a box with no hostname command (a
+# minimal Fedora image) made the path ~/.ssh/ -- a readable directory -- and
+# the second, failing $(hostname) then killed any `set -e` caller with 127.
+_win_key="$(hostname -s 2>/dev/null || hostname 2>/dev/null || true)"
+if [[ -n ${_win_key} && -f "${HOME}/.ssh/${_win_key}" ]]; then
+	WIN_SSH_OPTS+=(-i "${HOME}/.ssh/${_win_key}")
 fi
+unset _win_key
 win-admin-channel() {
 	local cmd host user name out
 	cmd="$(win-exe cmd.exe)" || return 1
