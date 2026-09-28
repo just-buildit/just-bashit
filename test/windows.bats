@@ -105,8 +105,15 @@ _channel_stubs() {
 	mkdir -p "${BATS_TEST_TMPDIR}/home/.ssh" "${BATS_TEST_TMPDIR}/nohost"
 	printf '#!/bin/sh\nexit 127\n' >"${BATS_TEST_TMPDIR}/nohost/hostname"
 	chmod +x "${BATS_TEST_TMPDIR}/nohost/hostname"
+	# A script FILE, not `bash -c`: coverage runs under kcov, whose
+	# instrumentation reads BASH_SOURCE -- unset in a -c string under -u.
+	cat >"${BATS_TEST_TMPDIR}/caller.sh" <<-EOF
+		set -euo pipefail
+		. '${PROJECT_ROOT}/src/just_bashit/windows.sh'
+		printf '%s ' "\${WIN_SSH_OPTS[@]}"
+	EOF
 	HOME="${BATS_TEST_TMPDIR}/home" PATH="${BATS_TEST_TMPDIR}/nohost:${PATH}" \
-		run bash -euo pipefail -c ". '${PROJECT_ROOT}/src/just_bashit/windows.sh'; printf '%s ' \"\${WIN_SSH_OPTS[@]}\""
+		run bash "${BATS_TEST_TMPDIR}/caller.sh"
 	assert_success
 	refute_output --partial "-i"
 }
