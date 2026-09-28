@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- **`windows-sshd.ps1` no longer prints a stray `False`.** The winget
+    attempt's return value was not captured, so a first run that fell back
+    to the MSI printed it (seen on swiftgo-ultra7).
+
 - **`jbx setup-system` runs under an older `jbx`.** An installed `jbx`
     co-fetches the libraries on its own built-in list, and nothing updates
     an install, so a 0.4.1 `jbx` fetched no `windows.sh` and `setup-system`
