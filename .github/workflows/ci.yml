@@ -278,7 +278,7 @@ jobs:
       # in just-buildit.github.io -- one way of doing this across the org.
       - name: Check the App credentials are visible here
         env:
-          APP_ID: ${{ secrets.ADOPTER_APP_ID }}
+          APP_CLIENT_ID: ${{ secrets.ADOPTER_APP_CLIENT_ID }}
           APP_KEY: ${{ secrets.ADOPTER_APP_PRIVATE_KEY }}
         run: |
           # These are organisation secrets. A repo they are not shared with
@@ -287,7 +287,7 @@ jobs:
           # malformed key -- true, unhelpful, and nothing to do with the key.
           # Say which name is missing instead.
           missing=""
-          [ -n "$APP_ID" ]  || missing="ADOPTER_APP_ID"
+          [ -n "$APP_CLIENT_ID" ] || missing="ADOPTER_APP_CLIENT_ID"
           [ -n "$APP_KEY" ] || missing="${missing:+$missing and }ADOPTER_APP_PRIVATE_KEY"
           if [ -n "$missing" ]; then
             echo "::error::$missing is not visible to this repository." \
@@ -299,7 +299,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@v3.2.0
         with:
-          app-id: ${{ secrets.ADOPTER_APP_ID }}
+          client-id: ${{ secrets.ADOPTER_APP_CLIENT_ID }}
           private-key: ${{ secrets.ADOPTER_APP_PRIVATE_KEY }}
           owner: just-buildit
           repositories: just-buildit.github.io
