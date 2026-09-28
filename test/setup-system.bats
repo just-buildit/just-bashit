@@ -921,8 +921,16 @@ _sshd_stubs() {
 
 	cat >"${STUBS}/cmd.exe" <<-'EOF'
 		#!/bin/bash
-		printf 'C:\\Users\\tester\\AppData\\Local\\Temp\r\n'
+		case "$*" in
+		*USERNAME*) printf 'tester\r\n' ;;
+		*COMPUTERNAME*) printf 'TESTHOST\r\n' ;;
+		*) printf 'C:\\Users\\tester\\AppData\\Local\\Temp\r\n' ;;
+		esac
 	EOF
+	# No admin ssh channel by default, so these tests exercise the UAC path;
+	# _admin_channel_stub turns one on. Never the real ssh or ip route.
+	printf '#!/bin/bash\nexit 255\n' >"${STUBS}/ssh"
+	export JB_WIN_HOST=192.0.2.1
 	cat >"${STUBS}/wslpath" <<-EOF
 		#!/bin/bash
 		p="\${2//\\\\//}"
@@ -1111,4 +1119,52 @@ C:\\Users\\tester\\AppData\\Local\\Temp\\jb-windows-sshd\\launch.ps1"
 	JB_JBS_BASE="file://${mirror}" run bash "${old}/setup-system.sh" -n -s git
 	assert_success
 	assert [ -r "${old}/windows.sh" ]
+}
+
+# An admin ssh channel to this machine's own sshd: answers the probe as
+# TESTHOST, elevated, and records (then plays) the one real command sent.
+_admin_channel_stub() {
+	cat >"${STUBS}/ssh" <<-EOF
+		#!/bin/bash
+		case "\$*" in
+		*COMPUTERNAME*) printf 'TESTHOST\\r\\nTrue\\r\\n' ;;
+		*) printf '%s\\n' "\${@: -1}" >"${CALLS}.ssh"
+		   printf '  ok    sshd running\\r\\n'
+		   exit "\${STUB_RC:-0}" ;;
+		esac
+	EOF
+	chmod +x "${STUBS}/ssh"
+}
+
+@test 'sshd: over an admin ssh channel, no UAC prompt is raised' {
+	_sshd_stubs
+	_admin_channel_stub
+	run setup-system.sh -s sshd --github-user octocat --sshd-allow 100.64.0.0/10
+	assert_success
+	assert_output --partial "no UAC prompt"
+	assert_output --partial "sshd running"
+	assert_output --partial "sshd:    ok (keys from github.com/octocat.keys, over ssh)"
+	# powershell.exe -- the UAC path -- never ran.
+	assert [ ! -e "${CALLS}" ]
+	run cat "${CALLS}.ssh"
+	assert_output --partial "jb-windows-sshd\\windows-sshd.ps1') -GitHubUser 'octocat'"
+	assert_output --partial "-RemoteAddress '100.64.0.0/10'"
+}
+
+@test 'sshd: a failing run over the channel reports failure' {
+	_sshd_stubs
+	_admin_channel_stub
+	STUB_RC=1 run setup-system.sh -s sshd --github-user octocat
+	assert_success
+	assert_output --partial "sshd:    failed (see above)"
+	assert [ ! -e "${CALLS}" ]
+}
+
+@test 'sshd: the dry run names the channel it would use' {
+	_sshd_stubs
+	_admin_channel_stub
+	run setup-system.sh -n -s sshd --github-user octocat
+	assert_success
+	assert_output --partial "over the admin ssh channel (tester@192.0.2.1), no UAC prompt"
+	assert [ ! -e "${CALLS}.ssh" ]
 }

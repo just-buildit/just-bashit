@@ -14,6 +14,18 @@
 
 ### Added
 
+- **Windows provisioning with no clicks after a box's first run (#76).**
+    `setup-system -s sshd` now runs `windows-sshd.ps1` over an admin ssh
+    session to the machine's own sshd when one exists: an admin logged in by
+    key is elevated with no UAC prompt, so nobody has to be at the desktop,
+    and the output streams back live. `windows.sh` gains `win-admin-channel`,
+    which trusts the far end only once it has proved to be this machine and
+    elevated. `windows-sshd.ps1` adds a firewall rule admitting the
+    machine's own WSL (by its virtual interface), installs pwsh with winget
+    and falls back to the MSI only in a first UAC-elevated run, and counts
+    an `InstallPending` capability as installed. Proven on zen-ai445: the
+    documented command, from a remote session, zero clicks.
+
 - **`windows.sh`: `win-exe`, one lookup for a Windows program from WSL.**
     Windows' directories are on a WSL shell's `PATH` only when WSL launched
     that shell; one reached over ssh (Tailscale SSH, VS Code Remote-SSH) has
