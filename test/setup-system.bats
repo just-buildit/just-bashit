@@ -1096,3 +1096,19 @@ C:\\Users\\tester\\AppData\\Local\\Temp\\jb-windows-sshd\\launch.ps1"
 	assert_output --partial "sshd:    ok (keys from github.com/octocat.keys)"
 	assert [ -e "${CALLS}" ]
 }
+
+# An installed jbx co-fetches the libraries on ITS OWN list, and nothing
+# updates an install: zen-ai445's 0.4.1 jbx fetched no windows.sh, and
+# setup-system died sourcing it (#75). The script now fetches a missing
+# library from the mirror, so an old client still runs it.
+@test 'a library missing beside setup-system is fetched from the mirror (old jbx)' {
+	local old="${BATS_TEST_TMPDIR}/jbx-cache" mirror="${BATS_TEST_TMPDIR}/mirror"
+	mkdir -p "${old}" "${mirror}"
+	# What a pre-windows.sh jbx leaves in its cache: the script and the
+	# libraries it knew about.
+	cp "${PROJECT_ROOT}"/src/just_bashit/{setup-system,toml,file}.sh "${old}/"
+	cp "${PROJECT_ROOT}/src/just_bashit/windows.sh" "${mirror}/"
+	JB_JBS_BASE="file://${mirror}" run bash "${old}/setup-system.sh" -n -s git
+	assert_success
+	assert [ -r "${old}/windows.sh" ]
+}

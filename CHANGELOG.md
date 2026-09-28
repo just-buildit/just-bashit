@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`jbx setup-system` runs under an older `jbx`.** An installed `jbx`
+    co-fetches the libraries on its own built-in list, and nothing updates
+    an install, so a 0.4.1 `jbx` fetched no `windows.sh` and `setup-system`
+    died sourcing it (seen on zen-ai445, #75). `setup-system` now loads its
+    libraries through `_asset`, which uses the sibling copy when there is
+    one and otherwise fetches it from the mirror, the way it already
+    fetched `windows-sshd.ps1`.
+
 ### Added
 
 - **`windows.sh`: `win-exe`, one lookup for a Windows program from WSL.**
