@@ -26,7 +26,7 @@ repos:
         # the drift gate guarantees the formatter reports a diff. Neither is
         # wrong on its own -- the vendored copy simply is not this repo's code
         # to format. Change it at canonical and re-vendor.
-        exclude: ^(scripts/release-watch\.sh|scripts/pwsh-lib\.sh|scripts/lint-powershell\.sh)$
+        exclude: ^(scripts/release-watch\.sh|scripts/pwsh-lib\.sh|scripts/lint-powershell\.sh|scripts/ci-tree-tested\.sh)$
 
   # Dispatches inward so the hook cannot format differently from `make format`.
   # Versions — mdformat and every plugin — come from pyproject.toml's dev group
