@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-02
+
+### Changed
+
+- **0.7.0 was tagged but never published; 0.7.1 is that release.** The
+    canonical standard moved (just-buildit.github.io#86) while 0.7.0's
+    release ran, so `standard-check` turned its commit's CI red and the
+    release workflow refused to publish, correctly. 0.7.1 carries every
+    0.7.0 change below plus the re-vendored `standard.mk`.
+
 ## [0.7.0] - 2026-10-02
 
 ### Fixed
