@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- **`install-deps` bounds every apt request** (#89). `apt-get update` and
+    `apt-get install` ran with no `Acquire` options, so a mirror that
+    stalled mid-transfer held the caller until its CI job's ceiling (29
+    minutes in just-makeit, just-makeit#1792). Both now pass
+    `-o Acquire::Retries=3 -o Acquire::http::Timeout=30   -o Acquire::https::Timeout=30`, so a stall becomes an error the
+    retries cover.
+
 - **`windows-sshd.ps1` no longer prints a stray `False`.** The winget
     attempt's return value was not captured, so a first run that fell back
     to the MSI printed it (seen on swiftgo-ultra7).
