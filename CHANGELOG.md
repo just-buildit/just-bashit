@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-02
+
 ### Fixed
 
 - **`install-deps` bounds every apt request** (#89). `apt-get update` and
@@ -22,6 +24,17 @@
     libraries through `_asset`, which uses the sibling copy when there is
     one and otherwise fetches it from the mirror, the way it already
     fetched `windows-sshd.ps1`.
+
+- **The package-manager list had five copies and no gate.** `TOML_KNOWN_PMS`
+    in `toml.sh` decides whether a `[group.pm]` section is recognised as a
+    group at all, so a manager added to `install-deps` but not to that array
+    fails with `no packages or cmd found` — a message about the manifest, for
+    a bug in the code. That is how `winget` first failed here. One test now
+    derives the set from that array and requires a `_do_install` arm, an
+    entry in `--help`'s supported list, the `One of:` line in `get-pkg-mgr`'s
+    help, a row in the docs manager table and a section in `template.toml`;
+    a second fails on any `_do_install` arm the array omits. Both directions,
+    one declaration.
 
 ### Added
 
@@ -168,19 +181,6 @@
     `--help` and the docs table — so two tests now read the validator's own
     "known steps" list and fail on any step missing from the help text or
     from `docs/setup-system.md`.
-
-### Fixed
-
-- **The package-manager list had five copies and no gate.** `TOML_KNOWN_PMS`
-    in `toml.sh` decides whether a `[group.pm]` section is recognised as a
-    group at all, so a manager added to `install-deps` but not to that array
-    fails with `no packages or cmd found` — a message about the manifest, for
-    a bug in the code. That is how `winget` first failed here. One test now
-    derives the set from that array and requires a `_do_install` arm, an
-    entry in `--help`'s supported list, the `One of:` line in `get-pkg-mgr`'s
-    help, a row in the docs manager table and a section in `template.toml`;
-    a second fails on any `_do_install` arm the array omits. Both directions,
-    one declaration.
 
 ### Changed
 
