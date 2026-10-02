@@ -102,7 +102,7 @@ EOF
 @test '--dry-run long form' {
 	run install-deps.sh --dry-run -s apt "${GROUPED_FILE}"
 	assert_success
-	assert_output --partial "apt-get install"
+	assert_output --partial "apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install"
 }
 
 @test '--verbose prints section and groups' {
@@ -134,7 +134,7 @@ EOF
 @test 'dry run runtime group' {
 	run install-deps.sh -n -s apt "${GROUPED_FILE}"
 	assert_success
-	assert_output --partial "apt-get install"
+	assert_output --partial "apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install"
 	assert_output --partial "curl"
 	assert_output --partial "wget"
 }
@@ -142,7 +142,7 @@ EOF
 @test 'dry run inline array' {
 	run install-deps.sh -n -s apt "${INLINE_FILE}"
 	assert_success
-	assert_output --partial "apt-get install"
+	assert_output --partial "apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install"
 	assert_output --partial "curl"
 	assert_output --partial "wget"
 	assert_output --partial "git"
@@ -151,7 +151,7 @@ EOF
 @test 'dry run dev group' {
 	run install-deps.sh -n -s apt -g dev "${GROUPED_FILE}"
 	assert_success
-	assert_output --partial "apt-get install"
+	assert_output --partial "apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install"
 	assert_output --partial "git"
 	assert_output --partial "make"
 }
@@ -379,7 +379,7 @@ EOF
 @test 'apt dry run includes update step' {
 	run install-deps.sh -n -s apt "${ALL_PM_FILE}"
 	assert_success
-	assert_output --partial "apt-get update"
+	assert_output --partial "apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update"
 }
 
 @test 'version-pinned apt package passes through verbatim' {
@@ -427,7 +427,7 @@ EOF
 @test 'long form --section overrides detected PM' {
 	run install-deps.sh -n --section apt "${GROUPED_FILE}"
 	assert_success
-	assert_output --partial "apt-get install"
+	assert_output --partial "apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install"
 }
 
 @test 'long form --groups restricts groups' {
@@ -604,14 +604,14 @@ _fake_uid() {
 @test '--no-sudo drops the prefix from apt' {
 	run install-deps.sh -n --no-sudo -s apt "${ALL_PM_FILE}"
 	assert_success
-	assert_output --partial "apt-get install -y --no-install-recommends curl"
+	assert_output --partial "apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends curl"
 	refute_output --partial "sudo"
 }
 
 @test '--no-sudo drops the prefix from the apt update step too' {
 	run install-deps.sh -n --no-sudo -s apt "${ALL_PM_FILE}"
 	assert_success
-	assert_line "apt-get update"
+	assert_line "apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update"
 }
 
 @test '--no-sudo drops the prefix from every root-needing manager' {
@@ -628,7 +628,7 @@ _fake_uid() {
 	bin="$(_fake_uid 0)"
 	PATH="${bin}:${PATH}" run install-deps.sh -n --sudo -s apt "${ALL_PM_FILE}"
 	assert_success
-	assert_line "sudo apt-get update"
+	assert_line "sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update"
 }
 
 @test 'auto: root gets no sudo prefix' {
@@ -636,7 +636,7 @@ _fake_uid() {
 	bin="$(_fake_uid 0)"
 	PATH="${bin}:${PATH}" run install-deps.sh -n -s apt "${ALL_PM_FILE}"
 	assert_success
-	assert_line "apt-get update"
+	assert_line "apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update"
 	refute_output --partial "sudo"
 }
 
@@ -650,7 +650,7 @@ _fake_uid() {
 	chmod +x "${bin}/sudo"
 	PATH="${bin}:${PATH}" run install-deps.sh -n -s apt "${ALL_PM_FILE}"
 	assert_success
-	assert_line "sudo apt-get update"
+	assert_line "sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update"
 }
 
 @test 'auto: non-root without sudo warns and runs bare' {
@@ -682,7 +682,7 @@ _fake_uid() {
 	fi
 	assert_success
 	assert_output --partial "sudo not found"
-	assert_line "apt-get update"
+	assert_line "apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update"
 }
 
 @test 'brew never gets a sudo prefix, even with --sudo' {
@@ -741,7 +741,7 @@ _run_clean() {
 @test 'no proxy anywhere leaves the command untouched' {
 	_run_clean -n --sudo -s apt "${ALL_PM_FILE}"
 	assert_success
-	assert_line "sudo apt-get update"
+	assert_line "sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update"
 	refute_output --partial "env "
 }
 
@@ -750,7 +750,7 @@ _run_clean() {
 	assert_success
 	# Order matters: `env A=B sudo cmd` would set the variable for sudo and
 	# then have it reset away again.
-	assert_line --regexp '^sudo env .*apt-get update$'
+	assert_line --regexp '^sudo env .*apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update$'
 }
 
 @test '--proxy sets both spellings of http and https' {
@@ -800,7 +800,7 @@ _run_clean() {
 	_run_clean no_proxy=localhost -n --sudo -s apt "${ALL_PM_FILE}"
 	assert_success
 	refute_output --partial "env "
-	assert_line "sudo apt-get update"
+	assert_line "sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update"
 }
 
 @test '--proxy overrides an ambient value' {
@@ -851,7 +851,7 @@ _run_clean() {
 	cd "${dir}"
 	run install-deps.sh -n --no-sudo -s apt
 	assert_success
-	assert_line "apt-get install -y --no-install-recommends git make"
+	assert_line "apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends git make"
 }
 
 # ---------------------------------------------------------------------------
@@ -874,9 +874,18 @@ _apt_shim() {
 #!/usr/bin/env bash
 exec "$@"
 EOF
+	# The subcommand is the first word that is not an option, as apt reads
+	# it: options come first (`apt-get -o Acquire::… update`, #89).
 	cat >"${shim}/apt-get" <<'EOF'
 #!/usr/bin/env bash
-case "$1" in
+while [ $# -gt 0 ]; do
+	case "$1" in
+	-o) shift 2 ;;
+	-*) shift ;;
+	*) break ;;
+	esac
+done
+case "${1:-}" in
 update)  echo "apt-get update ran";  exit "${APT_UPDATE_RC:-0}"  ;;
 install) echo "apt-get install ran"; exit "${APT_INSTALL_RC:-0}" ;;
 esac
