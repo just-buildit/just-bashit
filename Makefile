@@ -226,6 +226,16 @@ RELEASE_WATCH_CMD = REPO=just-buildit/just-bashit RW_PKG=just-bashit \
 # ── Vendored from canonical ──────────────────────────────────────────────────
 # Verbatim copies the drift gate holds to canonical, alongside standard.mk
 # itself. Edit canonical and re-vendor; never edit these in place.
+# Pre-commit hooks that run their own tool rather than `make -s lint-<tool>`
+# (standard.mk's hook-dispatch-check refuses any other). Six are
+# pre-commit/pre-commit-hooks' fixers and syntax checks; shellcheck and shfmt
+# come from their own hook repos. Each is pinned by its repo's `rev:` -- the
+# second source of truth the rule exists to end -- and stays a named exception
+# until it gets a lint target. The list may only shrink.
+HOOK_DISPATCH_EXEMPT = check-yaml check-toml check-merge-conflict \
+                       check-added-large-files end-of-file-fixer \
+                       trailing-whitespace shellcheck shfmt
+
 VENDORED_FILES = scripts/release-watch.sh \
                  scripts/pwsh-lib.sh \
                  scripts/lint-powershell.sh
