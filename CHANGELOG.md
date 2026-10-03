@@ -36,6 +36,14 @@
 
 ### Fixed
 
+- **"open a new shell" only when the shell really is out of date, and why.**
+    `setup-system` ended every run with it, `-s ssh` included, which changes
+    nothing a running shell reads. It is now printed only when a run wrote
+    (or, dry run, would write) a file the shell sources at startup, or left a
+    tool in `~/.local/bin` while that is not on the caller's `PATH` -- with
+    the reason beneath it. (setup-system cannot apply the change itself: it
+    runs in a child process, and sourcing its strict-mode script into an
+    interactive shell would close the terminal on the first error.)
 - **On WSL, one ssh key per box, not per distro.** Distros do not share a
     filesystem, so every distro's ssh step generated its own key under the
     same name and comment (three different `matt@swiftgo-ultra7` keys on one
