@@ -34,7 +34,6 @@ mkdir -p $(REPORT_PATH)
 $(BATS) --report-formatter junit --output $(REPORT_PATH) \
     --print-output-on-failure test
 tar -czf $(ARTIFACT) src $(REPORT_PATH)
-rm -f $(TESTHELPER_PATH)/bats-*/*.json
 endef
 
 TEST_FAST_CMD = $(BATS) --abort test
