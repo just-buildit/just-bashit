@@ -2,7 +2,9 @@
 
 ## [Unreleased]
 
-### Changed
+## [0.8.0] - 2026-10-03
+
+### Breaking
 
 - **Native Windows builds with clang-cl; the MinGW toolchain is gone.**
     just-makeit and doppler build Windows natively with clang-cl, so
@@ -10,6 +12,9 @@
     -- MSYS2 is the bash host, with only the tools the scripts use. The
     winget baseline (clang-cl, CMake, Git) gains PowerShell 7, and an MSYS2
     host runs it too, so the native toolchain arrives from either bash.
+
+### Changed
+
 - **CI tests each tree on main once.** A PR rebased onto main's tip and
     green merges without re-running the matrix: ci.yml now asks the vendored
     `changes` workflow (canonical), and `make ci-changes-wiring-check` keeps
@@ -113,6 +118,10 @@
 - **`make test` initializes the bats submodules.** A plain clone left
     `test/bats` and both helpers empty, so the suite died before its first
     test; CI never saw it because its checkout recurses.
+- **`make test` leaves the tree as it found it.** Its last step deleted the
+    `package.json` both bats submodules track, so every run left them dirty.
+    It no longer does, and `make test` now fails if a run changes the
+    working tree, inside submodules included.
 
 ## [0.7.1] - 2026-10-02
 
