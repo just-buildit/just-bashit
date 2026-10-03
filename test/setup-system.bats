@@ -13,12 +13,36 @@ setup() {
 	mkdir -p "${HOME}"
 	cd "${BATS_TEST_TMPDIR}" || return 1
 
+	# Plain Linux unless a test says otherwise. On a real WSL box the real
+	# /proc/version says microsoft, and every step that reaches Windows then
+	# reached the REAL one: the ssh step published a test's throwaway key
+	# into the developer's own %USERPROFILE%\.ssh (2026-10-03). A test that
+	# wants WSL writes its own /proc/version and stubs the Windows side.
+	echo "Linux version 6.8.0-generic (not WSL)" >"${BATS_TEST_TMPDIR}/proc-version"
+	export JB_PROC_VERSION="${BATS_TEST_TMPDIR}/proc-version"
+	# And no Windows to find even if a step asks anyway: win-exe looks on
+	# PATH and then under the C: drive in the mount table, so both are
+	# emptied of the real one. A test's own stubs and fake mounts, set
+	# after this, are the only Windows it can reach.
+	: >"${BATS_TEST_TMPDIR}/mounts"
+	export JB_PROC_MOUNTS="${BATS_TEST_TMPDIR}/mounts"
+	# Not on native Windows (MSYS2, Cygwin): there the suite runs ON the real
+	# Windows, its cmd.exe is the machine's own and on PATH by design, and
+	# the tests that drive it already account for that.
+	case "${OSTYPE:-}" in
+	msys* | cygwin*) ;;
+	*) _hide_windows_path cmd.exe powershell.exe icacls.exe whoami.exe ;;
+	esac
+
 	# Sourcing profile.sh starts a real ssh-agent, and a daemon that
 	# outlives the test holds the output pipe bats reads from — its
 	# formatter then never sees EOF and the whole run hangs until something
 	# kills it (six hours, on a CI runner). Off by default here; the one
 	# test that exercises the bootstrap turns it back on deliberately.
 	export JB_SSH_AGENT=0
+	# And no ssh round trip to GitHub from the ssh step: the suite runs
+	# offline. The tests of that check stub ssh and turn it back on.
+	export JB_SSH_GITHUB_CHECK=0
 
 	RC_LINE='if [ -r "$HOME/.config/just-bashit/bashrc.sh" ]; then . "$HOME/.config/just-bashit/bashrc.sh"; fi'
 	PF_LINE='if [ -r "$HOME/.config/just-bashit/profile.sh" ]; then . "$HOME/.config/just-bashit/profile.sh"; fi'
@@ -432,6 +456,172 @@ ssh-keygen removal is not reproducible under MSYS2"
 	assert_output --partial "ssh-ed25519"
 	assert_output --partial "EMPTY passphrase"
 	assert_equal "$(find "${HOME}/.ssh" -name '*.pub' | wc -l)" 1
+}
+
+# The key is named after the host by bash's own $HOSTNAME, never
+# hostname(1): Fedora's WSL image has no hostname command, and the old
+# fallback named the key `id_ed25519` there (2026-10-03). Pinning HOSTNAME
+# is the proof -- code that still called hostname(1) would ignore it.
+@test 'ssh step names the key after the host without hostname(1)' {
+	run env HOSTNAME=fakebox.example.org setup-system.sh -n -s ssh
+	assert_success
+	assert_output --partial "generating ed25519 key ${HOME}/.ssh/fakebox"
+	assert_output --partial "-C $(id -un)@fakebox "
+	refute_output --partial "id_ed25519"
+}
+
+# The guard above, checked: from a test's default environment the real
+# Windows is out of reach. On a CI runner this passes trivially; on a WSL
+# box it is the only thing between the suite and the developer's profile.
+@test 'the real Windows is unreachable from a default test' {
+	case "${OSTYPE:-}" in
+	msys* | cygwin*) skip "native Windows: the suite runs on the real Windows" ;;
+	*) ;;
+	esac
+	run bash -c ". '${PROJECT_ROOT}/src/just_bashit/windows.sh'; win-exe cmd.exe"
+	assert_failure
+	run bash -c ". '${PROJECT_ROOT}/src/just_bashit/windows.sh'; win-home"
+	assert_failure
+}
+
+# A fake WSL with a fake Windows profile: /proc/version says microsoft,
+# cmd.exe answers %USERPROFILE%, wslpath maps it to WINHOME, and icacls and
+# whoami exist for ssh-to-windows. All stubs, first on PATH -- on a real WSL
+# box the genuine programs are on PATH too, and none of them may answer.
+_box_key_stubs() {
+	STUBS="${BATS_TEST_TMPDIR}/stubs"
+	WINHOME="${BATS_TEST_TMPDIR}/winprofile"
+	mkdir -p "${STUBS}" "${WINHOME}"
+	echo "Linux version 6.6.87-microsoft-standard-WSL2" >"${BATS_TEST_TMPDIR}/proc-version"
+	export JB_PROC_VERSION="${BATS_TEST_TMPDIR}/proc-version"
+	export HOSTNAME=fakebox STUBS WINHOME
+	printf '#!/bin/bash\nprintf "C:\\\\Users\\\\tester\\r\\n"\n' >"${STUBS}/cmd.exe"
+	cat >"${STUBS}/wslpath" <<-EOF
+		#!/bin/bash
+		case "\$1" in
+		-u) printf '%s\n' "${WINHOME}" ;;
+		*) printf 'C:\\\\Users\\\\tester\\\\.ssh\n' ;;
+		esac
+	EOF
+	printf '#!/bin/bash\nprintf "box\\\\tester\\r\\n"\n' >"${STUBS}/whoami.exe"
+	printf '#!/bin/bash\nexit 0\n' >"${STUBS}/icacls.exe"
+	chmod +x "${STUBS}"/*
+	PATH="${STUBS}:${PATH}"
+}
+
+# 1. a key in this distro wins: Windows is not even read.
+@test 'ssh step on WSL keeps a key this distro already has' {
+	_box_key_stubs
+	mkdir -p "${HOME}/.ssh" "${WINHOME}/.ssh"
+	printf 'mine\n' >"${HOME}/.ssh/own"
+	printf 'mine.pub\n' >"${HOME}/.ssh/own.pub"
+	printf 'win\n' >"${WINHOME}/.ssh/fakebox"
+	printf 'win.pub\n' >"${WINHOME}/.ssh/fakebox.pub"
+	run setup-system.sh -y -s ssh
+	assert_success
+	assert_output --partial "ssh:     ok (existing key)"
+	assert [ ! -e "${HOME}/.ssh/fakebox" ]
+}
+
+# 2. none here, one on Windows: adopted byte for byte, nothing generated.
+# Distros do not share a filesystem; generating here minted a second
+# `matt@<box>` key on the same machine (2026-10-03).
+@test 'ssh step on WSL adopts the box key from the Windows profile' {
+	_box_key_stubs
+	mkdir -p "${WINHOME}/.ssh"
+	printf -- '-----BEGIN OPENSSH PRIVATE KEY-----\nwin\n' >"${WINHOME}/.ssh/fakebox"
+	printf 'ssh-ed25519 AAAA matt@fakebox\n' >"${WINHOME}/.ssh/fakebox.pub"
+	run setup-system.sh -y -s ssh
+	assert_success
+	assert_output --partial "adopting this box's key from ${WINHOME}/.ssh/fakebox"
+	assert_output --partial "ssh:     ok (box key from Windows: ${HOME}/.ssh/fakebox)"
+	refute_output --partial "generating"
+	cmp -s "${WINHOME}/.ssh/fakebox" "${HOME}/.ssh/fakebox"
+	cmp -s "${WINHOME}/.ssh/fakebox.pub" "${HOME}/.ssh/fakebox.pub"
+	# Mode bits mean nothing on NTFS (the windows/ucrt64 runner reports 644
+	# after chmod 600), as the permission tests above already say.
+	case "${OSTYPE:-}" in
+	msys* | cygwin*) ;;
+	*) assert_equal "$(stat -c %a "${HOME}/.ssh/fakebox")" "600" ;;
+	esac
+}
+
+# 3. none anywhere: generated, then published to Windows for the next distro.
+@test 'ssh step on WSL publishes a new box key to the Windows profile' {
+	_box_key_stubs
+	run setup-system.sh -n -s ssh
+	assert_success
+	assert_output --partial "generating ed25519 key ${HOME}/.ssh/fakebox"
+	assert_output --partial "publishing fakebox to ${WINHOME}/.ssh"
+}
+
+# Off WSL there is no Windows profile to read or write.
+@test 'ssh step off WSL neither adopts nor publishes' {
+	_box_key_stubs
+	echo "Linux version 6.8.0-generic" >"${JB_PROC_VERSION}"
+	run setup-system.sh -n -s ssh
+	assert_success
+	assert_output --partial "generating ed25519 key ${HOME}/.ssh/fakebox"
+	refute_output --partial "adopting"
+	refute_output --partial "publishing"
+}
+
+# GitHub's answer to `ssh -T`, played by a stub: STUB_GH=ok|denied|down.
+_github_ssh_stub() {
+	local stubs="${BATS_TEST_TMPDIR}/ghstub"
+	mkdir -p "${stubs}"
+	cat >"${stubs}/ssh" <<-'EOF'
+		#!/bin/bash
+		printf '%s\n' "$*" >>"${BATS_TEST_TMPDIR}/ssh.argv"
+		case "${STUB_GH:-ok}" in
+		ok) echo "Hi octocat! You've successfully authenticated, but GitHub does not provide shell access." >&2; exit 1 ;;
+		denied) echo "git@github.com: Permission denied (publickey)." >&2; exit 255 ;;
+		*) echo "ssh: connect to host github.com port 22: Connection timed out" >&2; exit 255 ;;
+		esac
+	EOF
+	chmod +x "${stubs}/ssh"
+	PATH="${stubs}:${PATH}"
+	export JB_SSH_GITHUB_CHECK=1
+}
+
+@test 'ssh step reports the GitHub account a key authenticates as' {
+	command -v ssh-keygen >/dev/null 2>&1 || skip "ssh-keygen not installed"
+	_github_ssh_stub
+	STUB_GH=ok run env HOSTNAME=fakebox setup-system.sh -y -s ssh
+	assert_success
+	assert_output --partial "github:  ok (fakebox authenticates as octocat)"
+	# THIS key, not whatever the agent offers.
+	run cat "${BATS_TEST_TMPDIR}/ssh.argv"
+	assert_output --partial "-i ${HOME}/.ssh/fakebox -o IdentitiesOnly=yes -o BatchMode=yes"
+}
+
+@test 'ssh step says how to register a key GitHub refuses' {
+	command -v ssh-keygen >/dev/null 2>&1 || skip "ssh-keygen not installed"
+	_github_ssh_stub
+	STUB_GH=denied run env HOSTNAME=fakebox setup-system.sh -y -s ssh
+	assert_success
+	assert_output --partial "github:  NOT registered (gh ssh-key add ${HOME}/.ssh/fakebox.pub"
+}
+
+# BatchMode cannot unlock a passphrase, so GitHub's refusal says nothing
+# about registration -- reported as untestable, never as "not registered".
+@test 'ssh step does not call a passphrase key unregistered' {
+	command -v ssh-keygen >/dev/null 2>&1 || skip "ssh-keygen not installed"
+	mkdir -p "${HOME}/.ssh"
+	ssh-keygen -q -t ed25519 -N secret -f "${HOME}/.ssh/fakebox" -C t@fakebox
+	_github_ssh_stub
+	STUB_GH=denied run env HOSTNAME=fakebox SSH_AUTH_SOCK= setup-system.sh -s ssh
+	assert_success
+	assert_output --partial "github:  not tested (passphrase"
+	refute_output --partial "NOT registered"
+}
+
+@test 'ssh step says when GitHub cannot be reached' {
+	command -v ssh-keygen >/dev/null 2>&1 || skip "ssh-keygen not installed"
+	_github_ssh_stub
+	STUB_GH=down run env HOSTNAME=fakebox setup-system.sh -y -s ssh
+	assert_success
+	assert_output --partial "github:  not tested (github.com unreachable over ssh)"
 }
 
 @test 'ssh step honours --key-name' {

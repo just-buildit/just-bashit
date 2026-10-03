@@ -18,8 +18,38 @@
     the version lives only where something reads it at runtime.
     `version-files-check` fails on a version-stamped header.
 
+### Added
+
+- **`setup-system`'s ssh step asks GitHub whether it accepts the key.**
+    Whichever key the step ends with (kept, adopted from Windows, or new),
+    `ssh -T git@github.com` with that key alone reports, in the summary, the
+    account it authenticates as, or the `gh ssh-key add` that registers it.
+    A passphrase key not in ssh-agent is reported as untestable, never as
+    unregistered. Informational only: it never fails the step.
+    `JB_SSH_GITHUB_CHECK=0` turns it off.
+
 ### Fixed
 
+- **On WSL, one ssh key per box, not per distro.** Distros do not share a
+    filesystem, so every distro's ssh step generated its own key under the
+    same name and comment (three different `matt@swiftgo-ultra7` keys on one
+    machine). The step now keeps a key the distro already has; otherwise it
+    adopts `%USERPROFILE%\.ssh\<host>` from Windows; only then generates,
+    and publishes the new key to Windows (through ssh-to-windows) so the
+    next distro adopts it. `win-home` in windows.sh is the one profile
+    lookup, shared with ssh-to-windows.
+- **The setup-system suite cannot reach the real Windows.** On a WSL box
+    the real `/proc/version` made every test "on WSL", and a key test
+    published its throwaway key into the developer's own `%USERPROFILE%\.ssh`.
+    Each test now starts as plain Linux with no Windows on PATH and an empty
+    mount table, and a test proves `win-exe cmd.exe` and `win-home` fail
+    from that default.
+- **The ssh key is named after the host on a machine with no `hostname`
+    command.** Fedora's WSL image has none, so `setup-system`'s ssh step
+    fell back to the literal `id_ed25519`, commented `matt@id_ed25519`. One
+    function, `ssh-key-name` in windows.sh, now derives the name from bash's
+    own `$HOSTNAME` for both the ssh step and the admin channel's key lookup,
+    which carried its own copy of the same derivation.
 - **The bootstrap runs on a machine with no awk.** A minimal Debian 13 WSL
     image ships none, and `jbx setup-system` -- the step that installs one --
     died resolving its own alias (`awk: command not found`). jbx's alias
