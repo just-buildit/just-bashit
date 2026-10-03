@@ -59,6 +59,16 @@ _shells() {
 	done
 }
 
+# _shell_is_bash SHELL -- prints "bash" when SHELL is bash under any name.
+_shell_is_bash() {
+	# shellcheck disable=SC2016  # expanded by the shell under test
+	if [[ $1 == busybox ]]; then
+		busybox sh -c 'echo ${BASH_VERSION:+bash}'
+	else
+		"$1" -c 'echo ${BASH_VERSION:+bash}'
+	fi
+}
+
 _run_in() {
 	if [[ $1 == busybox ]]; then
 		run busybox sh -c "$(_scenario)"
@@ -77,8 +87,11 @@ _run_in() {
 		assert_output --partial "path=yes"
 		assert_output --partial "marker=gone"
 		assert_output --partial "jbx: applied to this shell:"
-		# bashrc.sh is bash-only: applied under bash, never elsewhere.
-		if [[ ${s} == bash ]]; then
+		# bashrc.sh is bash-only: applied under bash, never elsewhere. Asked
+		# of the shell itself, as the function asks it: arch, fedora and
+		# macOS ship `sh` as bash (POSIX mode, BASH_VERSION set), Debian's
+		# is dash -- a name says nothing.
+		if [[ -n "$(_shell_is_bash "${s}")" ]]; then
 			assert_output --partial "bashrc=applied"
 		else
 			assert_output --partial "bashrc=unset"
