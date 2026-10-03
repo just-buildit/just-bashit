@@ -4,6 +4,12 @@
 
 ### Changed
 
+- **Native Windows builds with clang-cl; the MinGW toolchain is gone.**
+    just-makeit and doppler build Windows natively with clang-cl, so
+    `setup-system`'s msys2 baseline no longer carries the MinGW gcc toolchain
+    -- MSYS2 is the bash host, with only the tools the scripts use. The
+    winget baseline (clang-cl, CMake, Git) gains PowerShell 7, and an MSYS2
+    host runs it too, so the native toolchain arrives from either bash.
 - **CI tests each tree on main once.** A PR rebased onto main's tip and
     green merges without re-running the matrix: ci.yml now asks the vendored
     `changes` workflow (canonical), and `make ci-changes-wiring-check` keeps

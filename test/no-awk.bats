@@ -30,26 +30,6 @@ _BOOTSTRAP=(just-runit get-jb.sh install-deps.sh toml.sh)
 	assert_equal "${hits}" ""
 }
 
-# A bin directory holding every program on this machine EXCEPT the awks, and
-# PATH set to it alone. Editing PATH cannot hide a program -- /bin is
-# /usr/bin on Debian -- but a PATH that names only this directory can.
-_awkless_bin() {
-	local bin="${BATS_TEST_TMPDIR}/bin" dir prog name
-	mkdir -p "${bin}"
-	for dir in /usr/local/bin /usr/bin /bin; do
-		[[ -d ${dir} ]] || continue
-		for prog in "${dir}"/*; do
-			name="${prog##*/}"
-			case "${name}" in
-			awk | gawk | mawk | nawk | original-awk | busybox) continue ;;
-			*) ;;
-			esac
-			[[ -e "${bin}/${name}" ]] || ln -s "${prog}" "${bin}/${name}"
-		done
-	done
-	printf '%s\n' "${bin}"
-}
-
 @test 'jbx resolves an alias on a machine with no awk' {
 	local cache="${BATS_TEST_TMPDIR}/cache/just-runit" base url key now bin
 	base="https://just-buildit.github.io"
@@ -76,7 +56,7 @@ _awkless_bin() {
 	printf '#!/usr/bin/env bash\necho PROBE-RAN\n' >"${cache}/${key}.sh"
 	printf 'ts=%s\nurl=%s\n' "${now}" "${url}" >"${cache}/${key}.meta"
 
-	bin="$(_awkless_bin)"
+	bin="$(_bin_without awk gawk mawk nawk original-awk busybox)"
 	run env -i HOME="${HOME}" XDG_CACHE_HOME="${BATS_TEST_TMPDIR}/cache" \
 		PATH="${bin}" bash "${PROJECT_ROOT}/src/just_bashit/just-runit" probe
 	refute_output --partial "awk: command not found"
