@@ -4,9 +4,7 @@ hide:
   - title
 ---
 
-<div style="text-align:center; background:linear-gradient(135deg,#0d1b2a,#1a3050); border-radius:24px; padding:3rem 2rem; margin:1.5rem 0; border:1px solid #1e3a5f">
-  <img src="assets/logo-wordmark.svg" alt="just-bashit" style="width:90%;max-width:560px">
-</div>
+<p class="jb-wordmark"><img src="assets/logo-wordmark.svg" alt="just-bashit"></p>
 
 <p class="jb-tagline">One curl. Any machine. Your shell.</p>
 

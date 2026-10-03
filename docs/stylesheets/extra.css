@@ -31,6 +31,17 @@ h1#__skip {
 /* ── Landing page hero ─────────────────────────────────────────────────── */
 /* Theme variables, not literals, so light and dark both read; amber is the
    brand accent the tables already use. */
+/* The wordmark draws its own dark terminal panel, so it needs no frame. */
+.md-typeset .jb-wordmark {
+  text-align: center;
+  margin: 1.5rem 0 0.5rem;
+}
+
+.md-typeset .jb-wordmark img {
+  width: 90%;
+  max-width: 560px;
+}
+
 .md-typeset .jb-tagline {
   font-size: clamp(1.6rem, 4.5vw, 2.6rem);
   font-weight: 800;
