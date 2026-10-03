@@ -1142,6 +1142,7 @@ C:\\Users\\tester\\AppData\\Local\\Temp\\jb-windows-sshd\\launch.ps1"
 	mv "${STUBS}/cmd.exe" "${root}/Windows/System32/"
 	printf 'C:\\134 %s 9p rw,aname=drvfs;path=C:\\ 0 0\n' "${root}" >"${BATS_TEST_TMPDIR}/mounts"
 	export JB_PROC_MOUNTS="${BATS_TEST_TMPDIR}/mounts"
+	_hide_windows_path powershell.exe cmd.exe
 	run setup-system.sh -s sshd --github-user octocat
 	assert_success
 	assert_output --partial "sshd:    ok (keys from github.com/octocat.keys)"

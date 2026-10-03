@@ -14,6 +14,15 @@
 
 ### Fixed
 
+- **Two WSL tests can no longer drive the real Windows.** "finds
+    powershell.exe under the C: mount when PATH lacks it" (and its
+    ssh-to-windows twin) hid a stub by moving it off PATH, assuming no
+    Windows on PATH. On a real WSL box Windows' System32 is on PATH, so the
+    genuine powershell.exe answered: it ran a stale launcher left in the
+    Windows temp dir and raised a real UAC prompt, and approving it re-ran
+    that machine's sshd setup elevated. A shared helper now takes every
+    Windows drive mount off PATH and fails the test, before anything runs,
+    if the program is still reachable.
 - **`setup-system`'s pwsh step installs the ICU runtime, and a pwsh that
     cannot start is a failure.** The Linux tarball does not carry ICU, and
     .NET aborts without it before PowerShell reads an argument, so on a

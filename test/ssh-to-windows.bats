@@ -171,6 +171,7 @@ setup() {
 	mv "${STUBS}/cmd.exe" "${STUBS}/whoami.exe" "${STUBS}/icacls.exe" "${root}/Windows/System32/"
 	printf 'C:\\134 %s 9p rw,aname=drvfs;path=C:\\ 0 0\n' "${root}" >"${BATS_TEST_TMPDIR}/mounts"
 	export JB_PROC_MOUNTS="${BATS_TEST_TMPDIR}/mounts"
+	_hide_windows_path cmd.exe whoami.exe icacls.exe
 	run bash "${SCRIPT}"
 	[ "${status}" -eq 0 ]
 	[ -f "${WINHOME}/.ssh/id_test" ]
