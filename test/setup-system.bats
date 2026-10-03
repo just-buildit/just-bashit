@@ -831,12 +831,14 @@ _ps_ver() {
 }
 
 # A stub standing in for an interpreter that is already on the machine.
-# EXIT decides what its PSScriptAnalyzer probe answers, which is the only
-# thing the step asks it.
+# EXIT decides what its PSScriptAnalyzer probe answers; STARTS (default 0)
+# what its `-Command 'exit 0'` start probe answers, so a stub can be on PATH
+# and still not run -- the tarball's pwsh without ICU.
 _pwsh_stub() {
-	local path="${BATS_TEST_TMPDIR}/pwsh-stub" exit_code="$1"
+	local path="${BATS_TEST_TMPDIR}/pwsh-stub" exit_code="$1" starts="${2:-0}"
 	cat >"${path}" <<-EOF
 		#!/usr/bin/env bash
+		[ "\${*: -1}" = "exit 0" ] && exit ${starts}
 		[ "\$1" = "--version" ] && { echo "PowerShell 7.9.9"; exit 0; }
 		exit ${exit_code}
 	EOF
@@ -864,6 +866,47 @@ _pwsh_stub() {
 	assert_success
 	refute_output --partial "releases/download"
 	assert_output --partial "Install-Module PSScriptAnalyzer -Scope CurrentUser -Force"
+}
+
+# The tarball's pwsh on a box without ICU: on PATH, and aborting before it
+# parses an argument. It was reported "already installed (ok)", and the
+# PSScriptAnalyzer install that followed could never succeed.
+@test 'pwsh step reports an interpreter that does not start as failed' {
+	local stub
+	stub="$(_pwsh_stub 0 1)"
+	run env JB_PWSH="${stub}" JB_UNAME_S=Linux JB_UNAME_M=x86_64 \
+		setup-system.sh -n -s pwsh
+	assert_success
+	assert_output --partial "pwsh:    failed (does not start)"
+	refute_output --partial "pwsh already installed"
+	refute_output --partial "pwsh:    ok"
+}
+
+@test 'pwsh step installs the ICU runtime on Linux' {
+	run env JB_PWSH=no-pwsh-here JB_UNAME_S=Linux JB_UNAME_M=x86_64 \
+		setup-system.sh -n -s pwsh
+	assert_success
+	assert_output --partial "installing packages from the PowerShell runtime (ICU)"
+}
+
+# The apt name carries ICU's soname, so it must be derived, never typed.
+# Read from apt's lists the same way the step does, so this follows the host.
+@test 'pwsh step names the versioned ICU package apt actually has' {
+	command -v apt-cache >/dev/null 2>&1 || skip "no apt-cache on this host"
+	local want
+	want="$(apt-cache pkgnames libicu | grep -E '^libicu[0-9]+$' | sort -V | tail -n 1)"
+	[ -n "${want}" ] || skip "apt's lists hold no libicu (never updated?)"
+	run env JB_PWSH=no-pwsh-here JB_UNAME_S=Linux JB_UNAME_M=x86_64 \
+		setup-system.sh -n -s pwsh
+	assert_success
+	assert_output --regexp "install .*${want}"
+}
+
+@test 'pwsh step installs no ICU on macOS, where brew provisions pwsh' {
+	run env JB_PWSH=no-pwsh-here JB_UNAME_S=Darwin JB_UNAME_M=arm64 \
+		setup-system.sh -n -s pwsh
+	assert_success
+	refute_output --partial "(ICU)"
 }
 
 # ---------------------------------------------------------------------------
