@@ -55,6 +55,33 @@ win-exe() {
 	return 1
 }
 
+# win-home -- this Windows user's profile directory (%USERPROFILE%) as a path
+# this shell can open, or return 1 when there is no Windows to ask.
+#
+# Asked of Windows rather than assembled from a guess: the profile is not
+# always C:\Users\<linux username>, and on a domain-joined machine it is
+# frequently neither. cmd.exe runs from /mnt/c because it warns (loudly, on
+# stderr, every call) when its working directory is a Linux path.
+#
+# The one lookup: ssh-to-windows publishes keys INTO this profile, and
+# setup-system's ssh step adopts the box key FROM it.
+#
+# Example:
+#   . windows.sh
+#   home="$(win-home)" && ls "${home}/.ssh"
+win-home() {
+	local cmd raw home
+	cmd="$(win-exe cmd.exe)" || return 1
+	raw="$( (
+		cd /mnt/c 2>/dev/null || true
+		"${cmd}" /c 'echo %USERPROFILE%' 2>/dev/null
+	) | tr -d '\r\n')" || raw=""
+	[[ -n ${raw} && ${raw} != '%USERPROFILE%' ]] || return 1
+	home="$(wslpath -u "${raw}" 2>/dev/null)" || return 1
+	[[ -d ${home} ]] || return 1
+	printf '%s\n' "${home}"
+}
+
 # win-admin-channel -- print the ssh destination (user@host) of this
 # machine's OWN Windows sshd when WSL can reach it as an elevated admin, or
 # return 1. With it, every elevated step after a box's first runs over ssh:
