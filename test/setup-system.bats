@@ -43,6 +43,9 @@ setup() {
 	# And no ssh round trip to GitHub from the ssh step: the suite runs
 	# offline. The tests of that check stub ssh and turn it back on.
 	export JB_SSH_GITHUB_CHECK=0
+	# Nor the closing installed report, which runs every tool's --version --
+	# including a test's recording stub ssh. Its own tests turn it on.
+	export JB_INSTALLED_REPORT=0
 
 	RC_LINE='if [ -r "$HOME/.config/just-bashit/bashrc.sh" ]; then . "$HOME/.config/just-bashit/bashrc.sh"; fi'
 	PF_LINE='if [ -r "$HOME/.config/just-bashit/profile.sh" ]; then . "$HOME/.config/just-bashit/profile.sh"; fi'
@@ -622,6 +625,44 @@ _github_ssh_stub() {
 	STUB_GH=down run env HOSTNAME=fakebox setup-system.sh -y -s ssh
 	assert_success
 	assert_output --partial "github:  not tested (github.com unreachable over ssh)"
+}
+
+# The installed report: each tool's own --version, and its path. A stub uv
+# first on PATH stands in for whatever the host has, so the row is known.
+@test 'the summary lists each tool with its version and path' {
+	local stubs="${BATS_TEST_TMPDIR}/vstubs"
+	mkdir -p "${stubs}"
+	printf '#!/bin/bash\necho "uv 9.8.7 (x86_64-unknown-linux-gnu)"\n' >"${stubs}/uv"
+	chmod +x "${stubs}/uv"
+	PATH="${stubs}:${PATH}" JB_INSTALLED_REPORT=1 run setup-system.sh -n -s shell
+	assert_success
+	assert_output --partial "installed (as of now: this dry run changed nothing)"
+	assert_output --regexp "    uv +9\.8\.7 +${stubs}/uv"
+}
+
+# _path_without NAME -- PATH minus every directory that holds NAME, so the
+# copy a test plants elsewhere is the only one there is.
+_path_without() {
+	local dir kept=""
+	local IFS=:
+	for dir in ${PATH}; do
+		[[ -e "${dir}/$1" ]] && continue
+		kept="${kept:+${kept}:}${dir}"
+	done
+	printf '%s\n' "${kept}"
+}
+
+# uv and claude land in ~/.local/bin, which the run that installed them has
+# not got on PATH yet: found there, not reported missing.
+@test 'the installed report looks in ~/.local/bin as well as PATH' {
+	mkdir -p "${HOME}/.local/bin"
+	printf '#!/bin/bash\necho "1.2.3 (Claude Code)"\n' >"${HOME}/.local/bin/claude"
+	chmod +x "${HOME}/.local/bin/claude"
+	local path_without_claude
+	path_without_claude="$(_path_without claude)"
+	PATH="${path_without_claude}" JB_INSTALLED_REPORT=1 run setup-system.sh -n -s shell
+	assert_success
+	assert_output --regexp "    claude +1\.2\.3 +${HOME}/.local/bin/claude"
 }
 
 @test 'ssh step honours --key-name' {

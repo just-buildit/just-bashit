@@ -20,6 +20,12 @@
 
 ### Added
 
+- **`setup-system` ends with what is installed, by version and path.**
+    After the per-step summary, an `installed` table lists git, make, cc,
+    cmake, pkg-config, curl, awk, ssh, gh, uv, pwsh (with PSScriptAnalyzer)
+    and claude: each tool's own `--version` and where it runs from, or
+    `missing`. ~/.local/bin is searched as well, since the run that put uv
+    and claude there has not got it on PATH yet.
 - **`setup-system`'s ssh step asks GitHub whether it accepts the key.**
     Whichever key the step ends with (kept, adopted from Windows, or new),
     `ssh -T git@github.com` with that key alone reports, in the summary, the
