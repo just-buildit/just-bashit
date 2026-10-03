@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
   <!-- Drawn for 16-32 px, on the pixel grid: one bold amber prompt and a
        cursor block, no text to hint, no detail to blur. -->
-  <rect width="32" height="32" rx="6" fill="#333438"/>
+  <rect width="32" height="32" rx="6" fill="#46484d"/>
   <!-- Prompt chevron: two 3px strokes, square ends, on whole pixels -->
   <path d="M7 9 L14 16 L7 23" fill="none" stroke="#f59e0b" stroke-width="3.5"
         stroke-linecap="square" stroke-linejoin="miter"/>
