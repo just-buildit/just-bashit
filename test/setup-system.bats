@@ -538,7 +538,12 @@ _box_key_stubs() {
 	refute_output --partial "generating"
 	cmp -s "${WINHOME}/.ssh/fakebox" "${HOME}/.ssh/fakebox"
 	cmp -s "${WINHOME}/.ssh/fakebox.pub" "${HOME}/.ssh/fakebox.pub"
-	assert_equal "$(stat -c %a "${HOME}/.ssh/fakebox")" "600"
+	# Mode bits mean nothing on NTFS (the windows/ucrt64 runner reports 644
+	# after chmod 600), as the permission tests above already say.
+	case "${OSTYPE:-}" in
+	msys* | cygwin*) ;;
+	*) assert_equal "$(stat -c %a "${HOME}/.ssh/fakebox")" "600" ;;
+	esac
 }
 
 # 3. none anywhere: generated, then published to Windows for the next distro.
