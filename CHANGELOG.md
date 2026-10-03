@@ -12,6 +12,21 @@
     the version lives only where something reads it at runtime.
     `version-files-check` fails on a version-stamped header.
 
+### Fixed
+
+- **`setup-system`'s pwsh step installs the ICU runtime, and a pwsh that
+    cannot start is a failure.** The Linux tarball does not carry ICU, and
+    .NET aborts without it before PowerShell reads an argument, so on a
+    minimal Debian 13 the step reported `pwsh already installed (ok)` while
+    every call, the PSScriptAnalyzer install included, died with
+    `Couldn't find a valid ICU package`. The step now installs ICU through
+    install-deps on every Linux pass (apt's versioned `libicuNN` derived
+    from apt's own lists; `icu`, `libicu`, `icu-libs` on pacman, dnf, apk),
+    and checks that pwsh runs rather than that it is on `PATH`.
+- **`make test` initializes the bats submodules.** A plain clone left
+    `test/bats` and both helpers empty, so the suite died before its first
+    test; CI never saw it because its checkout recurses.
+
 ## [0.7.1] - 2026-10-02
 
 ### Changed

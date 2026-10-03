@@ -39,6 +39,19 @@ endef
 
 TEST_FAST_CMD = $(BATS) --abort test
 
+# bats, bats-support and bats-assert are submodules, and a plain clone (what
+# sync-repos does on a new machine) leaves all three empty: `make test` then
+# died on a missing test/bats/bin/bats, and with bats installed system-wide,
+# on the first `load`. CI never saw it because checkout passes
+# `submodules: recursive`. One file stands for all three, the way standard.mk
+# makes `build` a prerequisite of `test`: the dependency is the check.
+SUBMODULE_STAMP = $(TESTHELPER_PATH)/bats-assert/load.bash
+
+$(SUBMODULE_STAMP):
+	git submodule update --init
+
+test test-fast: $(SUBMODULE_STAMP)
+
 # ── lint dispatch ─────────────────────────────────────────────────────────────
 # mdformat is a Python tool, so pyproject.toml's dev group names it and
 # uv.lock pins it — including its plugins, which as a pre-commit
