@@ -895,12 +895,18 @@ _win_pkg_stubs() {
 
 # The fresh-machine case: run from a directory with no manifest, as from
 # $HOME. It used to install nothing, which left a new box with no compiler.
-# cmake is in every manager's baseline, so it is the host-independent tell.
+# cmake is in every Unix manager's baseline, so it is the tell there. MSYS2's
+# section is the bash host's tools only -- cmake comes from winget's -- so
+# on Windows the tell is a package the msys2 section does carry.
 @test 'deps step installs the baseline toolchain with no deps file' {
+	local tell=cmake
+	case ${OSTYPE:-} in
+	msys* | cygwin*) tell=pkg-config ;;
+	esac
 	run setup-system.sh -n -s deps
 	assert_success
 	assert_output --partial "installing packages from the baseline toolchain"
-	assert_output --partial "cmake"
+	assert_output --partial "${tell}"
 	assert_output --partial "deps:    ok (baseline toolchain)"
 	refute_output --partial "skipped"
 }
