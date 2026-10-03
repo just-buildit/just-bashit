@@ -60,11 +60,13 @@ features = [
 
 [[project.theme.palette]]
 scheme = "slate"
+primary = "custom"
 toggle.icon = "lucide/moon"
 toggle.name = "Switch to light mode"
 
 [[project.theme.palette]]
 scheme = "default"
+primary = "custom"
 toggle.icon = "lucide/sun"
 toggle.name = "Switch to dark mode"
 

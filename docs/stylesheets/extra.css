@@ -2,7 +2,27 @@ h1#__skip {
   display: none;
 }
 
+/* The header is the brand navy in BOTH themes (palette primary = "custom").
+   Material's default indigo header in the light theme gave the icon a
+   different backdrop than the dark theme's, so the same gray mark looked
+   like it changed colour when switching. Links follow the primary colour by
+   default, so they are set per scheme below: navy on the white page, amber
+   on the navy one. */
+:root,
+[data-md-color-scheme] {
+  --md-primary-fg-color: #1a3050;
+  --md-primary-fg-color--light: #2a4a70;
+  --md-primary-fg-color--dark: #0d1b2a;
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: rgba(255, 255, 255, 0.7);
+}
+
+[data-md-color-scheme="default"] {
+  --md-typeset-a-color: #1a3050;
+}
+
 [data-md-color-scheme="slate"] {
+  --md-typeset-a-color: #f59e0b;
   --md-default-bg-color: #0d1b2a;
   --md-default-bg-color--light: #112035;
   --md-default-bg-color--lighter: #152540;
