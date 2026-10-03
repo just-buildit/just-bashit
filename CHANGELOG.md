@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Library headers no longer stamp a version.** Every `# PACKAGE:` header
+    read `just-bashit version X`, so every release rewrote all 22 shipped
+    files, and every repo vendoring one byte-for-byte went red on its drift
+    gate with no code change (`~/.claude`'s `jbs/windows.sh` was stale on
+    nothing but its version line). The header is now `# PACKAGE: just-bashit`;
+    the version lives only where something reads it at runtime.
+    `version-files-check` fails on a version-stamped header.
+
 ## [0.7.1] - 2026-10-02
 
 ### Changed

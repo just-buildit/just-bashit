@@ -12,12 +12,16 @@ ______________________________________________________________________
 
 ## 1. Files and version
 
-- [ ] Every new `src/just_bashit/` script has the standard package header:
+- [ ] Every new `src/just_bashit/` script has the standard package header,
+    with **no version** — a stamp there would make every release rewrite the
+    file and break every repo that vendors it (`make version-files-check`
+    fails on one):
     ```bash
-    # PACKAGE: just-bashit version 0.2.0                                         #
+    # PACKAGE: just-bashit                                                       #
     ```
-- [ ] Every new script is listed in `[[tool.bumpversion.files]]` in
-    `pyproject.toml`, so the next bump updates it automatically.
+- [ ] A new line the code reads the version from at runtime is listed in
+    `[[tool.bumpversion.files]]` in `pyproject.toml`, so the next bump
+    updates it automatically.
 - [ ] Every version string in the repo agrees:
     ```bash
     make version-check
