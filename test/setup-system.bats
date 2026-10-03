@@ -26,7 +26,13 @@ setup() {
 	# after this, are the only Windows it can reach.
 	: >"${BATS_TEST_TMPDIR}/mounts"
 	export JB_PROC_MOUNTS="${BATS_TEST_TMPDIR}/mounts"
-	_hide_windows_path cmd.exe powershell.exe icacls.exe whoami.exe
+	# Not on native Windows (MSYS2, Cygwin): there the suite runs ON the real
+	# Windows, its cmd.exe is the machine's own and on PATH by design, and
+	# the tests that drive it already account for that.
+	case "${OSTYPE:-}" in
+	msys* | cygwin*) ;;
+	*) _hide_windows_path cmd.exe powershell.exe icacls.exe whoami.exe ;;
+	esac
 
 	# Sourcing profile.sh starts a real ssh-agent, and a daemon that
 	# outlives the test holds the output pipe bats reads from — its
@@ -468,6 +474,10 @@ ssh-keygen removal is not reproducible under MSYS2"
 # Windows is out of reach. On a CI runner this passes trivially; on a WSL
 # box it is the only thing between the suite and the developer's profile.
 @test 'the real Windows is unreachable from a default test' {
+	case "${OSTYPE:-}" in
+	msys* | cygwin*) skip "native Windows: the suite runs on the real Windows" ;;
+	*) ;;
+	esac
 	run bash -c ". '${PROJECT_ROOT}/src/just_bashit/windows.sh'; win-exe cmd.exe"
 	assert_failure
 	run bash -c ". '${PROJECT_ROOT}/src/just_bashit/windows.sh'; win-home"
