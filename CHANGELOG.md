@@ -14,6 +14,17 @@
 
 ### Fixed
 
+- **The bootstrap runs on a machine with no awk.** A minimal Debian 13 WSL
+    image ships none, and `jbx setup-system` -- the step that installs one --
+    died resolving its own alias (`awk: command not found`). jbx's alias
+    lookup, `bootstrap.toml` source list and function listing are pure bash
+    now, setup-system's baseline installs awk (`mawk` on apt, `gawk` on
+    pacman/dnf/zypper) for the steps after it, and a test resolves an alias
+    with a PATH that holds no awk at all.
+- **`get-jb.sh` no longer reports uv installed when it is not.** uv's
+    installer needs awk; without one it failed its checksum and the script
+    still printed "uv installed". It now skips uv with the reason when awk is
+    missing, and claims success only when the binary exists.
 - **Two WSL tests can no longer drive the real Windows.** "finds
     powershell.exe under the C: mount when PATH lacks it" (and its
     ssh-to-windows twin) hid a stub by moving it off PATH, assuming no
