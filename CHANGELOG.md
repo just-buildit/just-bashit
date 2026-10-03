@@ -4,6 +4,12 @@
 
 ### Changed
 
+- **CI tests each tree on main once.** A PR rebased onto main's tip and
+    green merges without re-running the matrix: ci.yml now asks the vendored
+    `changes` workflow (canonical), and `make ci-changes-wiring-check` keeps
+    every job waiting on it. Pages still deploys on such a merge, from the
+    PR run's test and coverage reports. Measured before: b32288a's tree was
+    PR #98's, and main re-ran all of it (windows alone 535 s).
 - **Library headers no longer stamp a version.** Every `# PACKAGE:` header
     read `just-bashit version X`, so every release rewrote all 22 shipped
     files, and every repo vendoring one byte-for-byte went red on its drift

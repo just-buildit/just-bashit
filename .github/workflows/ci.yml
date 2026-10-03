@@ -15,8 +15,20 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Has this run anything left to prove? The vendored answer (canonical,
+  # HAS_RELEASE): src=false for a tree a merged PR already passed, or a
+  # version bump alone; code=false for a docs-only diff. Every job below
+  # waits on it -- `make ci-changes-wiring-check` refuses one that does not.
+  changes:
+    uses: ./.github/workflows/changes.yml
+    permissions:
+      checks: read
+      contents: read
+
   test:
     name: test (${{ matrix.distro }})
+    needs: changes
+    if: needs.changes.outputs.src == 'true' && needs.changes.outputs.code != 'false'
     runs-on: ubuntu-22.04
     # The suite takes ~1 minute. A job that runs longer is hung, not slow,
     # and without this it hangs for GitHub's 6-hour ceiling: a leaked
@@ -100,6 +112,8 @@ jobs:
 
   test-macos:
     name: test (macos)
+    needs: changes
+    if: needs.changes.outputs.src == 'true' && needs.changes.outputs.code != 'false'
     runs-on: macos-latest
     timeout-minutes: 20
     defaults:
@@ -127,6 +141,8 @@ jobs:
 
   test-windows:
     name: test (windows/ucrt64)
+    needs: changes
+    if: needs.changes.outputs.src == 'true' && needs.changes.outputs.code != 'false'
     runs-on: windows-latest
     timeout-minutes: 30
     defaults:
@@ -175,6 +191,8 @@ jobs:
 
   coverage:
     name: coverage
+    needs: changes
+    if: needs.changes.outputs.src == 'true' && needs.changes.outputs.code != 'false'
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     container:
@@ -217,6 +235,8 @@ jobs:
           path: test-results/coverage/
 
   lint:
+    needs: changes
+    if: needs.changes.outputs.src == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -250,7 +270,9 @@ jobs:
 
   ci-passed:
     name: CI passed
-    needs: [test, test-macos, test-windows, lint]
+    # `changes` too: if it fails, nothing below it ran, and that is not a
+    # pass. A job it skipped (an already-tested tree) is `skipped`, which is.
+    needs: [changes, test, test-macos, test-windows, lint]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -325,11 +347,17 @@ jobs:
     # then started 70s before the upload and failed with "Artifact not found
     # for name: test-report-xml" -- on main only, since this job is skipped
     # on pull requests, so no PR could have caught it.
-    needs: [test, coverage, lint]
+    #
+    # And `ci-passed`, so it runs after CI whether the matrix ran or was
+    # skipped as already tested. When it was skipped, the reports come from
+    # the PR run that tested this exact tree (step "reports" below): skipping
+    # the deploy instead would leave every merged docs change unpublished.
+    needs: [ci-passed, test, coverage, lint]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci-passed.result == 'success'
     permissions:
+      actions: read
       contents: read
       pages: write
       id-token: write
@@ -348,11 +376,39 @@ jobs:
 
       - run: zensical build --clean
 
+      # Which run's reports to publish: this one's when it ran the matrix,
+      # else the merged PR's -- the run that tested this tree. The same PR
+      # ci-tree-tested found: merged, associated with this commit, and its
+      # head's CI run succeeded. Nothing found is a failure, not a deploy
+      # without reports.
+      - name: Which run's reports
+        id: reports
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TESTED: ${{ needs.test.result }}
+        run: |
+          if [ "$TESTED" = success ]; then
+            echo "run-id=${{ github.run_id }}" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          head=$(gh api "repos/$REPO/commits/$GITHUB_SHA/pulls" \
+                   --jq '[.[] | select(.merged_at != null)][0].head.sha')
+          run=$(gh run list -R "$REPO" --workflow ci.yml --commit "$head" \
+                  --status success --json databaseId --jq '.[0].databaseId')
+          if [ -z "$head" ] || [ -z "$run" ]; then
+            echo "::error::matrix skipped, but no successful PR run for $GITHUB_SHA (head ${head:-none})"
+            exit 1
+          fi
+          echo "reports from PR head $head, run $run"
+          echo "run-id=$run" >> "$GITHUB_OUTPUT"
+
       - name: Download test report XML
         uses: actions/download-artifact@v8
         with:
           name: test-report-xml
           path: test-report-xml
+          run-id: ${{ steps.reports.outputs.run-id }}
+          github-token: ${{ github.token }}
 
       - name: Generate test report HTML
         run: |
@@ -372,6 +428,8 @@ jobs:
         with:
           name: coverage-report
           path: site/coverage
+          run-id: ${{ steps.reports.outputs.run-id }}
+          github-token: ${{ github.token }}
 
       - name: Move badge JSON to site root
         run: mv site/coverage/coverage-badge.json site/coverage-badge.json || true
