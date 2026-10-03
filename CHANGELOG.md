@@ -20,6 +20,17 @@
 
 ### Added
 
+- **`jbx setup-system` applies its changes to the shell that ran it.** No
+    child process can change its parent's environment, so `jbx` is now also
+    a shell function (`jbx-shell.sh`, POSIX: bash, zsh, dash, busybox ash).
+    It runs the real `jbx`; when setup-system changed what a shell reads at
+    startup, it leaves a marker naming just-bashit's own files -- written to
+    be sourced again -- and the function sources them in place, instead of
+    "open a new shell". `get-jb.sh` defines it on first run and the shell
+    step installs it beside `bashrc.sh`, which sources it in every later
+    shell. A run started any other way writes no marker and keeps the hint.
+    fish is not covered: it cannot source POSIX sh, and is left for bash
+    first.
 - **`setup-system` ends with what is installed, by version and path.**
     After the per-step summary, an `installed` table lists git, make, cc,
     cmake, pkg-config, curl, awk, ssh, gh, uv, pwsh (with PSScriptAnalyzer)

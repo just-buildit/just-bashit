@@ -26,6 +26,7 @@ nav = [
     {"environment" = "libraries/environment.md"},
     {"file" = "libraries/file.md"},
     {"format" = "libraries/format.md"},
+    {"jbx-shell" = "libraries/jbx-shell.md"},
     {"logging" = "libraries/logging.md"},
     {"make-run" = "libraries/make-run.md"},
     {"match" = "libraries/match.md"},
