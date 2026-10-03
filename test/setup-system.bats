@@ -697,6 +697,57 @@ _path_without() {
 	assert_output --partial "(${HOME}/.local/bin is not on this shell's PATH)"
 }
 
+# The `jbx` function's half of the handshake: setup-system writes the marker
+# only when the function asked (JB_CALLER_APPLIES=1), never on a dry run,
+# and names just-bashit's own files plus ~/.local/bin.
+@test 'a run through the jbx function leaves it a marker, and says so' {
+	JB_CALLER_APPLIES=1 run setup-system.sh -s shell
+	assert_success
+	assert_output --partial "jbx applies this to your shell when setup-system exits:"
+	refute_output --partial "open a new shell"
+	local m="${XDG_STATE_HOME:-${HOME}/.local/state}/just-bashit/reload"
+	assert [ -f "${m}" ]
+	run cat "${m}"
+	assert_line "profile ${XDG_CONFIG_HOME}/just-bashit/profile.sh"
+	assert_line "bashrc ${XDG_CONFIG_HOME}/just-bashit/bashrc.sh"
+	assert_line "path ${HOME}/.local/bin"
+}
+
+@test 'a direct run or a dry run leaves no marker' {
+	local m="${HOME}/.local/state/just-bashit/reload"
+	run setup-system.sh -s shell
+	assert_output --partial "open a new shell"
+	assert [ ! -e "${m}" ]
+	JB_CALLER_APPLIES=1 run setup-system.sh -n -s shell
+	assert [ ! -e "${m}" ]
+}
+
+@test 'the shell step installs jbx-shell.sh beside bashrc.sh' {
+	run setup-system.sh -s shell
+	assert_success
+	cmp -s "${PROJECT_ROOT}/src/just_bashit/jbx-shell.sh" \
+		"${XDG_CONFIG_HOME}/just-bashit/jbx-shell.sh"
+}
+
+# End to end: the function around the REAL setup-system. The same shell that
+# ran it must see both templates applied -- no new shell.
+@test 'jbx setup-system applies to the shell that ran it' {
+	local stubs="${BATS_TEST_TMPDIR}/jbxbin"
+	mkdir -p "${stubs}"
+	printf '#!/bin/bash\nshift\nexec bash "%s" "$@"\n' \
+		"${PROJECT_ROOT}/src/just_bashit/setup-system.sh" >"${stubs}/jbx"
+	chmod +x "${stubs}/jbx"
+	# Interactive (-i), as a user's shell is: bashrc.sh returns at once in a
+	# non-interactive one, as a bashrc should. --norc: only what jbx sources.
+	run bash --norc -i -c "PATH=\"${stubs}:\${PATH}\"
+		. \"${PROJECT_ROOT}/src/just_bashit/jbx-shell.sh\"
+		jbx setup-system -s shell >/dev/null
+		echo \"profile=\${JB_PROFILE:-unset} bashrc=\${JB_BASHRC:-unset}\""
+	assert_success
+	assert_output --partial "jbx: applied to this shell: profile.sh bashrc.sh"
+	assert_output --partial "profile=1 bashrc=1"
+}
+
 @test 'ssh step honours --key-name' {
 	command -v ssh-keygen >/dev/null 2>&1 || skip "ssh-keygen not installed"
 	run setup-system.sh -y -s ssh --key-name testkey
@@ -1420,12 +1471,23 @@ C:\\Users\\tester\\AppData\\Local\\Temp\\jb-windows-sshd\\launch.ps1"
 	local old="${BATS_TEST_TMPDIR}/jbx-cache" mirror="${BATS_TEST_TMPDIR}/mirror"
 	mkdir -p "${old}" "${mirror}"
 	# What a pre-windows.sh jbx leaves in its cache: the script and the
-	# libraries it knew about.
+	# libraries it knew about. The mirror holds every library setup-system
+	# loads -- read from its own `for _lib in` line, not restated here, so a
+	# library added there (jbx-shell.sh) is in the mirror too.
 	cp "${PROJECT_ROOT}"/src/just_bashit/{setup-system,toml,file}.sh "${old}/"
-	cp "${PROJECT_ROOT}/src/just_bashit/windows.sh" "${mirror}/"
+	local libs lib
+	libs="$(sed -n 's/^for _lib in \(.*\); do$/\1/p' \
+		"${PROJECT_ROOT}/src/just_bashit/setup-system.sh")"
+	[[ -n ${libs} ]]
+	for lib in ${libs}; do
+		cp "${PROJECT_ROOT}/src/just_bashit/${lib}" "${mirror}/"
+	done
 	JB_JBS_BASE="file://${mirror}" run bash "${old}/setup-system.sh" -n -s git
 	assert_success
-	assert [ -r "${old}/windows.sh" ]
+	# Every library the old cache lacked was fetched beside the script.
+	for lib in ${libs}; do
+		assert [ -r "${old}/${lib}" ]
+	done
 }
 
 # An admin ssh channel to this machine's own sshd: answers the probe as

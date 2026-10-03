@@ -27,17 +27,24 @@ source = "just-bashit:setup-system"
 # how the ssh step shipped requiring the binary for work that never needed it.
 # The package that carries it differs on every manager; each name below was
 # checked by generating a key in that distro's image, not inferred.
+#
+# zsh is here for test/jbx-shell.bats: the POSIX `jbx` function is sourced
+# into whatever shell the user has, and zsh is macOS's default (brew's base
+# already has it) -- a shell absent from the image would be a scenario that
+# silently never ran. msys2 is left out; the .bats skip an absent shell.
+# fish is deliberately not: it cannot source POSIX sh, and a fish-default
+# distro (CachyOS) is left for bash before jbx is ever run.
 [dev.apt]
-packages = ["ca-certificates", "make", "git", "bats", "curl", "openssh-client"]
+packages = ["ca-certificates", "make", "git", "bats", "curl", "openssh-client", "zsh"]
 
 [dev.pacman]
-packages = ["git", "make", "diffutils", "bats", "curl", "openssh"]
+packages = ["git", "make", "diffutils", "bats", "curl", "openssh", "zsh"]
 
 [dev.dnf]
-packages = ["git", "make", "diffutils", "bats", "curl", "openssh-clients"]
+packages = ["git", "make", "diffutils", "bats", "curl", "openssh-clients", "zsh"]
 
 [dev.zypper]
-packages = ["git", "make", "diffutils", "bats", "curl", "openssh"]
+packages = ["git", "make", "diffutils", "bats", "curl", "openssh", "zsh"]
 
 [dev.apk]
 packages = [
@@ -49,6 +56,7 @@ packages = [
     "curl",
     "diffutils",
     "openssh-keygen",
+    "zsh",
 ]
 
 # macOS ships ssh-keygen in the base system, so brew has nothing to add.
