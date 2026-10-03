@@ -748,6 +748,55 @@ _path_without() {
 	assert_output --partial "profile=1 bashrc=1"
 }
 
+# Native Windows builds with clang-cl (just-makeit, doppler); the MinGW gcc
+# toolchain is gone from the msys2 baseline, and pwsh joins winget's.
+_baseline_section() {
+	sed -n "/^\t\[baseline\.$1\]/,/^\t\[/p" \
+		"${PROJECT_ROOT}/src/just_bashit/setup-system.sh" | grep 'packages'
+}
+
+@test 'the Windows baselines: clang-cl and pwsh by winget, no MinGW' {
+	run _baseline_section winget
+	assert_output --partial '"LLVM.LLVM"'
+	assert_output --partial '"Microsoft.PowerShell"'
+	run _baseline_section msys2
+	assert_success
+	refute_output --partial "mingw-w64"
+}
+
+# MSYS2's section has no compiler now, so an MSYS2 host (Windows uname,
+# pacman present) also runs the winget section for the native toolchain.
+_win_pkg_stubs() {
+	local d="${BATS_TEST_TMPDIR}/winpkg"
+	mkdir -p "${d}"
+	printf '#!/bin/bash\nexit 0\n' >"${d}/pacman"
+	printf '#!/bin/bash\necho "winget stub $*" >&2\nexit 0\n' >"${d}/winget"
+	chmod +x "${d}"/*
+	PATH="${d}:${PATH}"
+}
+
+@test 'deps on MSYS2 also installs the native toolchain with winget' {
+	_win_pkg_stubs
+	JB_UNAME_S=MINGW64_NT-10.0 run setup-system.sh -n -s deps
+	assert_success
+	assert_output --partial "installing packages from the native Windows toolchain (winget)"
+	assert_output --partial "LLVM.LLVM"
+	assert_output --partial "Microsoft.PowerShell"
+}
+
+@test 'deps without pacman runs no second winget pass' {
+	local d="${BATS_TEST_TMPDIR}/winpkg" bin
+	mkdir -p "${d}"
+	printf '#!/bin/bash\nexit 0\n' >"${d}/winget"
+	chmod +x "${d}/winget"
+	# No pacman anywhere on PATH -- arch keeps a real one in /usr/bin.
+	bin="$(_bin_without pacman)"
+	PATH="${d}:${PROJECT_ROOT}/src/just_bashit:${bin}" JB_UNAME_S=MINGW64_NT-10.0 \
+		run setup-system.sh -n -s deps
+	assert_success
+	refute_output --partial "native Windows toolchain (winget)"
+}
+
 @test 'ssh step honours --key-name' {
 	command -v ssh-keygen >/dev/null 2>&1 || skip "ssh-keygen not installed"
 	run setup-system.sh -y -s ssh --key-name testkey
@@ -846,12 +895,18 @@ _path_without() {
 
 # The fresh-machine case: run from a directory with no manifest, as from
 # $HOME. It used to install nothing, which left a new box with no compiler.
-# cmake is in every manager's baseline, so it is the host-independent tell.
+# cmake is in every Unix manager's baseline, so it is the tell there. MSYS2's
+# section is the bash host's tools only -- cmake comes from winget's -- so
+# on Windows the tell is a package the msys2 section does carry.
 @test 'deps step installs the baseline toolchain with no deps file' {
+	local tell=cmake
+	case ${OSTYPE:-} in
+	msys* | cygwin*) tell=pkg-config ;;
+	esac
 	run setup-system.sh -n -s deps
 	assert_success
 	assert_output --partial "installing packages from the baseline toolchain"
-	assert_output --partial "cmake"
+	assert_output --partial "${tell}"
 	assert_output --partial "deps:    ok (baseline toolchain)"
 	refute_output --partial "skipped"
 }

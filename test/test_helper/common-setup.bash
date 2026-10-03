@@ -47,3 +47,28 @@ _hide_windows_path() {
 		fi
 	done
 }
+
+# _bin_without NAME... -- print a directory of symlinks to every program in
+# /usr/local/bin, /usr/bin and /bin EXCEPT the named ones. Set PATH to it
+# (plus what the test needs) to run as if they were not installed. Editing
+# PATH cannot hide a program -- /bin is /usr/bin on Debian, and arch keeps
+# pacman in /usr/bin -- but a PATH naming only this directory can. NAME.exe
+# is skipped too: MSYS2's pacman is /usr/bin/pacman.exe, and bash finds it
+# by the bare name, so skipping only "pacman" hides nothing there.
+_bin_without() {
+	# shellcheck disable=SC2154  # BATS_TEST_TMPDIR is bats'
+	local bin="${BATS_TEST_TMPDIR}/bin-without" dir prog name skip
+	mkdir -p "${bin}"
+	for dir in /usr/local/bin /usr/bin /bin; do
+		[[ -d ${dir} ]] || continue
+		for prog in "${dir}"/*; do
+			name="${prog##*/}"
+			for skip in "$@"; do
+				[[ ${name} == "${skip}" || ${name} == "${skip}.exe" ]] &&
+					continue 2
+			done
+			[[ -e "${bin}/${name}" ]] || ln -s "${prog}" "${bin}/${name}"
+		done
+	done
+	printf '%s\n' "${bin}"
+}
