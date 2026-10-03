@@ -13,18 +13,34 @@
 
 # just-bashit
 
-Evolving set of [shfmt](https://github.com/mvdan/sh#shfmt)-conformant, [bats](https://bats-core.readthedocs.io/en/stable/)-tested, [shellcheck](https://www.shellcheck.net/)-linted tools, templates, and more.
+**One curl. Any machine. Your shell.**
+
+A bare Linux, macOS or WSL box becomes a working dev machine in one command,
+and every script runs straight from a URL with nothing installed.
+shellcheck-clean, shfmt-formatted, and 500+ bats tests on Debian, Arch,
+Fedora, Alpine, macOS and Windows for every change.
 
 **[Documentation](https://just-buildit.github.io/just-bashit/)**
 
 ## Install
 
 ```bash
+. <(curl -sSL https://just-buildit.github.io/get-jb.sh)   # jbx, in this shell
+jbx setup-system                                          # the rest of the box
+```
+
+Only `bash` and `curl` needed.
+[Setting up a new machine](https://just-buildit.github.io/just-bashit/guides/new-machine/)
+walks through it.
+
+Or as a Python tool:
+
+```bash
 uv tool install just-bashit   # or: pip install just-bashit
 ```
 
-That puts three commands on `PATH`: `jb` (top-level CLI), `jbx` (ephemeral
-runner — fetch a script, call a function, discard), and `jb-inspect`.
+That puts `jb`, `jbx` (ephemeral runner — fetch a script, call a function,
+discard) and `jb-inspect` on `PATH`.
 
 Nothing needs installing to *use* a script. `jbx` fetches on demand:
 

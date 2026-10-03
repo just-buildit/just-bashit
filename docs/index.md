@@ -8,10 +8,40 @@ hide:
   <img src="assets/logo-wordmark.svg" alt="just-bashit" style="width:90%;max-width:560px">
 </div>
 
-Evolving set of [shfmt](https://github.com/mvdan/sh#shfmt)-conformant,
-[bats](https://bats-core.readthedocs.io/en/stable/)-tested,
-[shellcheck](https://www.shellcheck.net/)-linted bash tools, templates, and
-more.
+<p class="jb-tagline">One curl. Any machine. Your shell.</p>
+
+<p class="jb-lede">A bare Linux, macOS or WSL box becomes a working dev
+machine in one command, and every script runs straight from a URL with
+nothing installed.</p>
+
+```bash
+. <(curl -sSL https://just-buildit.github.io/get-jb.sh)   # jbx, in this shell
+jbx setup-system                                          # the rest of the box
+```
+
+<div class="jb-cards">
+  <div class="jb-card">
+    <h3>Any box &rarr; your box</h3>
+    <p>Packages, compiler, shell config, git, uv, PowerShell and Claude Code.
+    One ssh key per machine, reused across every WSL distro and checked
+    against GitHub. It ends by listing exactly what is installed, and
+    applies the changes to the shell you ran it from.</p>
+    <a href="setup-system/">setup-system &rarr;</a>
+  </div>
+  <div class="jb-card">
+    <h3>Run it, don't install it</h3>
+    <p><code>jbx</code> fetches a script by name or URL, calls one function
+    and discards it. Cached, hash-pinnable, and nothing left on
+    <code>PATH</code>.</p>
+    <a href="just-runit/">jbx &rarr;</a>
+  </div>
+  <div class="jb-card">
+    <h3>Bash you can trust</h3>
+    <p>shellcheck-clean, shfmt-formatted, and 500+ bats tests on Debian,
+    Arch, Fedora, Alpine, macOS and Windows for every change.</p>
+    <a href="https://github.com/just-buildit/just-bashit/actions/workflows/ci.yml">CI &rarr;</a>
+  </div>
+</div>
 
 [![CI](https://github.com/just-buildit/just-bashit/actions/workflows/ci.yml/badge.svg)](https://github.com/just-buildit/just-bashit/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/endpoint?url=https://just-buildit.github.io/just-bashit/coverage-badge.json)](https://just-buildit.github.io/just-bashit/coverage/)
@@ -25,7 +55,19 @@ more.
 
 ## Quick Start
 
-Download the latest release, extract it, and source whatever you need:
+On any Linux, macOS or WSL box (only `bash` and `curl` needed):
+
+```bash
+. <(curl -sSL https://just-buildit.github.io/get-jb.sh)
+jbx setup-system --dry-run      # read the plan first
+jbx setup-system
+```
+
+The whole walk-through, and how to check it worked, is
+[Setting up a new machine](guides/new-machine.md).
+
+To use the libraries in your own scripts, unpack a release and source what
+you need. They depend on each other, so keep the package whole:
 
 ```bash
 tar xf just-bashit.tar.gz
@@ -33,9 +75,6 @@ tar xf just-bashit.tar.gz
 iso-8601-basic
 # 20260522T143200Z
 ```
-
-Because libraries depend on each other, it's simplest to unpack the whole
-package and source individual files from it.
 
 ## CLI Tools
 
@@ -72,14 +111,14 @@ package and source individual files from it.
 
 Tested on every release across six platforms:
 
-| Platform               | Package manager |
-| ---------------------- | --------------- |
-| Debian (latest)        | apt             |
-| Arch Linux (latest)    | pacman          |
-| Fedora (latest)        | dnf             |
-| Alpine Linux (latest)  | apk             |
-| macOS (latest)         | brew            |
-| Windows — MSYS2 UCRT64 | pacman (MSYS2)  |
+| Platform              | Package manager |
+| --------------------- | --------------- |
+| Debian (latest)       | apt             |
+| Arch Linux (latest)   | pacman          |
+| Fedora (latest)       | dnf             |
+| Alpine Linux (latest) | apk             |
+| macOS (latest)        | brew            |
+| Windows (MSYS2 bash)  | winget          |
 
 ## Templates
 
