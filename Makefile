@@ -41,6 +41,8 @@ TREE_BEFORE = $(shell git rev-parse --git-path make-test-tree-before)
 TREE_STATUS = git status --porcelain --ignore-submodules=none
 
 define TEST_CMD
+@test -n "$(TREE_BEFORE)" || { echo "make test checks the tree with git," \
+    "and git cannot read this checkout (its message is above)" >&2; exit 1; }
 $(TREE_STATUS) >$(TREE_BEFORE)
 mkdir -p $(REPORT_PATH)
 $(BATS) --report-formatter junit --output $(REPORT_PATH) \
