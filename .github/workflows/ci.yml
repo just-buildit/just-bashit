@@ -93,6 +93,14 @@ jobs:
       - name: Install dependencies (bootstrap.toml)
         run: bash src/just_bashit/install-deps.sh --verbose
 
+      # The container runs as root, but the checkout belongs to the runner's
+      # user, so git refuses the repo as "dubious ownership". actions/checkout
+      # trusts it only in a temporary config it removes again, and `make test`
+      # runs git (the tree-unchanged gate) -- including in the submodules,
+      # hence '*'. The container is discarded with the job.
+      - name: Trust the checkout for git
+        run: git config --global --add safe.directory '*'
+
       - name: Run tests
         run: make test
 
