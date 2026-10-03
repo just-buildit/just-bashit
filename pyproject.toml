@@ -8,7 +8,7 @@ pure = true
 [project]
 name = "just-bashit"
 version = "0.7.1"
-description = "Evolving set of auto-formatted, bats-tested, shellcheck-linted tools, templates, and more."
+description = "One curl. Any machine. Your shell. A bare box becomes a working dev machine in one command; every script runs straight from a URL."
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [

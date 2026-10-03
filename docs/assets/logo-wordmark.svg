@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 80" width="420" height="80">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 398 80" width="398" height="80">
 
   <!-- Background -->
-  <rect width="420" height="80" rx="16" fill="#0d1117"/>
+  <rect width="398" height="80" rx="16" fill="#46484d"/>
 
   <!-- Traffic light dots -->
   <circle cx="22" cy="26" r="6" fill="#ff5f57"/>
@@ -9,7 +9,7 @@
   <circle cx="58" cy="26" r="6" fill="#28c840"/>
 
   <!-- Divider -->
-  <line x1="76" y1="14" x2="76" y2="66" stroke="#30363d" stroke-width="1.5"/>
+  <line x1="76" y1="14" x2="76" y2="66" stroke="#5e6066" stroke-width="1.5"/>
 
   <!-- Prompt $ -->
   <text
@@ -31,6 +31,6 @@
   </text>
 
   <!-- Cursor -->
-  <rect x="398" y="22" width="14" height="32" rx="2" fill="#f59e0b" opacity="0.85"/>
+  <rect x="368" y="22" width="14" height="32" rx="2" fill="#f59e0b" opacity="0.85"/>
 
 </svg>

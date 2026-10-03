@@ -2,7 +2,25 @@ h1#__skip {
   display: none;
 }
 
+/* The header is the brand navy in BOTH themes. Zensical's modern theme does
+   not paint it with the primary colour: .md-header takes the page's own
+   translucent background and text colour, so it was white-and-black in the
+   light theme and navy-blue in the dark one, and the gray icon on it seemed
+   to change while the wordmark on the page did not. Set on the header
+   itself, it is one look in both. */
+.md-header {
+  background-color: #1a3050;
+  color: #ffffff;
+}
+
+/* Links followed the primary colour; set per scheme instead -- navy on the
+   white page, the brand amber on the navy one. */
+[data-md-color-scheme="default"] {
+  --md-typeset-a-color: #1a3050;
+}
+
 [data-md-color-scheme="slate"] {
+  --md-typeset-a-color: #f59e0b;
   --md-default-bg-color: #0d1b2a;
   --md-default-bg-color--light: #112035;
   --md-default-bg-color--lighter: #152540;
@@ -26,4 +44,68 @@ h1#__skip {
 
 .md-typeset table:not([class]) tr:hover td {
   background-color: rgba(245, 158, 11, 0.07);
+}
+
+/* ── Landing page hero ─────────────────────────────────────────────────── */
+/* Theme variables, not literals, so light and dark both read; amber is the
+   brand accent the tables already use. */
+/* The wordmark draws its own dark terminal panel, so it needs no frame. */
+.md-typeset .jb-wordmark {
+  text-align: center;
+  margin: 1.5rem 0 0.5rem;
+}
+
+.md-typeset .jb-wordmark img {
+  width: 90%;
+  max-width: 560px;
+}
+
+.md-typeset .jb-tagline {
+  font-size: clamp(1.6rem, 4.5vw, 2.6rem);
+  font-weight: 800;
+  line-height: 1.15;
+  text-align: center;
+  letter-spacing: -0.01em;
+  margin: 1.2rem 0 0.4rem;
+}
+
+.md-typeset .jb-lede {
+  font-size: 1.05rem;
+  text-align: center;
+  color: var(--md-default-fg-color--light);
+  max-width: 40rem;
+  margin: 0 auto 1.2rem;
+}
+
+.md-typeset .jb-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0 2rem;
+}
+
+.md-typeset .jb-card {
+  background: var(--md-default-bg-color--light);
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-top: 3px solid #f59e0b;
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.md-typeset .jb-card h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.md-typeset .jb-card p {
+  flex: 1;
+  margin: 0 0 0.8rem;
+  font-size: 0.9rem;
+}
+
+.md-typeset .jb-card a {
+  font-weight: 700;
+  color: #f59e0b;
 }
