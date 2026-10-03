@@ -585,7 +585,7 @@ step_ssh() {
 
 	local name="${KEY_NAME}"
 	if [[ -z ${name} ]]; then
-		name="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo id_ed25519)"
+		name="$(ssh-key-name)"
 	fi
 	local key="${dir}/${name}"
 

@@ -20,6 +20,12 @@
 
 ### Fixed
 
+- **The ssh key is named after the host on a machine with no `hostname`
+    command.** Fedora's WSL image has none, so `setup-system`'s ssh step
+    fell back to the literal `id_ed25519`, commented `matt@id_ed25519`. One
+    function, `ssh-key-name` in windows.sh, now derives the name from bash's
+    own `$HOSTNAME` for both the ssh step and the admin channel's key lookup,
+    which carried its own copy of the same derivation.
 - **The bootstrap runs on a machine with no awk.** A minimal Debian 13 WSL
     image ships none, and `jbx setup-system` -- the step that installs one --
     died resolving its own alias (`awk: command not found`). jbx's alias

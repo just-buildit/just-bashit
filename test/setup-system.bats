@@ -434,6 +434,18 @@ ssh-keygen removal is not reproducible under MSYS2"
 	assert_equal "$(find "${HOME}/.ssh" -name '*.pub' | wc -l)" 1
 }
 
+# The key is named after the host by bash's own $HOSTNAME, never
+# hostname(1): Fedora's WSL image has no hostname command, and the old
+# fallback named the key `id_ed25519` there (2026-10-03). Pinning HOSTNAME
+# is the proof -- code that still called hostname(1) would ignore it.
+@test 'ssh step names the key after the host without hostname(1)' {
+	run env HOSTNAME=fakebox.example.org setup-system.sh -n -s ssh
+	assert_success
+	assert_output --partial "generating ed25519 key ${HOME}/.ssh/fakebox"
+	assert_output --partial "-C $(id -un)@fakebox "
+	refute_output --partial "id_ed25519"
+}
+
 @test 'ssh step honours --key-name' {
 	command -v ssh-keygen >/dev/null 2>&1 || skip "ssh-keygen not installed"
 	run setup-system.sh -y -s ssh --key-name testkey
