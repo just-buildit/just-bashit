@@ -2,21 +2,19 @@ h1#__skip {
   display: none;
 }
 
-/* The header is the brand navy in BOTH themes (palette primary = "custom").
-   Material's default indigo header in the light theme gave the icon a
-   different backdrop than the dark theme's, so the same gray mark looked
-   like it changed colour when switching. Links follow the primary colour by
-   default, so they are set per scheme below: navy on the white page, amber
-   on the navy one. */
-:root,
-[data-md-color-scheme] {
-  --md-primary-fg-color: #1a3050;
-  --md-primary-fg-color--light: #2a4a70;
-  --md-primary-fg-color--dark: #0d1b2a;
-  --md-primary-bg-color: #ffffff;
-  --md-primary-bg-color--light: rgba(255, 255, 255, 0.7);
+/* The header is the brand navy in BOTH themes. Zensical's modern theme does
+   not paint it with the primary colour: .md-header takes the page's own
+   translucent background and text colour, so it was white-and-black in the
+   light theme and navy-blue in the dark one, and the gray icon on it seemed
+   to change while the wordmark on the page did not. Set on the header
+   itself, it is one look in both. */
+.md-header {
+  background-color: #1a3050;
+  color: #ffffff;
 }
 
+/* Links followed the primary colour; set per scheme instead -- navy on the
+   white page, the brand amber on the navy one. */
 [data-md-color-scheme="default"] {
   --md-typeset-a-color: #1a3050;
 }
