@@ -665,6 +665,38 @@ _path_without() {
 	assert_output --regexp "    claude +1\.2\.3 +${HOME}/.local/bin/claude"
 }
 
+# "open a new shell" only when the running shell is really out of date: it
+# was printed after every run, `-s ssh` included, which touches nothing a
+# shell reads at startup.
+@test 'no new-shell hint when nothing the shell reads changed' {
+	command -v ssh-keygen >/dev/null 2>&1 || skip "ssh-keygen not installed"
+	run setup-system.sh -y -s ssh
+	assert_success
+	refute_output --partial "exec bash -l"
+}
+
+@test 'the new-shell hint says why, and only until the shell is current' {
+	run setup-system.sh -s shell
+	assert_success
+	assert_output --partial "open a new shell, or run: exec bash -l"
+	assert_output --partial "(.bashrc now sources just-bashit)"
+	# Everything is in place now: a second run has nothing to reload.
+	run setup-system.sh -s shell
+	assert_success
+	refute_output --partial "exec bash -l"
+}
+
+@test 'a tool in ~/.local/bin off PATH asks for a new shell' {
+	mkdir -p "${HOME}/.local/bin"
+	printf '#!/bin/bash\necho uv 1.0.0\n' >"${HOME}/.local/bin/uv"
+	chmod +x "${HOME}/.local/bin/uv"
+	local p
+	p="$(_path_without uv)"
+	PATH="${p}" run setup-system.sh -n -s ssh
+	assert_success
+	assert_output --partial "(${HOME}/.local/bin is not on this shell's PATH)"
+}
+
 @test 'ssh step honours --key-name' {
 	command -v ssh-keygen >/dev/null 2>&1 || skip "ssh-keygen not installed"
 	run setup-system.sh -y -s ssh --key-name testkey
