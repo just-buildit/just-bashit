@@ -13,3 +13,37 @@ _common_setup() {
 	export HELP_REGEX='Usage:'               # Check each script/function at least has usage.
 	export BASH_XTRACEFD=${BASH_XTRACEFD:-2} # Use kcov's pipe fd when running under kcov; else stderr.
 }
+
+# _hide_windows_path NAME... — take every directory on a Windows drive mount
+# off PATH, then fail if any NAME is still reachable.
+#
+# For a test that fakes "WSL with Windows' PATH left out" by moving its stub
+# out of PATH. On a real WSL box with interop, Windows' own System32 is on
+# PATH as well, so the real powershell.exe answered instead of the stub: the
+# sshd test drove the genuine elevated setup and raised a UAC prompt on the
+# desktop (Debian 13 WSL2, 2026-10-03). CI never saw it, since a Linux
+# runner has no Windows drive mounted.
+#
+# The drives come from the REAL /proc/mounts, never JB_PROC_MOUNTS: that one
+# is the test's fake, and the danger is the machine's own C:. The check runs
+# before the script under test, so a failure here has driven nothing.
+_hide_windows_path() {
+	local roots root dir keep name kept=""
+	roots="$(awk '$3 == "drvfs" || $4 ~ /(^|,)aname=drvfs/ { print $2 }' \
+		/proc/mounts 2>/dev/null || true)"
+	local IFS=:
+	for dir in ${PATH}; do
+		keep=1
+		while IFS= read -r root; do
+			[[ -n ${root} && ${dir} == "${root}"/* ]] && keep=0
+		done <<<"${roots}"
+		[[ ${keep} -eq 1 ]] && kept="${kept:+${kept}:}${dir}"
+	done
+	export PATH="${kept}"
+	for name in "$@"; do
+		if command -v "${name}" >/dev/null 2>&1; then
+			echo "a real ${name} is still on PATH ($(command -v "${name}")); refusing to run" >&2
+			return 1
+		fi
+	done
+}

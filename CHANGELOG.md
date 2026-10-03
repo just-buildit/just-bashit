@@ -12,6 +12,18 @@
     the version lives only where something reads it at runtime.
     `version-files-check` fails on a version-stamped header.
 
+### Fixed
+
+- **Two WSL tests can no longer drive the real Windows.** "finds
+    powershell.exe under the C: mount when PATH lacks it" (and its
+    ssh-to-windows twin) hid a stub by moving it off PATH, assuming no
+    Windows on PATH. On a real WSL box Windows' System32 is on PATH, so the
+    genuine powershell.exe answered: it ran a stale launcher left in the
+    Windows temp dir and raised a real UAC prompt, and approving it re-ran
+    that machine's sshd setup elevated. A shared helper now takes every
+    Windows drive mount off PATH and fails the test, before anything runs,
+    if the program is still reachable.
+
 ## [0.7.1] - 2026-10-02
 
 ### Changed
