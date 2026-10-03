@@ -29,11 +29,25 @@ ARTIFACT         = just-bashit.tar.gz
 # ── test ──────────────────────────────────────────────────────────────────────
 # The tarball is the release artifact CI uploads, so it is built by the same
 # target that produces the report it contains.
+#
+# A test run must leave the tree as it found it. It did not: a cleanup line
+# here globbed bats-*/*.json and deleted the package.json both bats
+# submodules track, so every `make test` left them dirty. The check compares
+# `git status` before and after rather than requiring it empty, so it holds
+# on a working tree with edits in it, and --ignore-submodules=none makes it
+# look inside the submodules, where that damage was. The snapshot lives in
+# the git dir, which no status reports and the tarball does not include.
+TREE_BEFORE = $(shell git rev-parse --git-path make-test-tree-before)
+TREE_STATUS = git status --porcelain --ignore-submodules=none
+
 define TEST_CMD
+$(TREE_STATUS) >$(TREE_BEFORE)
 mkdir -p $(REPORT_PATH)
 $(BATS) --report-formatter junit --output $(REPORT_PATH) \
     --print-output-on-failure test
 tar -czf $(ARTIFACT) src $(REPORT_PATH)
+$(TREE_STATUS) | diff $(TREE_BEFORE) - >&2 || { \
+    echo "make test changed the working tree (diff above)" >&2; exit 1; }
 endef
 
 TEST_FAST_CMD = $(BATS) --abort test
