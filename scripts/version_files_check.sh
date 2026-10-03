@@ -2,7 +2,7 @@
 # ############################################################################
 # version_files_check.sh — repo gate, not a shipped library.                 #
 # ############################################################################
-# Three invariants over the [tool.bumpversion] table, each of which has       #
+# Four invariants over the version declarations, each of which has           #
 # already shipped broken once:                                               #
 #                                                                            #
 #   1. Every registered `filename` exists. The jb.toml -> bootstrap.toml     #
@@ -13,9 +13,9 @@
 #   2. Every registered `search` string actually MATCHES in its file. A      #
 #      search that no longer matches is worse than a missing entry: bumping  #
 #      succeeds, silently changes nothing, and the file drifts a version     #
-#      behind. The `# PACKAGE:` headers are padded to a fixed width and two  #
-#      of them are one space narrower than the other eighteen, so this is    #
-#      one edited comment away from happening.                               #
+#      behind. The `# PACKAGE:` headers were padded to a fixed width and two #
+#      were one space narrower than the other twenty: one edited comment     #
+#      away from happening.                                                  #
 #                                                                            #
 #   3. Every LINE that declares the version is covered by a search. Not      #
 #      every file -- every line. just-runit carried a `# PACKAGE:` header    #
@@ -24,6 +24,16 @@
 #      check passes that bug green; it was written that way first and did.   #
 #      make-run.sh shipped in 0.4.0 with no entry at all, which is the same  #
 #      check with every line uncovered.                                      #
+#                                                                            #
+#   4. No `# PACKAGE:` header names a version. Until 0.8.0 every shipped     #
+#      file stamped one, so every release rewrote every file -- and every    #
+#      repo vendoring one byte-for-byte (~/.claude vendors windows.sh) went  #
+#      red on its drift gate with no code change, until someone re-vendored  #
+#      by hand. The version lives where something reads it at runtime:       #
+#      pyproject.toml, bootstrap.toml, just-runit's _VERSION. A stamp in a   #
+#      comment is read by nothing, and costs every consumer a bump.          #
+#      Checked here because check 3 cannot see it: once the header shape     #
+#      left the table, an unquoted stamp is prose to check 3.                #
 #                                                                            #
 # Why `version-check` does not cover any of this: it compares the manifests  #
 # to each other AFTER a bump. It cannot see a bump that never ran, an entry  #
@@ -180,6 +190,19 @@ if ((${#uncovered[@]} > 0)); then
 	printf '  %s\n' "${uncovered[@]}"
 	echo "  They will keep ${current} through the next release. Add a"
 	echo "  [[tool.bumpversion.files]] entry whose search matches each line."
+	rc=1
+fi
+
+# ---------------------------------------------------------------------------
+# 4. No header stamps a version. Any version-shaped string, not just the
+# current one: a header copied from an old file carries an old version.
+# ---------------------------------------------------------------------------
+stamped=$(grep -rnE '^# PACKAGE:.*[0-9]+\.[0-9]+\.[0-9]+' src/just_bashit)
+if [[ -n "${stamped}" ]]; then
+	echo "ERROR: headers stamp a version:"
+	printf '%s\n' "${stamped}" | sed 's/^/  /'
+	echo "  Every release would rewrite these files and break every repo that"
+	echo "  vendors them. Write the header as '# PACKAGE: just-bashit', padded."
 	rc=1
 fi
 

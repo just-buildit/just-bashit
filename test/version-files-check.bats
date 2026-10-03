@@ -24,9 +24,9 @@ setup() {
 
 	# Two shipped files: one with only a header, one that also declares a
 	# quoted _VERSION — the shape that went unregistered in 0.1.4.
-	printf '#!/bin/bash\n# PACKAGE: just-bashit version 1.2.3%s#\n' \
+	printf '#!/bin/bash\n# STAMP: fixture version 1.2.3%s#\n' \
 		"${HDR_PAD}" >"${REPO}/src/just_bashit/alpha.sh"
-	printf '#!/bin/bash\n# PACKAGE: just-bashit version 1.2.3%s#\n_VERSION="1.2.3"\n' \
+	printf '#!/bin/bash\n# STAMP: fixture version 1.2.3%s#\n_VERSION="1.2.3"\n' \
 		"${HDR_PAD}" >"${REPO}/src/just_bashit/runner"
 
 	printf 'version = "1.2.3"\n' >"${REPO}/manifest.toml"
@@ -40,13 +40,13 @@ current_version = "1.2.3"
 
 [[tool.bumpversion.files]]
 filename = "src/just_bashit/alpha.sh"
-search = "# PACKAGE: just-bashit version {current_version}${HDR_PAD}#"
-replace = "# PACKAGE: just-bashit version {new_version}${HDR_PAD}#"
+search = "# STAMP: fixture version {current_version}${HDR_PAD}#"
+replace = "# STAMP: fixture version {new_version}${HDR_PAD}#"
 
 [[tool.bumpversion.files]]
 filename = "src/just_bashit/runner"
-search = "# PACKAGE: just-bashit version {current_version}${HDR_PAD}#"
-replace = "# PACKAGE: just-bashit version {new_version}${HDR_PAD}#"
+search = "# STAMP: fixture version {current_version}${HDR_PAD}#"
+replace = "# STAMP: fixture version {new_version}${HDR_PAD}#"
 
 [[tool.bumpversion.files]]
 filename = "src/just_bashit/runner"
@@ -93,7 +93,7 @@ _edit() {
 	# matches it. bump-my-version reports success and changes nothing, which
 	# is the failure mode worth catching. Mutating the file rather than the
 	# config also avoids sed's GNU-only `0,/re/` address form.
-	printf '#!/bin/bash\n# PACKAGE: just-bashit version 1.2.3 %s#\n' \
+	printf '#!/bin/bash\n# STAMP: fixture version 1.2.3 %s#\n' \
 		"${HDR_PAD}" >"${REPO}/src/just_bashit/alpha.sh"
 	_gate
 	assert_failure
@@ -116,7 +116,7 @@ _edit() {
 }
 
 @test 'a shipped file with no entry at all fails (make-run.sh 0.4.0)' {
-	printf '#!/bin/bash\n# PACKAGE: just-bashit version 1.2.3%s#\n' \
+	printf '#!/bin/bash\n# STAMP: fixture version 1.2.3%s#\n' \
 		"${HDR_PAD}" >"${REPO}/src/just_bashit/newcomer.sh"
 	_gate
 	assert_failure
@@ -178,4 +178,23 @@ _edit() {
 	_gate
 	assert_failure
 	assert_output --partial "current_version"
+}
+
+@test 'a header that stamps a version fails (re-vendoring on every release)' {
+	# Before 0.8.0 every shipped file carried one, so a release changed every
+	# file and every byte-for-byte vendored copy downstream went stale. Any
+	# version, not only the current one: copied headers carry old versions.
+	printf '#!/bin/bash\n# PACKAGE: just-bashit version 0.9.9%s#\n' \
+		"${HDR_PAD}" >"${REPO}/src/just_bashit/stamped.sh"
+	_gate
+	assert_failure
+	assert_output --partial "headers stamp a version"
+	assert_output --partial "stamped.sh"
+}
+
+@test 'an unversioned package header passes' {
+	printf '#!/bin/bash\n# PACKAGE: just-bashit%s#\n' \
+		"${HDR_PAD}" >"${REPO}/src/just_bashit/plain.sh"
+	_gate
+	assert_success
 }
