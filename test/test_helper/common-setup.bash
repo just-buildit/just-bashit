@@ -72,3 +72,36 @@ _bin_without() {
 	done
 	printf '%s\n' "${bin}"
 }
+
+# _serve_fixtures DIR -- answer every just-runit fetch from DIR, offline.
+#
+# Puts a curl first on PATH that, for `curl ... -o DEST URL`, copies
+# DIR/<the URL's last path segment> to DEST, and fails as `curl --fail` does
+# on a 404 when DIR has no such file. A call without -o (just-runit's probe
+# for --retry-all-errors) succeeds and does nothing. just-runit fetches only
+# https:// -- it refuses http:// and file:// -- so a local server cannot
+# stand in for the network; replacing curl is the seam fetch.bats uses.
+_serve_fixtures() {
+	local bin="${BATS_TEST_TMPDIR}/fixture-curl"
+	mkdir -p "${bin}"
+	cat >"${bin}/curl" <<-'EOF'
+		#!/usr/bin/env bash
+		dest="" url=""
+		while [[ $# -gt 0 ]]; do
+			case "${1}" in
+			-o)
+				dest="${2}"
+				shift 2
+				continue
+				;;
+			https://*) url="${1}" ;;
+			esac
+			shift
+		done
+		[[ -n ${dest} ]] || exit 0
+		[[ -f "${JB_FIXTURES}/${url##*/}" ]] || exit 22
+		cp "${JB_FIXTURES}/${url##*/}" "${dest}"
+	EOF
+	chmod +x "${bin}/curl"
+	export JB_FIXTURES="${1}" PATH="${bin}:${PATH}"
+}

@@ -112,6 +112,7 @@ ______________________________________________________________________
 | Flag      | Description                                                 |
 | --------- | ----------------------------------------------------------- |
 | `-l`      | List functions the script defines, then exit                |
+| `-f`      | Fetch only — cache the script, print its path, run nothing  |
 | `-r`      | Refresh — re-fetch even if the cache is fresh               |
 | `-n`      | No-cache — fetch once and discard (nothing written to disk) |
 | `-c`      | Clean environment (minimal env, like `sudo` without `-E`)   |
@@ -289,7 +290,8 @@ These are available under `just-runit` only.
 
 Walk up from the current directory to find `bootstrap.toml`, then pre-fetch
 every `source` declared under `[tools.*]` into the local cache. Subsequent
-`jbx` calls for those tools are instant cache hits.
+`jbx` calls for those tools are instant cache hits. Nothing is run: each tool
+is fetched as `just-runit -f` fetches it.
 
 ```
   reading /path/to/project/bootstrap.toml

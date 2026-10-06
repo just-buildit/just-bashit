@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`just-runit install` runs nothing (#117).** It pre-fetched each
+    `[tools.*]` source by running itself with `-l`, and `-l` lists a
+    script's functions by sourcing it, so every tool without a main guard
+    ran, its output discarded -- `setup-system`, which this repo's own
+    `bootstrap.toml` names, among them. It now fetches with the new `-f`:
+    cache the script, print its path, run nothing.
+
 ## [0.8.0] - 2026-10-03
 
 ### Breaking
