@@ -10,6 +10,12 @@
     ran, its output discarded -- `setup-system`, which this repo's own
     `bootstrap.toml` names, among them. It now fetches with the new `-f`:
     cache the script, print its path, run nothing.
+- **`jbx -n <url>` runs the script (#118).** It failed "No such file or
+    directory": the temp file's cleanup was an EXIT trap set inside the
+    function that fetched it, which runs in a `$(...)` subshell, so the
+    file was deleted as the subshell returned, before the script ran. The
+    fetch now goes into a directory the main shell makes (under `$TMPDIR`)
+    and removes on exit, after the script has run or the fetch has failed.
 
 ## [0.8.0] - 2026-10-03
 
