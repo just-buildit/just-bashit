@@ -635,12 +635,13 @@ _acquire() {
 		return
 	fi
 
+	# -n: into the directory main made, which main's EXIT trap removes. A
+	# trap set HERE belongs to the $(...) subshell every caller runs this
+	# in, and fired as the substitution returned: the script was deleted
+	# before it ran (just-bashit#118).
 	if [[ ${OPT_NO_CACHE} -eq 1 ]]; then
-		local ext tmp
-		ext=$(_cache_ext "${url}")
-		tmp=$(mktemp "/tmp/just-runit.XXXXXX${ext}")
-		# shellcheck disable=SC2064
-		trap "rm -f '${tmp}' '$(_meta_path "${tmp}")'" EXIT
+		local tmp
+		tmp="${_NO_CACHE_DIR}/script$(_cache_ext "${url}")"
 		_fetch_to "${url}" "${tmp}"
 		echo "${tmp}"
 		return
@@ -805,6 +806,14 @@ _run() {
 
 URL=$(_resolve "${RAW_SPEC}")
 _log "resolved: ${URL}"
+
+# -n fetches into a directory this shell owns, so it is THIS shell's EXIT
+# trap that removes it, after the script has run -- not the trap of the
+# $(...) subshell _acquire runs in.
+if [[ ${OPT_NO_CACHE} -eq 1 ]]; then
+	_NO_CACHE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/just-runit.XXXXXX")
+	trap 'rm -rf "${_NO_CACHE_DIR}"' EXIT
+fi
 
 SCRIPT=$(_acquire "${URL}")
 _log "script: ${SCRIPT}"

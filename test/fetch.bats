@@ -79,3 +79,35 @@ EOF
 	refute_output --partial 'is unknown'
 	assert_output --partial 'fetch failed'
 }
+
+# -n fetches into a temp file, runs it, and removes it. The removal was an
+# EXIT trap set inside _acquire, which every caller runs as $(...): it was
+# the subshell's trap, and it fired as the substitution returned, so the
+# script was gone before it ran -- `jbx -n <url>` failed "No such file or
+# directory" (just-bashit#118). TMPDIR is the test's, so "nothing left
+# behind" is checked where the file was made; and -n caches nothing.
+_no_cache_run() {
+	local tmp="${BATS_TEST_TMPDIR}/tmp"
+	mkdir -p "${tmp}"
+	_serve_fixtures "${BATS_TEST_TMPDIR}/fixtures"
+	TMPDIR="${tmp}" XDG_CACHE_HOME="${BATS_TEST_TMPDIR}/cache" \
+		run just-runit -n "$@"
+	assert_equal "$(ls -A "${tmp}")" ""
+	refute [ -e "${BATS_TEST_TMPDIR}/cache/just-runit" ]
+}
+
+@test '-n runs the script, then leaves nothing behind' {
+	mkdir -p "${BATS_TEST_TMPDIR}/fixtures"
+	printf '#!/usr/bin/env bash\necho "no-cache ran: $*"\n' \
+		>"${BATS_TEST_TMPDIR}/fixtures/tool.sh"
+	_no_cache_run https://fixture.invalid/tool.sh --flag
+	assert_success
+	assert_output 'no-cache ran: --flag'
+}
+
+@test '-n leaves nothing behind when the fetch fails' {
+	mkdir -p "${BATS_TEST_TMPDIR}/fixtures"
+	_no_cache_run https://fixture.invalid/absent.sh
+	assert_failure
+	assert_output --partial 'fetch failed'
+}
