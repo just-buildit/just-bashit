@@ -2,15 +2,11 @@
 name    = "just-bashit"
 version = "0.8.0"
 
-[tools.install-deps]
-source = "src/install-deps.sh"
-
-[tools.just-runit]
-source = "src/just-runit"
-
-[tools.get-jb]
-source = "src/get-jb.sh"
-
+# Only a tool this repo needs FETCHED belongs here, spelled as a SPEC
+# just-runit resolves (`just-bashit:<name>`, an https URL). The scripts it
+# ships are not: the Makefile runs install-deps.sh from source on purpose,
+# and just-runit has no local-path SPEC, so a `src/...` path never resolved
+# (#119). test/runit-install.bats installs this file to keep it that way.
 [tools.setup-system]
 source = "just-bashit:setup-system"
 
