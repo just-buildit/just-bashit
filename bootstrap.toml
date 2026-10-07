@@ -1,6 +1,6 @@
 [project]
 name    = "just-bashit"
-version = "0.8.0"
+version = "0.9.0"
 
 # Only a tool this repo needs FETCHED belongs here, spelled as a SPEC
 # just-runit resolves (`just-bashit:<name>`, an https URL). The scripts it

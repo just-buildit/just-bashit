@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-06
+
+### Added
+
+- **`just-runit -f SPEC`: fetch only (#117).** Resolves SPEC, caches the
+    script (verifying `-k` when given), prints the cached path and exits
+    without running it, so a later `jbx` of the same SPEC is a cache hit.
+    `just-runit install` fetches every `[tools.*]` source this way.
+
 ### Fixed
 
 - **`just-runit install` runs nothing (#117).** It pre-fetched each
