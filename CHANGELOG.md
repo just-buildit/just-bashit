@@ -16,6 +16,12 @@
     file was deleted as the subshell returned, before the script ran. The
     fetch now goes into a directory the main shell makes (under `$TMPDIR`)
     and removes on exit, after the script has run or the fetch has failed.
+- **This repo's own `bootstrap.toml` installs (#119).** Three `[tools.*]`
+    entries named `src/...` paths, which just-runit has never resolved (it
+    has no local-path SPEC), so `just-runit install` here failed on all
+    three. They are dropped: the Makefile runs `install-deps.sh` from
+    source, and the runner and its installer are not tools this repo
+    fetches. `test/runit-install.bats` now installs the file, offline.
 
 ## [0.8.0] - 2026-10-03
 

@@ -45,3 +45,18 @@ setup() {
 	run cmp "${output}" "${fixtures}/tool.sh"
 	assert_success
 }
+
+# This repo's own bootstrap.toml must install: every [tools.*] source is a
+# SPEC just-runit resolves. Three `src/...` paths never did -- just-runit
+# has no local-path SPEC -- and `install` failed on them from the day they
+# landed (#119). Offline: the scripts the CDN publishes are served from the
+# tree that publishes them, so the resolution is just-runit's own and only
+# the bytes are local.
+@test "this repo's own bootstrap.toml installs" {
+	export JB_FIXTURES="${PROJECT_ROOT}/src/just_bashit"
+	cp "${PROJECT_ROOT}/bootstrap.toml" "${BATS_TEST_TMPDIR}/proj/bootstrap.toml"
+	cd "${BATS_TEST_TMPDIR}/proj"
+	run just-runit install
+	assert_success
+	refute_output --partial 'failed'
+}
