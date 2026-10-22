@@ -1626,10 +1626,10 @@ _admin_channel_stub() {
 @test 'certs: skipped on WSL when powershell.exe is absent' {
 	local proc_ver="${BATS_TEST_TMPDIR}/proc_version"
 	echo "Linux version 5.15.153.1-microsoft-standard-WSL2" >"${proc_ver}"
-	local stubs="${BATS_TEST_TMPDIR}/stubs"
-	mkdir -p "${stubs}"
+	local p
+	p="$(_path_without powershell.exe)"
 	touch "${BATS_TEST_TMPDIR}/empty_mounts"
-	PATH="${stubs}" JB_PROC_MOUNTS="${BATS_TEST_TMPDIR}/empty_mounts" JB_PROC_VERSION="${proc_ver}" run setup-system.sh -s certs
+	PATH="${p}" JB_PROC_MOUNTS="${BATS_TEST_TMPDIR}/empty_mounts" JB_PROC_VERSION="${proc_ver}" run setup-system.sh -s certs
 	assert_success
 	assert_output --partial "powershell.exe not found"
 	assert_output --partial "certs:   skipped (no powershell.exe)"
