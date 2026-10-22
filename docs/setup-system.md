@@ -21,6 +21,7 @@ ______________________________________________________________________
 | Step     | What it does                                                                                                                                                                                                                                                    |
 | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `deps`   | Installs a baseline toolchain — C compiler, `make`, `cmake`, `pkg-config`, `git`, `curl`, ssh — then the packages of any `bootstrap.toml` in the current directory, both via [`install-deps`](install-deps.md).                                                 |
+| `certs`  | **WSL only**. Exports Windows Trusted Root certificates via PowerShell and installs them into the WSL distro trust store alongside the Mozilla CA bundle.                                                                                                        |
 | `shell`  | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                                                                                                                           |
 | `ssh`    | Tightens permissions across `~/.ssh` — repairing a directory copied from Windows, FAT, a zip or git — then creates an ed25519 key named after this host if there is no key at all. Prints the public key.                                                       |
 | `sshd`   | **Opt-in, Windows only** (WSL or native MSYS2 / Git Bash). Runs Windows' own OpenSSH server as a boot-time service — key-only, keys from `github.com/<user>.keys`, `pwsh.exe` as the login shell — so the machine answers ssh even when WSL is down. See below. |
@@ -48,6 +49,31 @@ steps  = ["deps", "shell", "git"]
 ```
 
 `-s` always overrides that, regardless of the toml setting.
+
+______________________________________________________________________
+
+## The certs step (WSL)
+
+On Windows Subsystem for Linux (WSL), enterprise root certificates and corporate
+TLS inspection proxies (such as Zscaler, Netskope, or Active Directory PKI) are
+installed in Windows' certificate store, but absent from the Linux distro. As a
+result, command-line tools (`curl`, `git`, `uv`, `apt`, Python) fail with TLS/SSL
+verification errors.
+
+The `certs` step queries Windows via `powershell.exe`:
+
+```powershell
+Get-ChildItem -Path Cert:\LocalMachine\Root, Cert:\CurrentUser\Root
+```
+
+It exports these root certificates in PEM format into
+`/usr/local/share/ca-certificates/windows-roots.crt` (or the equivalent anchor
+path on Fedora, RHEL, and Arch) and runs the distro's certificate updater
+(`update-ca-certificates` or `update-ca-trust`). The updater merges the
+distro's Mozilla CA bundle and the exported Windows root certificates into the
+system certificate bundle (`/etc/ssl/certs/ca-certificates.crt`).
+
+On non-WSL machines, this step is safely skipped.
 
 ______________________________________________________________________
 

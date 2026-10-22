@@ -100,6 +100,21 @@ fi
 : "${VISUAL:=${EDITOR:-vi}}"
 export VISUAL
 
+# ---------------------------------------------------------------------------
+# SSL / TLS certificate bundle.
+#
+# If a system CA bundle exists and SSL_CERT_FILE is unset, point to it so
+# runtimes that vendor their own CA bundle (e.g. Python certifi) honor system
+# certificates (including corporate roots synced from Windows on WSL).
+# ---------------------------------------------------------------------------
+if [ -z "${SSL_CERT_FILE:-}" ]; then
+	if [ -r "/etc/ssl/certs/ca-certificates.crt" ]; then
+		export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
+	elif [ -r "/etc/pki/tls/certs/ca-bundle.crt" ]; then
+		export SSL_CERT_FILE="/etc/pki/tls/certs/ca-bundle.crt"
+	fi
+fi
+
 if command -v less >/dev/null 2>&1; then
 	export PAGER=less
 	# -R real colours, -i smart-case search, -M verbose status line,

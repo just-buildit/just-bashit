@@ -180,6 +180,7 @@ _write_deps_toml() {
 	run setup-system.sh -n
 	assert_success
 	assert_output --partial "deps —"
+	assert_output --partial "certs —"
 	assert_output --partial "shell —"
 	assert_output --partial "ssh —"
 	assert_output --partial "git —"
@@ -1591,4 +1592,45 @@ _admin_channel_stub() {
 	assert_success
 	assert_output --partial "over the admin ssh channel (tester@192.0.2.1), no UAC prompt"
 	assert [ ! -e "${CALLS}.ssh" ]
+}
+
+# ---------------------------------------------------------------------------
+# certs — WSL certificate sync
+# ---------------------------------------------------------------------------
+
+@test 'certs: skipped when not running on WSL' {
+	local proc_ver="${BATS_TEST_TMPDIR}/proc_version"
+	echo "Linux version 6.8.0-generic" >"${proc_ver}"
+	JB_PROC_VERSION="${proc_ver}" run setup-system.sh -s certs
+	assert_success
+	assert_output --partial "certs:   skipped (not WSL)"
+}
+
+@test 'certs: dry run on WSL previews certificate sync' {
+	local proc_ver="${BATS_TEST_TMPDIR}/proc_version"
+	echo "Linux version 5.15.153.1-microsoft-standard-WSL2" >"${proc_ver}"
+	local stubs="${BATS_TEST_TMPDIR}/stubs"
+	mkdir -p "${stubs}"
+	cat >"${stubs}/powershell.exe" <<-EOF
+		#!/bin/bash
+		exit 0
+	EOF
+	chmod +x "${stubs}/powershell.exe"
+	PATH="${stubs}:${PATH}" JB_PROC_VERSION="${proc_ver}" run setup-system.sh -n -s certs
+	assert_success
+	assert_output --partial "certs —"
+	assert_output --partial "would query Windows Trusted Root certificates"
+	assert_output --partial "certs:   ok (dry run)"
+}
+
+@test 'certs: skipped on WSL when powershell.exe is absent' {
+	local proc_ver="${BATS_TEST_TMPDIR}/proc_version"
+	echo "Linux version 5.15.153.1-microsoft-standard-WSL2" >"${proc_ver}"
+	local stubs="${BATS_TEST_TMPDIR}/stubs"
+	mkdir -p "${stubs}"
+	touch "${BATS_TEST_TMPDIR}/empty_mounts"
+	PATH="${stubs}" JB_PROC_MOUNTS="${BATS_TEST_TMPDIR}/empty_mounts" JB_PROC_VERSION="${proc_ver}" run setup-system.sh -s certs
+	assert_success
+	assert_output --partial "powershell.exe not found"
+	assert_output --partial "certs:   skipped (no powershell.exe)"
 }

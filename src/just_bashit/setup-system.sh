@@ -22,8 +22,8 @@ _JBS_BASE="${JB_JBS_BASE:-https://just-buildit.github.io/jbs}"
 # with tar, both of which the deps step is what puts on a bare machine.
 # Kept as an array as well as a string because IFS is newline+tab here, so
 # a space-separated string does not word-split.
-_STEPS_ALL=(deps shell ssh sshd git tools pwsh claude)
-_STEPS_ALL_STR="deps shell ssh sshd git tools pwsh claude"
+_STEPS_ALL=(deps certs shell ssh sshd git tools pwsh claude)
+_STEPS_ALL_STR="deps certs shell ssh sshd git tools pwsh claude"
 
 # Steps that run only when named with -s or in bootstrap.toml. sshd opens a
 # listening port on the machine, which is not something a default run gets
@@ -54,6 +54,9 @@ read -r -d '' HELP <<-'EOF' || true
 	          pkg-config, git, curl, ssh), then the packages of any
 	          bootstrap.toml in the current directory (delegates to
 	          install-deps).
+	  certs   WSL only: Export Windows Trusted Root certificates via
+	          PowerShell and install them into the WSL distro trust
+	          store with the Mozilla CA bundle.
 	  shell   Install the opinionated bash configuration to
 	          ~/.config/just-bashit/{bashrc,profile}.sh and add one source
 	          line to ~/.bashrc and ~/.profile. Your files stay yours.
@@ -480,6 +483,124 @@ step_deps() {
 	fi
 }
 
+# ---------------------------------------------------------------------------
+# Overridable so the suite can run WSL-only steps on a Linux runner (as
+# ssh-to-windows does): a WSL-only step tested only by hand is eventually not
+# tested.
+# ---------------------------------------------------------------------------
+_PROC_VERSION="${JB_PROC_VERSION:-/proc/version}"
+
+# _on_wsl -- true inside a WSL distro.
+_on_wsl() {
+	[[ -r ${_PROC_VERSION} ]] && grep -qi microsoft "${_PROC_VERSION}"
+}
+
+# ---------------------------------------------------------------------------
+# certs — WSL only: export Windows Trusted Root certificates via PowerShell
+# and install them into the distro trust store (which merges them with the
+# Mozilla CA bundle).
+# ---------------------------------------------------------------------------
+step_certs() {
+	_head "certs — sync Windows trusted root certificates into WSL"
+
+	if ! _on_wsl; then
+		_info "not WSL — no Windows root certificates to import"
+		_result "certs:   skipped (not WSL)"
+		return 0
+	fi
+
+	local ps_exe
+	ps_exe="$(win-exe powershell.exe)" || ps_exe=""
+	if [[ -z ${ps_exe} ]]; then
+		_warn "powershell.exe not found — cannot export Windows certificates"
+		_result "certs:   skipped (no powershell.exe)"
+		return 0
+	fi
+
+	# Determine distro certificate store directory and update command
+	local cert_dir update_cmd=()
+	if [[ -d /usr/local/share/ca-certificates ]] || _have update-ca-certificates; then
+		cert_dir="/usr/local/share/ca-certificates"
+		update_cmd=(update-ca-certificates)
+	elif [[ -d /etc/pki/ca-trust/source/anchors ]] || _have update-ca-trust; then
+		cert_dir="/etc/pki/ca-trust/source/anchors"
+		update_cmd=(update-ca-trust extract)
+	elif [[ -d /etc/ca-certificates/trust-source/anchors ]] || _have trust; then
+		cert_dir="/etc/ca-certificates/trust-source/anchors"
+		update_cmd=(trust extract-compat)
+	else
+		cert_dir="/usr/local/share/ca-certificates"
+		update_cmd=(update-ca-certificates)
+	fi
+
+	local cert_file="${cert_dir}/windows-roots.crt"
+
+	if [[ ${DRY_RUN} -eq 1 ]]; then
+		_info "would query Windows Trusted Root certificates via ${ps_exe}"
+		_info "would install exported certificates to ${cert_file}"
+		local sudo_pfx=()
+		if [[ $(id -u) -ne 0 ]] && _have sudo; then
+			sudo_pfx=(sudo)
+		fi
+		(
+			IFS=' '
+			_info "would run: ${sudo_pfx[*]} mkdir -p ${cert_dir}"
+			_info "would run: ${sudo_pfx[*]} cp <exported-certs> ${cert_file}"
+			_info "would run: ${sudo_pfx[*]} chmod 644 ${cert_file}"
+			_info "would run: ${sudo_pfx[*]} ${update_cmd[*]}"
+		)
+		_result "certs:   ok (dry run)"
+		return 0
+	fi
+
+	local tmp_crt
+	tmp_crt="$(mktemp /tmp/jb-windows-roots.XXXXXX.crt)" || {
+		_warn "cannot create temporary certificate file"
+		_result "certs:   failed (mktemp failed)"
+		return 1
+	}
+
+	_info "exporting Windows Root certificates..."
+	local ps_cmd
+	ps_cmd="Get-ChildItem -Path Cert:\LocalMachine\Root, Cert:\CurrentUser\Root -ErrorAction SilentlyContinue | Where-Object { \$_.RawData } | ForEach-Object { '-----BEGIN CERTIFICATE-----'; [System.Convert]::ToBase64String(\$_.RawData, 'InsertLineBreaks'); '-----END CERTIFICATE-----' }"
+
+	if ! "${ps_exe}" -NoProfile -Command "${ps_cmd}" | tr -d '\r' >"${tmp_crt}" 2>/dev/null; then
+		rm -f "${tmp_crt}"
+		_warn "failed to export certificates from Windows PowerShell"
+		_result "certs:   failed (powershell query error)"
+		return 1
+	fi
+
+	local count
+	count=$(grep -c -- '-----BEGIN CERTIFICATE-----' "${tmp_crt}" || true)
+	if [[ ${count} -eq 0 ]]; then
+		rm -f "${tmp_crt}"
+		_warn "no certificates exported from Windows root store"
+		_result "certs:   failed (empty export)"
+		return 1
+	fi
+	_info "found ${count} certificate(s) from Windows"
+
+	local sudo_cmd=()
+	if [[ $(id -u) -ne 0 ]] && _have sudo; then
+		sudo_cmd=(sudo)
+	fi
+
+	"${sudo_cmd[@]+"${sudo_cmd[@]}"}" mkdir -p "${cert_dir}"
+	"${sudo_cmd[@]+"${sudo_cmd[@]}"}" cp "${tmp_crt}" "${cert_file}"
+	"${sudo_cmd[@]+"${sudo_cmd[@]}"}" chmod 644 "${cert_file}"
+	rm -f "${tmp_crt}"
+
+	_info "updating WSL certificate store (${update_cmd[*]})..."
+	if "${sudo_cmd[@]+"${sudo_cmd[@]}"}" "${update_cmd[@]}"; then
+		_result "certs:   ok (${count} cert(s) installed into ${cert_file})"
+	else
+		_warn "certificate update command failed (${update_cmd[*]})"
+		_result "certs:   failed (${update_cmd[0]} failed)"
+		return 1
+	fi
+}
+
 # shell — the bashrc/profile templates plus their one-line hooks.
 step_shell() {
 	_head "shell — bash configuration"
@@ -853,16 +974,6 @@ step_ssh() {
 # also waits for every descendant, and the MSI installs this triggers can
 # leave one running -- an outer wait that then never returns.
 # ---------------------------------------------------------------------------
-
-# Overridable so the suite can run this on a Linux runner (as ssh-to-windows
-# does): a WSL-only step tested only by hand is eventually not tested.
-_PROC_VERSION="${JB_PROC_VERSION:-/proc/version}"
-
-# _on_wsl -- true inside a WSL distro. The ssh step (box key adoption) and
-# the sshd step (path translator) both ask it.
-_on_wsl() {
-	[[ -r ${_PROC_VERSION} ]] && grep -qi microsoft "${_PROC_VERSION}"
-}
 
 # _sshd_github_user — whose keys to authorize: --github-user, else the
 # account gh is signed in to. Printed, or return 1 when neither is known.
