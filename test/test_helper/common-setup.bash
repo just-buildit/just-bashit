@@ -55,6 +55,13 @@ _hide_windows_path() {
 # pacman in /usr/bin -- but a PATH naming only this directory can. NAME.exe
 # is skipped too: MSYS2's pacman is /usr/bin/pacman.exe, and bash finds it
 # by the bare name, so skipping only "pacman" hides nothing there.
+#
+# On MSYS2 the entries are HARD links, falling back to native symlinks. Its
+# `ln -s` copies by default (MSYS unset), and from msys2-runtime 3.6.11 a
+# copied program does not start at all -- exit 127, no output, with or
+# without its DLLs beside it -- while a hard link or a native symlink to the
+# same file runs. Measured on the windows-2025 runner, 2026-10-25; that
+# copy-shaped farm is what kept tests 270 and 370 red from 2026-10-16.
 _bin_without() {
 	# shellcheck disable=SC2154  # BATS_TEST_TMPDIR is bats'
 	local bin="${BATS_TEST_TMPDIR}/bin-without" dir prog name skip
@@ -67,7 +74,14 @@ _bin_without() {
 				[[ ${name} == "${skip}" || ${name} == "${skip}.exe" ]] &&
 					continue 2
 			done
-			[[ -e "${bin}/${name}" ]] || ln -s "${prog}" "${bin}/${name}"
+			[[ -e "${bin}/${name}" ]] && continue
+			case "$(uname -s)" in
+			MINGW* | MSYS*)
+				ln "${prog}" "${bin}/${name}" 2>/dev/null ||
+					MSYS=winsymlinks:nativestrict ln -s "${prog}" "${bin}/${name}"
+				;;
+			*) ln -s "${prog}" "${bin}/${name}" ;;
+			esac
 		done
 	done
 	printf '%s\n' "${bin}"
