@@ -14,6 +14,21 @@ setup() {
 	_common_setup
 }
 
+# _bin_without is what every "as if X were not installed" test stands on, so
+# it is checked directly: a directory whose programs are found but do not
+# start (an msys2-runtime 3.6.11 copy, 2026-10-25) fails those tests with an
+# empty exit 127 that names nothing. This names the helper.
+@test '_bin_without builds a directory whose programs run' {
+	local bin
+	bin="$(_bin_without awk)"
+	run env -i PATH="${bin}" dirname /a/b
+	assert_success
+	assert_output "/a"
+	run env -i PATH="${bin}" bash -c 'echo BASH-RUNS'
+	assert_success
+	assert_output "BASH-RUNS"
+}
+
 # The scripts that run before setup-system's baseline lands.
 _BOOTSTRAP=(just-runit get-jb.sh install-deps.sh toml.sh)
 
