@@ -33,6 +33,16 @@
     manifest and silently installing or reporting nothing. A
     `bootstrap.toml` beside a legacy file is read and the legacy file
     ignored; an explicit path argument is read whatever else is present.
+- **The tree-unchanged test gate covers every run and every outcome
+    (#113).** It lived inline in `make test`'s recipe, so `make test-fast`
+    and `make coverage` ran without it, and a bats failure aborted the
+    recipe before the after-diff: a red run that also damaged the tree
+    reported only the test failure. It is now one script,
+    `scripts/tree_unchanged.sh`, wrapped around all three; it diffs after a
+    failing run too and keeps that run's exit status. Its sabotage proof is
+    kept as `test/tree-unchanged.bats`, and a new `BATS_ARGS` (default
+    `test`) runs a subset through make:
+    `make test-fast BATS_ARGS='-f deps test/setup-system.bats'`.
 
 ## [0.9.0] - 2026-10-06
 
