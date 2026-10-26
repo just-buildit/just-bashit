@@ -170,3 +170,52 @@ YAML
 	assert_failure
 	assert_output --partial "broken parser"
 }
+
+# Check 4: every job a pull request runs feeds `CI passed`, the required
+# check. coverage did not, and went red on main for #142 while the merge went
+# through. The fixture's aggregate is named ci-passed, as the real one is.
+_with_ci_passed() {
+	cat >>"${REPO}/.github/workflows/ci.yml" <<'YAML'
+
+  extra:
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
+
+  ci-passed:
+    needs: [build, consume, extra]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
+
+  after:
+    needs: ci-passed
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
+YAML
+}
+
+@test 'every pull-request job feeding CI passed, or after it, passes' {
+	_with_ci_passed
+	_gate
+	assert_success
+}
+
+@test 'a pull-request job CI passed does not wait for fails (the coverage bug)' {
+	_with_ci_passed
+	_edit "${REPO}/.github/workflows/ci.yml" \
+		-e 's/needs: \[build, consume, extra\]/needs: [build, consume]/'
+	_gate
+	assert_failure
+	assert_output --partial "job 'extra' runs on pull requests"
+}
+
+@test 'a transitive wait into CI passed counts' {
+	_with_ci_passed
+	_edit "${REPO}/.github/workflows/ci.yml" \
+		-e 's/needs: \[build, consume, extra\]/needs: [consume, extra]/'
+	_gate
+	assert_success
+}

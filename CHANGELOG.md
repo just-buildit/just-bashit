@@ -10,6 +10,10 @@
     its first line, and `make coverage` went red on main while `make test`
     passed. The child now starts from bash's default options.
 
+- **`CI passed` waits for `coverage`.** A red `coverage` merged #142,
+    because the one required check did not wait for it. `make   workflow-check` now fails on any pull-request job that `CI passed` does
+    not wait for, unless the job runs after it.
+
 - **Getting Started installs `jbx` (#116).** Its Installation section only
     offered the release tarball, so a reader who started there never got the
     one-line `get-jb.sh` installer every adopter points at. It now leads with
