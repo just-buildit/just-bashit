@@ -4,11 +4,15 @@
 
 ### Fixed
 
-- **`jbx -l` lists under an exported `SHELLOPTS` (#121 follow-up).** The
-    child that sources the script inherited jbx's own `set -euo pipefail`
-    whenever the caller exported `SHELLOPTS`, as kcov does. `compgen -A   function` returns 1 while no function exists yet, so the child died on
-    its first line, and `make coverage` went red on main while `make test`
-    passed. The child now starts from bash's default options.
+- **`jbx -l` lists a script whatever the caller's shell environment
+    (#121 follow-up).** The child that sources the script inherited two
+    things from the caller. Through an exported `SHELLOPTS` it got jbx's own
+    `set -euo pipefail`, and `compgen -A function` returns 1 while no
+    function exists yet, so the child died on its first line. Through
+    `BASH_ENV` it got kcov's tracer, whose `PS4` names `BASH_SOURCE`, and a
+    script with `set -u` made the next traced line fail. `make coverage`
+    went red on main while `make test` passed. The child now runs without
+    either, from bash's defaults.
 
 - **`CI passed` waits for `coverage`.** A red `coverage` merged #142,
     because the one required check did not wait for it. `make   workflow-check` now fails on any pull-request job that `CI passed` does

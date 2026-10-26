@@ -1,6 +1,7 @@
 # shellcheck disable=SC2154  # bats/common-setup export the harness vars
 load 'test_helper/common-setup'
 _common_setup
+bats_require_minimum_version 1.5.0
 
 # `jbx -l SPEC` lists a shell script's functions by SOURCING it in a child
 # bash, so the functions it gets from the libraries it sources are listed
@@ -140,4 +141,31 @@ setup() {
 			just-runit -l https://fixture.invalid/tool.sh'
 	assert_success
 	assert_output "$(printf 'hello\nworld')"
+}
+
+# kcov traces every bash it reaches through BASH_ENV, a file that turns on
+# xtrace with a PS4 naming BASH_SOURCE. The child that sources the script
+# read it too, and a script with `set -euo pipefail` left nounset on after
+# sourcing, so the child's next line expanded that PS4 at its top level,
+# where BASH_SOURCE is unset, and failed: this test's real counterpart went
+# red under `make coverage` only. The child now runs without BASH_ENV.
+@test '-l lists a strict script when a BASH_ENV tracer is set, as under kcov' {
+	cat >"${fixtures}/tool.sh" <<-'EOF2'
+		#!/usr/bin/env bash
+		set -euo pipefail
+		main() { :; }
+		if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main; fi
+	EOF2
+	local tracer="${BATS_TEST_TMPDIR}/tracer.sh"
+	# Single quotes in the file, as kcov writes it: PS4 is expanded at each
+	# traced line, not once when the file is read.
+	cat >"${tracer}" <<-'EOF2'
+		set -x
+		PS4='+trace@${BASH_SOURCE}@${LINENO}@'
+	EOF2
+	run --separate-stderr env -i PATH="${PATH}" HOME="${HOME}" \
+		JB_FIXTURES="${JB_FIXTURES}" XDG_CACHE_HOME="${XDG_CACHE_HOME}" \
+		BASH_ENV="${tracer}" just-runit -l https://fixture.invalid/tool.sh
+	assert_success
+	assert_output 'main'
 }
