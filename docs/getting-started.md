@@ -2,31 +2,31 @@
 
 ## Installation
 
-Download the latest release from
-[GitHub Releases](https://github.com/just-buildit/just-bashit/releases) and
-extract it:
+### jbx
+
+Most people want `jbx` (`just-runit`), which runs any script or library
+function by name, fetching it on demand. One line installs it into the shell
+you run it in:
 
 ```bash
-tar xf just-bashit.tar.gz
+. <(curl -sSL https://just-buildit.github.io/get-jb.sh)
 ```
 
-This gives you:
+What that installs, why it is sourced, and how to reinstall are in
+[Getting just-runit](just-runit.md#getting-just-runit). From there,
+`jbx setup-system` sets up the rest of the machine.
 
-```
-just-bashit/
-├── README.md
-├── src/
-│   ├── datetime.sh
-│   ├── environment.sh
-│   ├── file.sh
-│   ├── format.sh
-│   ├── function-template.sh
-│   ├── logging.sh
-│   ├── match.sh
-│   ├── network.sh
-│   ├── path.sh
-│   └── script-template
-└── test-results/
+### The libraries
+
+To source the libraries from your own scripts, download `just-bashit.tar.gz`
+from [GitHub Releases](https://github.com/just-buildit/just-bashit/releases)
+and extract it into a `just-bashit/` directory, which is the path every example
+in these docs sources from:
+
+```bash
+mkdir -p just-bashit
+tar xzf just-bashit.tar.gz -C just-bashit
+ls just-bashit/src/just_bashit/   # logging.sh, path.sh, match.sh, ...
 ```
 
 ## Sourcing Libraries
