@@ -12,6 +12,15 @@
     tarball has no top-level directory and no README, and its libraries are
     under `src/just_bashit/`. It now extracts into `just-bashit/`, the path
     every example in the docs sources from.
+- **`jbx -n` leaves the cache untouched for just-bashit scripts and
+    aliases (#122).** A `just-bashit:` spec, a `jbs/` URL and an alias into
+    `jbs/` (`install-deps`, `setup-system`) took the co-fetch path before
+    `-n` was checked, so the whole bundle was written to the cache, or a
+    fresh cached one used without fetching; the aliases.toml lookup cached
+    its file too, and the nested run that installs uv for a Python script
+    dropped `-n`. All of them now fetch fresh into the run's temporary
+    directory, removed on exit, so the bundle's libraries still resolve
+    beside the script.
 
 ## [0.9.0] - 2026-10-06
 

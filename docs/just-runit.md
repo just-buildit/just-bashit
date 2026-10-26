@@ -109,17 +109,17 @@ ______________________________________________________________________
 
 ## Options
 
-| Flag      | Description                                                 |
-| --------- | ----------------------------------------------------------- |
-| `-l`      | List functions the script defines, then exit                |
-| `-f`      | Fetch only — cache the script, print its path, run nothing  |
-| `-r`      | Refresh — re-fetch even if the cache is fresh               |
-| `-n`      | No-cache — fetch once and discard (nothing written to disk) |
-| `-c`      | Clean environment (minimal env, like `sudo` without `-E`)   |
-| `-p VARS` | Comma-separated vars to pass through when using `-c`        |
-| `-t TTL`  | Cache TTL in seconds. Default `3600`. `0` = keep forever    |
-| `-k HASH` | Verify before running: `sha256:HASH` or `md5:HASH`          |
-| `-v`      | Verbose — prints fetch/cache activity to stderr             |
+| Flag      | Description                                                     |
+| --------- | --------------------------------------------------------------- |
+| `-l`      | List functions the script defines, then exit                    |
+| `-f`      | Fetch only — cache the script, print its path, run nothing      |
+| `-r`      | Refresh — re-fetch even if the cache is fresh                   |
+| `-n`      | No-cache — fetch fresh, discard on exit; the cache is untouched |
+| `-c`      | Clean environment (minimal env, like `sudo` without `-E`)       |
+| `-p VARS` | Comma-separated vars to pass through when using `-c`            |
+| `-t TTL`  | Cache TTL in seconds. Default `3600`. `0` = keep forever        |
+| `-k HASH` | Verify before running: `sha256:HASH` or `md5:HASH`              |
+| `-v`      | Verbose — prints fetch/cache activity to stderr                 |
 
 ______________________________________________________________________
 
@@ -140,6 +140,10 @@ across all projects on the machine.
     network.sh
     ...
 ```
+
+`-n` neither reads nor writes any of it: the script, the co-fetch bundle and
+aliases.toml go to a temporary directory under `$TMPDIR`, removed when the run
+exits.
 
 The key is a SHA-256 of the full URL, so two different URLs that happen to
 return the same content get separate entries.
