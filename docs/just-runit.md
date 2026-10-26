@@ -111,7 +111,7 @@ ______________________________________________________________________
 
 | Flag      | Description                                                     |
 | --------- | --------------------------------------------------------------- |
-| `-l`      | List functions the script defines, then exit                    |
+| `-l`      | List functions the script defines, then exit (see below)        |
 | `-f`      | Fetch only — cache the script, print its path, run nothing      |
 | `-r`      | Refresh — re-fetch even if the cache is fresh                   |
 | `-n`      | No-cache — fetch fresh, discard on exit; the cache is untouched |
@@ -217,6 +217,32 @@ jbx -l just-bashit:logging
 # log-wait
 # trim-from
 ```
+
+`-l` lists a shell script's functions by **sourcing** it, so the functions it
+gets from the libraries it sources are listed too. That would run a script
+whose top level does work, so `-l` first reads the script and refuses one
+whose top level runs a command, naming the line, and sources nothing:
+
+```text
+just-runit: error: -l will not source setup-system: line 111 of ... runs a command at its top level:
+  while [[ $# -gt 0 ]]; do
+```
+
+What a listable script's top level may hold: comments, function definitions
+(any body), assignments (alone, or chained with `&&` / `||` after a test),
+`source` / `.`, `set`, `shopt`, `declare` / `readonly` / `export` / `unset`,
+a `read` from a heredoc, an `if` whose condition and branches hold only
+these, and a main guard, whose body never runs when the file is sourced:
+
+```bash
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi
+(return 0 2>/dev/null) || echo "This file must be sourced."
+```
+
+It guards against running a script by accident, not against a hostile one: a
+command substitution inside an assignment (`DIR=$(cd ... && pwd)`) still runs,
+as do the top levels of the libraries the script sources. A Python script is
+parsed (`ast`), never run, so `-l` lists any of them.
 
 **Pin to a checksum for auditable CI use:**
 

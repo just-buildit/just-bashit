@@ -21,6 +21,15 @@
     dropped `-n`. All of them now fetch fresh into the run's temporary
     directory, removed on exit, so the bundle's libraries still resolve
     beside the script.
+- **`jbx -l` no longer runs the script it lists (#121).** `-l` lists a
+    shell script's functions by sourcing it in a child bash, so a script
+    without a main guard ran in full -- `jbx -l setup-system` set the
+    machine up. `-l` now reads the script first and refuses, naming the
+    line, one whose top level runs a command; a top level of function
+    definitions, assignments, `source`, `set` and the like, or work behind a
+    main guard (`if [[ "${BASH_SOURCE[0]}" == "$0" ]]`, or the libraries'
+    `(return 0 2>/dev/null) ||`), is still sourced and listed, library
+    functions included. Python scripts are parsed, as before.
 
 ## [0.9.0] - 2026-10-06
 
