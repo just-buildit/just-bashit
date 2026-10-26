@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **`jbx -l` lists under an exported `SHELLOPTS` (#121 follow-up).** The
+    child that sources the script inherited jbx's own `set -euo pipefail`
+    whenever the caller exported `SHELLOPTS`, as kcov does. `compgen -A   function` returns 1 while no function exists yet, so the child died on
+    its first line, and `make coverage` went red on main while `make test`
+    passed. The child now starts from bash's default options.
+
 - **Getting Started installs `jbx` (#116).** Its Installation section only
     offered the release tarball, so a reader who started there never got the
     one-line `get-jb.sh` installer every adopter points at. It now leads with
@@ -22,6 +28,7 @@
     dropped `-n`. All of them now fetch fresh into the run's temporary
     directory, removed on exit, so the bundle's libraries still resolve
     beside the script.
+
 - **`jbx -l` no longer runs the script it lists (#121).** `-l` lists a
     shell script's functions by sourcing it in a child bash, so a script
     without a main guard ran in full -- `jbx -l setup-system` set the

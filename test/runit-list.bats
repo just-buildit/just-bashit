@@ -121,3 +121,23 @@ setup() {
 	done
 	assert [ "${n}" -gt 0 ]
 }
+
+# kcov exports SHELLOPTS so the shells it traces pass their options on, and
+# with it jbx's own `set -euo pipefail` reached the child that sources the
+# script: `compgen -A function` returns 1 while no function exists yet, so the
+# child died on its first line, and `make coverage` went red on main while
+# `make test` passed. The child now starts from bash's default options. This
+# runs -l with errexit and nounset exported, as under kcov, so `make test`
+# sees what only coverage saw.
+@test '-l lists a script when the caller exports its shell options, as kcov does' {
+	printf '#!/usr/bin/env bash\nhello() { :; }\nworld() { :; }\n' \
+		>"${fixtures}/tool.sh"
+	# env -i: an exported function in the environment (bats has them) would
+	# make the child's first compgen succeed and hide the failure.
+	run env -i PATH="${PATH}" HOME="${HOME}" JB_FIXTURES="${JB_FIXTURES}" \
+		XDG_CACHE_HOME="${XDG_CACHE_HOME}" \
+		bash -c 'set -eu; export SHELLOPTS
+			just-runit -l https://fixture.invalid/tool.sh'
+	assert_success
+	assert_output "$(printf 'hello\nworld')"
+}
