@@ -35,6 +35,13 @@ ______________________________________________________________________
     ```bash
     make test
     ```
+    It also fails if the run changed the working tree (`git status`
+    before and after, submodules included), even when a test failed. To
+    iterate on a subset, pass bats arguments through make rather than
+    calling bats by hand, which skips that check:
+    ```bash
+    make test-fast BATS_ARGS='-f deps test/setup-system.bats'
+    ```
 - [ ] New scripts have a corresponding `test/<script>.bats` file.
 - [ ] New functions in existing libraries have test coverage.
 

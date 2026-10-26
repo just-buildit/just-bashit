@@ -219,6 +219,12 @@ jobs:
       - name: Install dependencies (bootstrap.toml)
         run: bash src/just_bashit/install-deps.sh --verbose
 
+      # Root in the container, the checkout owned by the runner's user: the
+      # same "dubious ownership" refusal as the test job, and `make coverage`
+      # runs the same tree-unchanged gate, so it needs the same trust.
+      - name: Trust the checkout for git
+        run: git config --global --add safe.directory '*'
+
       - name: Run tests with coverage
         run: make coverage
 
