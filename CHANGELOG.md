@@ -16,6 +16,20 @@
 
 ### Fixed
 
+- **`jbx -l` lists a script whatever the caller's shell environment
+    (#121 follow-up).** The child that sources the script inherited two
+    things from the caller. Through an exported `SHELLOPTS` it got jbx's own
+    `set -euo pipefail`, and `compgen -A function` returns 1 while no
+    function exists yet, so the child died on its first line. Through
+    `BASH_ENV` it got kcov's tracer, whose `PS4` names `BASH_SOURCE`, and a
+    script with `set -u` made the next traced line fail. `make coverage`
+    went red on main while `make test` passed. The child now runs without
+    either, from bash's defaults.
+
+- **`CI passed` waits for `coverage`.** A red `coverage` merged #142,
+    because the one required check did not wait for it. `make   workflow-check` now fails on any pull-request job that `CI passed` does
+    not wait for, unless the job runs after it.
+
 - **Getting Started installs `jbx` (#116).** Its Installation section only
     offered the release tarball, so a reader who started there never got the
     one-line `get-jb.sh` installer every adopter points at. It now leads with

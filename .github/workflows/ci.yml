@@ -286,7 +286,7 @@ jobs:
     name: CI passed
     # `changes` too: if it fails, nothing below it ran, and that is not a
     # pass. A job it skipped (an already-tested tree) is `skipped`, which is.
-    needs: [changes, test, test-macos, test-windows, lint]
+    needs: [changes, test, test-macos, test-windows, coverage, lint]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
