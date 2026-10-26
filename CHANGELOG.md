@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`jbx --no-verify` skips TLS certificate checks on jbx's own downloads.**
+    This is for networks whose proxy re-signs TLS with a CA the box does not
+    trust, where every fetch failed with a certificate error. It reaches
+    every curl call jbx makes: the script, the `aliases.toml` lookup, the
+    just-bashit co-fetch bundle, the bare-name probe and the nested uv
+    install. `just-runit install --no-verify` passes it to every tool it
+    fetches. It is long-only, because `-k` is the checksum. It is read only
+    before SPEC, so a script's own `--no-verify` argument still reaches the
+    script. It warns on every run, and pairs with `-k HASH`.
+
 ### Fixed
 
 - **Getting Started installs `jbx` (#116).** Its Installation section only
@@ -22,6 +34,7 @@
     dropped `-n`. All of them now fetch fresh into the run's temporary
     directory, removed on exit, so the bundle's libraries still resolve
     beside the script.
+
 - **`jbx -l` no longer runs the script it lists (#121).** `-l` lists a
     shell script's functions by sourcing it in a child bash, so a script
     without a main guard ran in full -- `jbx -l setup-system` set the
