@@ -70,13 +70,14 @@ ______________________________________________________________________
 
 ## SPEC forms
 
-| Form                    | Example                       | Resolves to                                                                       |
-| ----------------------- | ----------------------------- | --------------------------------------------------------------------------------- |
-| `NAME`                  | `install-deps`                | default namespace (`just-buildit.github.io`) via `aliases.toml` then direct probe |
-| `NS:NAME`               | `just-bashit:logging`         | namespace `NS` — built-in: `just-buildit`, `just-bashit`                          |
-| `gh:USER/REPO/PATH`     | `gh:user/repo/tool.sh`        | GitHub raw content, default branch `main`                                         |
-| `gh:USER/REPO/PATH@REF` | `gh:user/repo/tool.sh@v2.1.0` | GitHub raw content at a specific ref/tag/SHA                                      |
-| `https://...`           | `https://example.com/tool.sh` | Any HTTPS URL                                                                     |
+| Form                                       | Example                                        | Resolves to                                                                       |
+| ------------------------------------------ | ---------------------------------------------- | --------------------------------------------------------------------------------- |
+| `NAME`                                     | `install-deps`                                 | default namespace (`just-buildit.github.io`) via `aliases.toml` then direct probe |
+| `NS:NAME`                                  | `just-bashit:logging`                          | namespace `NS` — built-in: `just-buildit`, `just-bashit`                          |
+| `gh:USER/REPO/PATH`                        | `gh:user/repo/tool.sh`                         | GitHub raw content, default branch `main`                                         |
+| `gh:USER/REPO/PATH@REF`                    | `gh:user/repo/tool.sh@v2.1.0`                  | GitHub raw content at a specific ref/tag/SHA                                      |
+| `https://...`                              | `https://example.com/tool.sh`                  | Any HTTPS URL                                                                     |
+| `[FORGE+]https://HOST/PROJECT//PATH[@REF]` | `https://gitlab.com/acme/tools//ci/tool.sh@v2` | A script by its path in a repository; see [Repository URLs](#repository-urls)     |
 
 **Resolution order for `NAME` / `NS:NAME`:**
 
@@ -96,6 +97,9 @@ jbx gh:user/repo/scripts/deploy.sh@v1.4.0 run --env prod
 
 # Full URL
 jbx https://example.com/tools/setup.sh configure
+
+# A script in a repository, on any supported forge
+jbx https://gitlab.com/acme/tools//ci/deploy.sh@v1.4.0 run --env prod
 ```
 
 !!! note "just-bashit namespace co-fetch"
@@ -104,6 +108,59 @@ jbx https://example.com/tools/setup.sh configure
     libraries. When you use `just-bashit:NAME`, `jbx` co-fetches the entire `src/`
     directory into a single cache folder so relative inter-source calls
     resolve correctly — you don't have to manage this yourself.
+
+### Repository URLs
+
+Name a script by the repository it lives in and its path there, instead of
+by a host's raw-content URL:
+
+```text
+[FORGE+]https://HOST[:PORT]/PROJECT//PATH[@REF]
+```
+
+- **`//`** separates the repository from the path inside it. It cannot be a
+    colon, since the scheme and a port already use one. A URL path never
+    holds `//`, so an ordinary script URL keeps its meaning.
+- **`@REF`** is a branch, tag or commit SHA. Without it, jbx fetches `HEAD`,
+    the repository's default branch. (`gh:` keeps its `main` default.) A ref
+    containing `/` is refused, because a raw URL cannot tell it from the
+    path; pin a tag or SHA instead.
+- **`FORGE+`** says which forge serves the host. The four public hosts below
+    need no prefix. Any other host must name its forge, because jbx does not
+    guess a raw-file layout. An unknown host is refused, and the error says
+    which prefix to add.
+
+| `FORGE`              | Known host      | Fetches                                                                          | Covers                                         |
+| -------------------- | --------------- | -------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `github`             | `github.com`    | `raw.githubusercontent.com/O/R/REF/PATH` (another host: `HOST/O/R/raw/REF/PATH`) | GitHub, GitHub Enterprise Server               |
+| `gitlab`             | `gitlab.com`    | `HOST/GROUP/.../PROJECT/-/raw/REF/PATH`                                          | GitLab.com, self-managed GitLab; nested groups |
+| `gitea` or `forgejo` | `codeberg.org`  | `HOST/O/R/raw/REF/PATH`                                                          | Gitea, Forgejo, Codeberg                       |
+| `bitbucket`          | `bitbucket.org` | `bitbucket.org/O/R/raw/REF/PATH`                                                 | Bitbucket Cloud only                           |
+
+```bash
+jbx https://github.com/acme/tools//bin/tool.sh                 # default branch
+jbx https://codeberg.org/acme/tools//tool.sh@v2 say hi         # a tag, then fn + args
+jbx gitea+https://git.example.com:3000/ops/tools//deploy.sh@0123abc deploy
+jbx gitlab+https://gitlab.example.com/platform/ci/tools//lint.sh
+```
+
+The repository URL resolves to the raw URL in the table, which is then
+fetched like any other URL. Caching, `-r`, `-n`, `-k HASH`, `-f`, `-l`,
+`--no-verify`, function calls and argument forwarding all behave as they do
+for a plain URL.
+
+**Transports and authentication.** Fetching is HTTPS only, and the TLS
+certificate is checked. jbx sends no credentials and fetches straight from the
+host, never through a third-party service, so a private repository fails as
+it would for an anonymous browser. These are refused, each with an error
+saying what to use instead:
+
+- `http://`, `ssh://` and `git@host:` URLs;
+- credentials in the URL (`user:token@host`), which would otherwise be
+    written to logs and cache metadata;
+- Bitbucket Server and Data Center, which serve raw files on another layout;
+- an empty or absolute path, or one containing `..`;
+- a repository that is not `OWNER/REPO`, except for GitLab groups.
 
 ______________________________________________________________________
 
