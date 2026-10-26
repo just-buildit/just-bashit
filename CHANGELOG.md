@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Getting Started installs `jbx` (#116).** Its Installation section only
+    offered the release tarball, so a reader who started there never got the
+    one-line `get-jb.sh` installer every adopter points at. It now leads with
+    that line and links Getting just-runit for the details. The tarball route
+    stays for sourcing the libraries, and its instructions were wrong: the
+    tarball has no top-level directory and no README, and its libraries are
+    under `src/just_bashit/`. It now extracts into `just-bashit/`, the path
+    every example in the docs sources from.
+
 ## [0.9.0] - 2026-10-06
 
 ### Added
