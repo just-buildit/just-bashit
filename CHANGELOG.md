@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-26
+
 ### Added
 
 - **`jbx --no-verify` skips TLS certificate checks on jbx's own downloads.**
