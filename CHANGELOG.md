@@ -13,6 +13,17 @@
     fetches. It is long-only, because `-k` is the checksum. It is read only
     before SPEC, so a script's own `--no-verify` argument still reaches the
     script. It warns on every run, and pairs with `-k HASH`.
+- **jbx runs a script by its path in a repository, on any forge (#136).**
+    `[FORGE+]https://HOST[:PORT]/PROJECT//PATH[@REF]` replaces spelling out
+    each host's raw-content URL. `//` separates the repository from the
+    path, and `REF` defaults to the repository's default branch. github.com,
+    gitlab.com, codeberg.org and bitbucket.org are known. Any other host
+    names its forge (`github+`, `gitlab+`, `gitea+`/`forgejo+`), so
+    self-hosted Gitea, GitLab and GitHub Enterprise work, ports included.
+    Each raw layout was measured against live repositories. The SPEC
+    resolves to the raw URL and is then fetched as before, so caching,
+    `-k`, `-n` and argument forwarding are unchanged. HTTP, SSH, credentials
+    in the URL and unknown hosts are refused, each with an explicit error.
 
 ### Fixed
 
