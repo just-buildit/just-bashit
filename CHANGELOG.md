@@ -34,6 +34,7 @@
     dropped `-n`. All of them now fetch fresh into the run's temporary
     directory, removed on exit, so the bundle's libraries still resolve
     beside the script.
+
 - **`jbx -l` no longer runs the script it lists (#121).** `-l` lists a
     shell script's functions by sourcing it in a child bash, so a script
     without a main guard ran in full -- `jbx -l setup-system` set the
