@@ -80,7 +80,7 @@ iso-8601-basic
 | ----------------------------------- | ----------------------------------------------------------------- |
 | [bootstrap.toml](bootstrap-toml.md) | The manifest — system packages and fetched tools                  |
 | [just-runit](just-runit.md)         | Ephemeral runner — fetch a script, call a function, discard       |
-| [install-deps](install-deps.md)     | Install packages declared in a `bootstrap.toml` / `jb-deps.toml`  |
+| [install-deps](install-deps.md)     | Install packages declared in a `bootstrap.toml`                   |
 | [setup-system](setup-system.md)     | Take a fresh machine to a working one — packages, shell, ssh, git |
 | [inspect](inspect.md)               | Snapshot installed package versions into a `.versions` file       |
 

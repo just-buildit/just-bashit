@@ -64,7 +64,7 @@ teardown() {
 	return 0
 }
 
-# A jb.toml covering every package manager, so the deps step resolves
+# A bootstrap.toml covering every package manager, so the deps step resolves
 # whatever the host actually runs.
 _write_deps_toml() {
 	cat >"${1}" <<-'EOF'
@@ -223,7 +223,7 @@ _write_deps_toml() {
 }
 
 @test '[tools.setup-system].steps restricts the default step set' {
-	cat >jb.toml <<-'EOF'
+	cat >bootstrap.toml <<-'EOF'
 		[tools.setup-system]
 		source = "just-bashit:setup-system"
 		steps = ["shell", "git"]
@@ -236,7 +236,7 @@ _write_deps_toml() {
 }
 
 @test 'explicit -s overrides the toml steps key' {
-	cat >jb.toml <<-'EOF'
+	cat >bootstrap.toml <<-'EOF'
 		[tools.setup-system]
 		steps = ["shell"]
 	EOF
@@ -912,13 +912,13 @@ _win_pkg_stubs() {
 }
 
 @test 'deps step delegates to install-deps' {
-	_write_deps_toml jb.toml
+	_write_deps_toml bootstrap.toml
 	run setup-system.sh -n -s deps
 	assert_success
 	assert_output --partial "installing packages from the baseline toolchain"
-	assert_output --partial "installing packages from jb.toml"
+	assert_output --partial "installing packages from bootstrap.toml"
 	assert_output --partial "curl"
-	assert_output --partial "deps:    ok (baseline toolchain + jb.toml)"
+	assert_output --partial "deps:    ok (baseline toolchain + bootstrap.toml)"
 }
 
 # Every manager install-deps can drive must have a baseline, or the fresh
@@ -948,12 +948,23 @@ _win_pkg_stubs() {
 	done
 }
 
-@test 'deps step prefers jb-deps.toml over jb.toml' {
-	_write_deps_toml jb-deps.toml
-	printf '[runtime.apt]\npackages = ["wget"]\n' >jb.toml
+# The legacy names are no longer read (#30). setup-system looks for the
+# manifest twice -- for [tools.setup-system].steps when no -s is given, and
+# in the deps step -- and each refuses a legacy file rather than quietly
+# installing the baseline alone.
+@test 'deps step refuses a legacy jb.toml, naming the rename' {
+	_write_deps_toml jb.toml
 	run setup-system.sh -n -s deps
-	assert_success
-	assert_output --partial "installing packages from jb-deps.toml"
+	assert_failure 1
+	assert_output --partial 'error: jb.toml is no longer read, rename it: git mv jb.toml bootstrap.toml'
+	refute_output --partial 'deps:    ok'
+}
+
+@test 'step resolution refuses a legacy jb-deps.toml, naming the rename' {
+	_write_deps_toml jb-deps.toml
+	run setup-system.sh -n
+	assert_failure 1
+	assert_output 'error: jb-deps.toml is no longer read, rename it: git mv jb-deps.toml bootstrap.toml'
 }
 
 # ---------------------------------------------------------------------------

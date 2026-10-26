@@ -213,36 +213,41 @@ EOF
 	assert_output --partial "curl"
 }
 
-@test 'auto-discovers jb-deps.toml in CWD' {
-	local tmpdir="${BATS_TEST_TMPDIR}/autodiscover"
+# The legacy names are no longer read (#30). One alone is refused, naming
+# the rename, and stdin is NOT read in its place: the stdin fed here would
+# install wget, which must not appear.
+@test 'a jb-deps.toml alone is refused, naming the rename' {
+	local tmpdir="${BATS_TEST_TMPDIR}/legacy_jbdeps"
 	mkdir -p "${tmpdir}"
 	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/jb-deps.toml"
 	cd "${tmpdir}"
-	run install-deps.sh -n -s apt
-	assert_success
-	assert_output --partial "curl"
+	run install-deps.sh -n -s apt <<<$'[runtime.apt]\npackages = ["wget"]'
+	assert_failure 1
+	assert_output 'error: jb-deps.toml is no longer read, rename it: git mv jb-deps.toml bootstrap.toml'
 }
 
-@test 'auto-discovers jb.toml in CWD' {
-	local tmpdir="${BATS_TEST_TMPDIR}/autodiscover_jbtoml"
+@test 'a jb.toml alone is refused, naming the rename' {
+	local tmpdir="${BATS_TEST_TMPDIR}/legacy_jbtoml"
 	mkdir -p "${tmpdir}"
 	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/jb.toml"
 	cd "${tmpdir}"
-	run install-deps.sh -n -s apt
-	assert_success
-	assert_output --partial "curl"
+	run install-deps.sh -n -s apt <<<$'[runtime.apt]\npackages = ["wget"]'
+	assert_failure 1
+	assert_output 'error: jb.toml is no longer read, rename it: git mv jb.toml bootstrap.toml'
 }
 
-@test 'jb-deps.toml takes priority over jb.toml' {
-	local tmpdir="${BATS_TEST_TMPDIR}/priority"
+# A file named on the command line is what the user asked for; a legacy
+# file beside it is not consulted at all.
+@test 'an explicit deps file is read beside a legacy jb.toml' {
+	local tmpdir="${BATS_TEST_TMPDIR}/legacy_explicit"
 	mkdir -p "${tmpdir}"
-	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/jb-deps.toml"
-	printf '[runtime.apt]\npackages = ["wget"]\n' >"${tmpdir}/jb.toml"
+	printf '[runtime.apt]\npackages = ["legacy-pkg"]\n' >"${tmpdir}/jb.toml"
 	cd "${tmpdir}"
-	run install-deps.sh -n -s apt
+	run install-deps.sh -n -s apt "${GROUPED_FILE}"
 	assert_success
 	assert_output --partial "curl"
-	refute_output --partial "wget"
+	refute_output --partial "legacy-pkg"
+	refute_output --partial "no longer read"
 }
 
 @test 'falls back to stdin when no file present' {
@@ -530,7 +535,7 @@ EOF
 	assert [ "${aaa_pos}" -lt "${zzz_pos}" ]
 }
 
-# --- bootstrap.toml (the name; jb.toml and jb-deps.toml are deprecated) ------
+# --- bootstrap.toml (the only name read; see #30) ----------------------------
 
 @test 'auto-discovers bootstrap.toml in CWD' {
 	local tmpdir="${BATS_TEST_TMPDIR}/autodiscover_bootstrap"
@@ -542,7 +547,7 @@ EOF
 	assert_output --partial "curl"
 }
 
-@test 'bootstrap.toml takes priority over both deprecated names' {
+@test 'bootstrap.toml is read, and a legacy name beside it ignored' {
 	local tmpdir="${BATS_TEST_TMPDIR}/bootstrap_priority"
 	mkdir -p "${tmpdir}"
 	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/bootstrap.toml"
@@ -554,24 +559,7 @@ EOF
 	assert_output --partial "curl"
 	refute_output --partial "wget"
 	refute_output --partial "nano"
-}
-
-@test 'bootstrap.toml is silent; the deprecated names warn' {
-	local tmpdir="${BATS_TEST_TMPDIR}/deprecation_notice"
-	mkdir -p "${tmpdir}/new" "${tmpdir}/old"
-	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/new/bootstrap.toml"
-	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/old/jb.toml"
-
-	cd "${tmpdir}/new"
-	run install-deps.sh -n -s apt
-	assert_success
-	refute_output --partial "deprecated"
-
-	cd "${tmpdir}/old"
-	run install-deps.sh -n -s apt
-	assert_success
-	assert_output --partial "jb.toml is deprecated"
-	assert_output --partial "bootstrap.toml"
+	refute_output --partial "no longer read"
 }
 
 # ---------------------------------------------------------------------------
