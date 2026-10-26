@@ -60,3 +60,17 @@ setup() {
 	assert_success
 	refute_output --partial 'failed'
 }
+
+# `jb.toml` is no longer read (#30). The nearest one on the walk up is
+# refused, naming the rename -- even with a bootstrap.toml further up, whose
+# tools are some other project's and must not be fetched in its place.
+@test 'install refuses a legacy jb.toml on the walk up, naming the rename' {
+	mkdir -p "${BATS_TEST_TMPDIR}/proj/sub/deeper"
+	printf '[tools.tool]\nsource = "https://fixture.invalid/tool.sh"\n' \
+		>"${BATS_TEST_TMPDIR}/proj/sub/jb.toml"
+	cd "${BATS_TEST_TMPDIR}/proj/sub/deeper"
+	run just-runit install
+	assert_failure 1
+	assert_output "just-runit: ${BATS_TEST_TMPDIR}/proj/sub/jb.toml is no longer read, rename it: git mv jb.toml bootstrap.toml"
+	refute [ -d "${XDG_CACHE_HOME}" ]
+}

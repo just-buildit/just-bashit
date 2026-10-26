@@ -302,8 +302,8 @@ is fetched as `just-runit -f` fetches it.
   -> just-bashit:install-deps ok
 ```
 
-`jb.toml` is still read, and warns. See
-[bootstrap.toml](bootstrap-toml.md).
+A legacy `jb.toml` met on the walk, before any `bootstrap.toml`, is refused
+with the rename to make. See [bootstrap.toml](bootstrap-toml.md).
 
 ### `just-runit cache`
 

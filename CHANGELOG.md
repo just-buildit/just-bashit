@@ -22,6 +22,18 @@
     directory, removed on exit, so the bundle's libraries still resolve
     beside the script.
 
+### Removed
+
+- **BREAKING: `jb.toml` and `jb-deps.toml` are no longer read (#30).**
+    `install-deps`, `inspect`, `setup-system` and `just-runit install` read
+    them, with a warning, since 0.5.0 renamed the file to `bootstrap.toml`;
+    every adopter has since renamed. A directory holding one of them and no
+    `bootstrap.toml` is now refused, with one line naming the fix
+    (`git mv jb.toml bootstrap.toml`), rather than treated as having no
+    manifest and silently installing or reporting nothing. A
+    `bootstrap.toml` beside a legacy file is read and the legacy file
+    ignored; an explicit path argument is read whatever else is present.
+
 ## [0.9.0] - 2026-10-06
 
 ### Added

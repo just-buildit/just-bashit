@@ -70,13 +70,13 @@ just-bashit setup-system
 dry run — nothing will be changed
 
 ==> deps — system packages
-    no bootstrap.toml or jb-deps.toml in /home/you — nothing to install
+    installing packages from the baseline toolchain
 ==> shell — bash configuration
     creating:   /home/you/.config/just-bashit/bashrc.sh
     would append to /home/you/.bashrc: if [ -r "$HOME/... "; fi
 ...
 summary
-    deps:    skipped (no deps file)
+    deps:    ok (baseline toolchain)
     shell:   ok (/home/you/.config/just-bashit)
 ```
 

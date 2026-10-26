@@ -20,12 +20,14 @@ ______________________________________________________________________
 When no file argument is given, `install-deps` searches the current working
 directory for a deps file in this order:
 
-| Priority | Source            | When to use                                 |
-| -------- | ----------------- | ------------------------------------------- |
-| 1        | explicit path arg | `jbx install-deps myfile.toml`              |
-| 2        | `jb-deps.toml`    | standalone deps-only file                   |
-| 3        | `bootstrap.toml`  | combined tool + deps manifest (recommended) |
-| 4        | stdin             | piped input, remote URLs                    |
+| Priority | Source            | When to use                    |
+| -------- | ----------------- | ------------------------------ |
+| 1        | explicit path arg | `jbx install-deps myfile.toml` |
+| 2        | `bootstrap.toml`  | combined tool + deps manifest  |
+| 3        | stdin             | piped input, remote URLs       |
+
+A legacy `jb.toml` or `jb-deps.toml` in place of `bootstrap.toml` is
+refused; see [bootstrap.toml](bootstrap-toml.md#removed-names).
 
 **Recommended:** put deps directly in `bootstrap.toml` alongside your tool
 declarations — one file covers everything `jb` needs.
@@ -63,8 +65,8 @@ packages = ["doxygen", "graphviz"]
 packages = ["doxygen", "graphviz"]
 ```
 
-Use a standalone `jb-deps.toml` only when the project doesn't have a
-`bootstrap.toml` or you need to keep deps separate.
+To keep deps in a separate file, name it on the command line:
+`jbx install-deps deps.toml`.
 
 ______________________________________________________________________
 

@@ -54,21 +54,25 @@ are singular and stable.
 
 ______________________________________________________________________
 
-## Deprecated names
+## Removed names
 
-`jb.toml` and `jb-deps.toml` are still read, and print a warning:
+`jb.toml` and `jb-deps.toml` are no longer read. A directory holding one of
+them and no `bootstrap.toml` is refused, rather than treated as having no
+manifest, so a project that declares its packages never silently installs
+nothing:
 
 ```
-warning: jb.toml is deprecated, rename it to bootstrap.toml
+error: jb.toml is no longer read, rename it: git mv jb.toml bootstrap.toml
 ```
 
-Resolution order is `bootstrap.toml`, then `jb-deps.toml`, then `jb.toml`.
-An explicit path argument beats all three.
+`just-runit install` refuses the nearest `jb.toml` on its walk up the same
+way. A `bootstrap.toml` beside a legacy file is read and the legacy file
+ignored, and an explicit path argument is read whatever else is present.
 
-Both legacy names are read during the transition because these scripts are
-fetched live from the CDN on every CI run — a hard cutover would break every
-repository that had not yet renamed, in the window between the publish and
-their rename. They will be removed in a later release.
+Both names were read, with a warning, from 0.5.0 until every adopter had
+renamed (#30): these scripts are fetched live from the CDN on every CI run,
+so a hard cutover would have broken every repository in the window between
+the publish and its rename.
 
 To migrate:
 
