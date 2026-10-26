@@ -109,17 +109,41 @@ ______________________________________________________________________
 
 ## Options
 
-| Flag      | Description                                                     |
-| --------- | --------------------------------------------------------------- |
-| `-l`      | List functions the script defines, then exit (see below)        |
-| `-f`      | Fetch only — cache the script, print its path, run nothing      |
-| `-r`      | Refresh — re-fetch even if the cache is fresh                   |
-| `-n`      | No-cache — fetch fresh, discard on exit; the cache is untouched |
-| `-c`      | Clean environment (minimal env, like `sudo` without `-E`)       |
-| `-p VARS` | Comma-separated vars to pass through when using `-c`            |
-| `-t TTL`  | Cache TTL in seconds. Default `3600`. `0` = keep forever        |
-| `-k HASH` | Verify before running: `sha256:HASH` or `md5:HASH`              |
-| `-v`      | Verbose — prints fetch/cache activity to stderr                 |
+| Flag          | Description                                                     |
+| ------------- | --------------------------------------------------------------- |
+| `-l`          | List functions the script defines, then exit (see below)        |
+| `-f`          | Fetch only — cache the script, print its path, run nothing      |
+| `-r`          | Refresh — re-fetch even if the cache is fresh                   |
+| `-n`          | No-cache — fetch fresh, discard on exit; the cache is untouched |
+| `-c`          | Clean environment (minimal env, like `sudo` without `-E`)       |
+| `-p VARS`     | Comma-separated vars to pass through when using `-c`            |
+| `-t TTL`      | Cache TTL in seconds. Default `3600`. `0` = keep forever        |
+| `-k HASH`     | Verify before running: `sha256:HASH` or `md5:HASH`              |
+| `-v`          | Verbose — prints fetch/cache activity to stderr                 |
+| `--no-verify` | Skip TLS certificate checks on jbx's own downloads (see below)  |
+
+### `--no-verify`
+
+Some networks re-sign TLS with a CA of their own, usually a proxy that
+inspects traffic. On a box that does not trust that CA, every jbx download
+fails with a certificate error. `--no-verify` makes jbx's own downloads skip
+the check, as `curl --insecure` does. That covers the script, the
+`aliases.toml` lookup, the just-bashit co-fetch bundle, the probe that
+resolves a bare name, and the nested uv install. It prints a warning on
+every run.
+
+```bash
+jbx --no-verify -k sha256:abc123def456 https://example.com/tool.sh run
+```
+
+- It has no short form, since `-k` is the checksum, so it is hard to type by
+    accident. It is read only before SPEC: `jbx tool.sh --no-verify` passes
+    the flag to the script.
+- Without TLS checks, anything on the path can change what is downloaded.
+    Pin `-k HASH` so the script is still verified before it runs.
+- It changes only the downloads jbx makes. A script that fetches more
+    (`install-deps`, `setup-system`) does so with its own curl and the box's
+    CA store, so trusting the CA is the lasting fix.
 
 ______________________________________________________________________
 
@@ -330,6 +354,9 @@ is fetched as `just-runit -f` fetches it.
 
 A legacy `jb.toml` met on the walk, before any `bootstrap.toml`, is refused
 with the rename to make. See [bootstrap.toml](bootstrap-toml.md).
+
+`just-runit install --no-verify` fetches every tool with
+[`--no-verify`](#-no-verify).
 
 ### `just-runit cache`
 
