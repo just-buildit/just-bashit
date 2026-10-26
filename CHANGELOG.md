@@ -12,6 +12,7 @@
     tarball has no top-level directory and no README, and its libraries are
     under `src/just_bashit/`. It now extracts into `just-bashit/`, the path
     every example in the docs sources from.
+
 - **`jbx -n` leaves the cache untouched for just-bashit scripts and
     aliases (#122).** A `just-bashit:` spec, a `jbs/` URL and an alias into
     `jbs/` (`install-deps`, `setup-system`) took the co-fetch path before
@@ -21,6 +22,17 @@
     dropped `-n`. All of them now fetch fresh into the run's temporary
     directory, removed on exit, so the bundle's libraries still resolve
     beside the script.
+
+- **The tree-unchanged test gate covers every run and every outcome
+    (#113).** It lived inline in `make test`'s recipe, so `make test-fast`
+    and `make coverage` ran without it, and a bats failure aborted the
+    recipe before the after-diff: a red run that also damaged the tree
+    reported only the test failure. It is now one script,
+    `scripts/tree_unchanged.sh`, wrapped around all three; it diffs after a
+    failing run too and keeps that run's exit status. Its sabotage proof is
+    kept as `test/tree-unchanged.bats`, and a new `BATS_ARGS` (default
+    `test`) runs a subset through make:
+    `make test-fast BATS_ARGS='-f deps test/setup-system.bats'`.
 
 ### Removed
 
@@ -33,16 +45,6 @@
     manifest and silently installing or reporting nothing. A
     `bootstrap.toml` beside a legacy file is read and the legacy file
     ignored; an explicit path argument is read whatever else is present.
-- **The tree-unchanged test gate covers every run and every outcome
-    (#113).** It lived inline in `make test`'s recipe, so `make test-fast`
-    and `make coverage` ran without it, and a bats failure aborted the
-    recipe before the after-diff: a red run that also damaged the tree
-    reported only the test failure. It is now one script,
-    `scripts/tree_unchanged.sh`, wrapped around all three; it diffs after a
-    failing run too and keeps that run's exit status. Its sabotage proof is
-    kept as `test/tree-unchanged.bats`, and a new `BATS_ARGS` (default
-    `test`) runs a subset through make:
-    `make test-fast BATS_ARGS='-f deps test/setup-system.bats'`.
 
 ## [0.9.0] - 2026-10-06
 
