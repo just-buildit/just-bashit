@@ -73,7 +73,7 @@ ______________________________________________________________________
 | Form                                       | Example                                        | Resolves to                                                                       |
 | ------------------------------------------ | ---------------------------------------------- | --------------------------------------------------------------------------------- |
 | `NAME`                                     | `install-deps`                                 | default namespace (`just-buildit.github.io`) via `aliases.toml` then direct probe |
-| `NS:NAME`                                  | `just-bashit:logging`                          | namespace `NS` — built-in: `just-buildit`, `just-bashit`                          |
+| `NS:NAME`                                  | `just-bashit:logging`                          | namespace `NS` — built-in: `just-buildit`, `just-bashit`, `just-makeit`           |
 | `gh:USER/REPO/PATH`                        | `gh:user/repo/tool.sh`                         | GitHub raw content, default branch `main`                                         |
 | `gh:USER/REPO/PATH@REF`                    | `gh:user/repo/tool.sh@v2.1.0`                  | GitHub raw content at a specific ref/tag/SHA                                      |
 | `https://...`                              | `https://example.com/tool.sh`                  | Any HTTPS URL                                                                     |
@@ -92,6 +92,9 @@ jbx install-deps -s apt
 # Explicit just-bashit namespace
 jbx just-bashit:logging log -t SUCCESS "deployed"
 
+# Explicit just-makeit namespace
+jbx just-makeit:install-deps
+
 # GitHub shorthand, pinned to a tag
 jbx gh:user/repo/scripts/deploy.sh@v1.4.0 run --env prod
 
@@ -101,6 +104,15 @@ jbx https://example.com/tools/setup.sh configure
 # A script in a repository, on any supported forge
 jbx https://gitlab.com/acme/tools//ci/deploy.sh@v1.4.0 run --env prod
 ```
+
+!!! note "just-makeit namespace"
+
+    `just-makeit:NAME` is an ordinary URL-base namespace, like the default
+    one, rooted at `https://just-buildit.github.io/just-makeit`. It holds the
+    tools that just-makeit publishes for its own users, such as
+    `install-deps` (the build-dependency installer). It resolves through that
+    site's `aliases.toml` first, then the direct `NAME.sh` / `NAME.py` probe,
+    and has no co-fetch bundle.
 
 !!! note "just-bashit namespace co-fetch"
 
