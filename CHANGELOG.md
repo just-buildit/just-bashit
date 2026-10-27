@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`jbx just-makeit:NAME` resolves against the just-makeit site.** A new
+    built-in namespace rooted at `https://just-buildit.github.io/just-makeit`,
+    resolved like the default one: its `aliases.toml`, then a direct
+    `NAME.sh` / `NAME.py` probe. The built-in namespaces are now one table
+    that the resolver, the unknown-namespace error and `-h` all read.
+
 ## [0.10.0] - 2026-10-26
 
 ### Added
