@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`deploy-docs` no longer fails on a pure version-bump commit (#151).** A
+    release PR runs no test matrix, so it uploads no `test-report-xml`, and
+    the step that reused the PR run's reports failed the download, leaving
+    the docs site and the Pages mirror (`_VERSION`) one release behind.
+    `scripts/docs-reports.sh` now falls back to the newest successful `main`
+    run that kept the reports, and when none did, deploys without them with
+    a `::warning::`. Only an API error fails the step.
+
 ## [0.11.0] - 2026-10-27
 
 ### Added
