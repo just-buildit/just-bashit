@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-27
+
 ### Added
 
 - **`jbx just-makeit:NAME` resolves against the just-makeit site.** A new
