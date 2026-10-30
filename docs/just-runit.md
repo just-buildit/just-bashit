@@ -70,13 +70,14 @@ ______________________________________________________________________
 
 ## SPEC forms
 
-| Form                    | Example                       | Resolves to                                                                       |
-| ----------------------- | ----------------------------- | --------------------------------------------------------------------------------- |
-| `NAME`                  | `install-deps`                | default namespace (`just-buildit.github.io`) via `aliases.toml` then direct probe |
-| `NS:NAME`               | `just-bashit:logging`         | namespace `NS` — built-in: `just-buildit`, `just-bashit`                          |
-| `gh:USER/REPO/PATH`     | `gh:user/repo/tool.sh`        | GitHub raw content, default branch `main`                                         |
-| `gh:USER/REPO/PATH@REF` | `gh:user/repo/tool.sh@v2.1.0` | GitHub raw content at a specific ref/tag/SHA                                      |
-| `https://...`           | `https://example.com/tool.sh` | Any HTTPS URL                                                                     |
+| Form                                       | Example                                        | Resolves to                                                                       |
+| ------------------------------------------ | ---------------------------------------------- | --------------------------------------------------------------------------------- |
+| `NAME`                                     | `install-deps`                                 | default namespace (`just-buildit.github.io`) via `aliases.toml` then direct probe |
+| `NS:NAME`                                  | `just-bashit:logging`                          | namespace `NS` — built-in: `just-buildit`, `just-bashit`, `just-makeit`           |
+| `gh:USER/REPO/PATH`                        | `gh:user/repo/tool.sh`                         | GitHub raw content, default branch `main`                                         |
+| `gh:USER/REPO/PATH@REF`                    | `gh:user/repo/tool.sh@v2.1.0`                  | GitHub raw content at a specific ref/tag/SHA                                      |
+| `https://...`                              | `https://example.com/tool.sh`                  | Any HTTPS URL                                                                     |
+| `[FORGE+]https://HOST/PROJECT//PATH[@REF]` | `https://gitlab.com/acme/tools//ci/tool.sh@v2` | A script by its path in a repository; see [Repository URLs](#repository-urls)     |
 
 **Resolution order for `NAME` / `NS:NAME`:**
 
@@ -91,12 +92,27 @@ jbx install-deps -s apt
 # Explicit just-bashit namespace
 jbx just-bashit:logging log -t SUCCESS "deployed"
 
+# Explicit just-makeit namespace
+jbx just-makeit:install-deps
+
 # GitHub shorthand, pinned to a tag
 jbx gh:user/repo/scripts/deploy.sh@v1.4.0 run --env prod
 
 # Full URL
 jbx https://example.com/tools/setup.sh configure
+
+# A script in a repository, on any supported forge
+jbx https://gitlab.com/acme/tools//ci/deploy.sh@v1.4.0 run --env prod
 ```
+
+!!! note "just-makeit namespace"
+
+    `just-makeit:NAME` is an ordinary URL-base namespace, like the default
+    one, rooted at `https://just-buildit.github.io/just-makeit`. It holds the
+    tools that just-makeit publishes for its own users, such as
+    `install-deps` (the build-dependency installer). It resolves through that
+    site's `aliases.toml` first, then the direct `NAME.sh` / `NAME.py` probe,
+    and has no co-fetch bundle.
 
 !!! note "just-bashit namespace co-fetch"
 
@@ -105,21 +121,98 @@ jbx https://example.com/tools/setup.sh configure
     directory into a single cache folder so relative inter-source calls
     resolve correctly — you don't have to manage this yourself.
 
+### Repository URLs
+
+Name a script by the repository it lives in and its path there, instead of
+by a host's raw-content URL:
+
+```text
+[FORGE+]https://HOST[:PORT]/PROJECT//PATH[@REF]
+```
+
+- **`//`** separates the repository from the path inside it. It cannot be a
+    colon, since the scheme and a port already use one. A URL path never
+    holds `//`, so an ordinary script URL keeps its meaning.
+- **`@REF`** is a branch, tag or commit SHA. Without it, jbx fetches `HEAD`,
+    the repository's default branch. (`gh:` keeps its `main` default.) A ref
+    containing `/` is refused, because a raw URL cannot tell it from the
+    path; pin a tag or SHA instead.
+- **`FORGE+`** says which forge serves the host. The four public hosts below
+    need no prefix. Any other host must name its forge, because jbx does not
+    guess a raw-file layout. An unknown host is refused, and the error says
+    which prefix to add.
+
+| `FORGE`              | Known host      | Fetches                                                                          | Covers                                         |
+| -------------------- | --------------- | -------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `github`             | `github.com`    | `raw.githubusercontent.com/O/R/REF/PATH` (another host: `HOST/O/R/raw/REF/PATH`) | GitHub, GitHub Enterprise Server               |
+| `gitlab`             | `gitlab.com`    | `HOST/GROUP/.../PROJECT/-/raw/REF/PATH`                                          | GitLab.com, self-managed GitLab; nested groups |
+| `gitea` or `forgejo` | `codeberg.org`  | `HOST/O/R/raw/REF/PATH`                                                          | Gitea, Forgejo, Codeberg                       |
+| `bitbucket`          | `bitbucket.org` | `bitbucket.org/O/R/raw/REF/PATH`                                                 | Bitbucket Cloud only                           |
+
+```bash
+jbx https://github.com/acme/tools//bin/tool.sh                 # default branch
+jbx https://codeberg.org/acme/tools//tool.sh@v2 say hi         # a tag, then fn + args
+jbx gitea+https://git.example.com:3000/ops/tools//deploy.sh@0123abc deploy
+jbx gitlab+https://gitlab.example.com/platform/ci/tools//lint.sh
+```
+
+The repository URL resolves to the raw URL in the table, which is then
+fetched like any other URL. Caching, `-r`, `-n`, `-k HASH`, `-f`, `-l`,
+`--no-verify`, function calls and argument forwarding all behave as they do
+for a plain URL.
+
+**Transports and authentication.** Fetching is HTTPS only, and the TLS
+certificate is checked. jbx sends no credentials and fetches straight from the
+host, never through a third-party service, so a private repository fails as
+it would for an anonymous browser. These are refused, each with an error
+saying what to use instead:
+
+- `http://`, `ssh://` and `git@host:` URLs;
+- credentials in the URL (`user:token@host`), which would otherwise be
+    written to logs and cache metadata;
+- Bitbucket Server and Data Center, which serve raw files on another layout;
+- an empty or absolute path, or one containing `..`;
+- a repository that is not `OWNER/REPO`, except for GitLab groups.
+
 ______________________________________________________________________
 
 ## Options
 
-| Flag      | Description                                                 |
-| --------- | ----------------------------------------------------------- |
-| `-l`      | List functions the script defines, then exit                |
-| `-f`      | Fetch only — cache the script, print its path, run nothing  |
-| `-r`      | Refresh — re-fetch even if the cache is fresh               |
-| `-n`      | No-cache — fetch once and discard (nothing written to disk) |
-| `-c`      | Clean environment (minimal env, like `sudo` without `-E`)   |
-| `-p VARS` | Comma-separated vars to pass through when using `-c`        |
-| `-t TTL`  | Cache TTL in seconds. Default `3600`. `0` = keep forever    |
-| `-k HASH` | Verify before running: `sha256:HASH` or `md5:HASH`          |
-| `-v`      | Verbose — prints fetch/cache activity to stderr             |
+| Flag          | Description                                                     |
+| ------------- | --------------------------------------------------------------- |
+| `-l`          | List functions the script defines, then exit (see below)        |
+| `-f`          | Fetch only — cache the script, print its path, run nothing      |
+| `-r`          | Refresh — re-fetch even if the cache is fresh                   |
+| `-n`          | No-cache — fetch fresh, discard on exit; the cache is untouched |
+| `-c`          | Clean environment (minimal env, like `sudo` without `-E`)       |
+| `-p VARS`     | Comma-separated vars to pass through when using `-c`            |
+| `-t TTL`      | Cache TTL in seconds. Default `3600`. `0` = keep forever        |
+| `-k HASH`     | Verify before running: `sha256:HASH` or `md5:HASH`              |
+| `-v`          | Verbose — prints fetch/cache activity to stderr                 |
+| `--no-verify` | Skip TLS certificate checks on jbx's own downloads (see below)  |
+
+### `--no-verify`
+
+Some networks re-sign TLS with a CA of their own, usually a proxy that
+inspects traffic. On a box that does not trust that CA, every jbx download
+fails with a certificate error. `--no-verify` makes jbx's own downloads skip
+the check, as `curl --insecure` does. That covers the script, the
+`aliases.toml` lookup, the just-bashit co-fetch bundle, the probe that
+resolves a bare name, and the nested uv install. It prints a warning on
+every run.
+
+```bash
+jbx --no-verify -k sha256:abc123def456 https://example.com/tool.sh run
+```
+
+- It has no short form, since `-k` is the checksum, so it is hard to type by
+    accident. It is read only before SPEC: `jbx tool.sh --no-verify` passes
+    the flag to the script.
+- Without TLS checks, anything on the path can change what is downloaded.
+    Pin `-k HASH` so the script is still verified before it runs.
+- It changes only the downloads jbx makes. A script that fetches more
+    (`install-deps`, `setup-system`) does so with its own curl and the box's
+    CA store, so trusting the CA is the lasting fix.
 
 ______________________________________________________________________
 
@@ -140,6 +233,10 @@ across all projects on the machine.
     network.sh
     ...
 ```
+
+`-n` neither reads nor writes any of it: the script, the co-fetch bundle and
+aliases.toml go to a temporary directory under `$TMPDIR`, removed when the run
+exits.
 
 The key is a SHA-256 of the full URL, so two different URLs that happen to
 return the same content get separate entries.
@@ -213,6 +310,32 @@ jbx -l just-bashit:logging
 # log-wait
 # trim-from
 ```
+
+`-l` lists a shell script's functions by **sourcing** it, so the functions it
+gets from the libraries it sources are listed too. That would run a script
+whose top level does work, so `-l` first reads the script and refuses one
+whose top level runs a command, naming the line, and sources nothing:
+
+```text
+just-runit: error: -l will not source setup-system: line 111 of ... runs a command at its top level:
+  while [[ $# -gt 0 ]]; do
+```
+
+What a listable script's top level may hold: comments, function definitions
+(any body), assignments (alone, or chained with `&&` / `||` after a test),
+`source` / `.`, `set`, `shopt`, `declare` / `readonly` / `export` / `unset`,
+a `read` from a heredoc, an `if` whose condition and branches hold only
+these, and a main guard, whose body never runs when the file is sourced:
+
+```bash
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi
+(return 0 2>/dev/null) || echo "This file must be sourced."
+```
+
+It guards against running a script by accident, not against a hostile one: a
+command substitution inside an assignment (`DIR=$(cd ... && pwd)`) still runs,
+as do the top levels of the libraries the script sources. A Python script is
+parsed (`ast`), never run, so `-l` lists any of them.
 
 **Pin to a checksum for auditable CI use:**
 
@@ -298,8 +421,11 @@ is fetched as `just-runit -f` fetches it.
   -> just-bashit:install-deps ok
 ```
 
-`jb.toml` is still read, and warns. See
-[bootstrap.toml](bootstrap-toml.md).
+A legacy `jb.toml` met on the walk, before any `bootstrap.toml`, is refused
+with the rename to make. See [bootstrap.toml](bootstrap-toml.md).
+
+`just-runit install --no-verify` fetches every tool with
+[`--no-verify`](#-no-verify).
 
 ### `just-runit cache`
 

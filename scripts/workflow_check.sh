@@ -25,6 +25,11 @@
 #      may only shrink; a stale entry fails too, so it cannot quietly         #
 #      describe a job that has since gained a pre-merge run.                 #
 #                                                                            #
+#   4. Every job a pull request runs feeds `CI passed` (ci-passed), the one  #
+#      required check, or comes after it. coverage did not: it went red on   #
+#      main for #142 and the merge went through, because nothing that         #
+#      gates a merge waited for it.                                           #
+#                                                                            #
 # Parsing is deliberately shallow and stdlib-only: awk over the keys this     #
 # needs, not a YAML library, because the gate has to run in the same          #
 # containers as the suite and those carry no Python. A parser that reads      #
@@ -183,6 +188,22 @@ for wf_path in "${WF_DIR}"/*.yml; do
 			rc=1
 		fi
 	done < <(printf '%s\n' "${wf}" | awk -F'\t' '$1=="mainonly"')
+
+	# 4. The required check waits for every job a pull request runs.
+	if printf '%s\n' "${wf}" | awk -F'\t' '$1=="job" && $2=="ci-passed"' |
+		grep -q .; then
+		mainonly=$(printf '%s\n' "${wf}" | awk -F'\t' '$1=="mainonly" { print $2 }')
+		while IFS=$'\t' read -r _ job; do
+			[[ -n "${job}" && "${job}" != "ci-passed" ]] || continue
+			grep -qxF -- "${job}" <<<"${mainonly}" && continue
+			_reaches "${wf}" ci-passed "${job}" && continue
+			_reaches "${wf}" "${job}" ci-passed && continue
+			echo "ERROR: ${name}: job '${job}' runs on pull requests, but"
+			echo "  'CI passed' (ci-passed) does not wait for it, so a red"
+			echo "  '${job}' merges anyway. Add it to ci-passed's needs."
+			rc=1
+		done < <(printf '%s\n' "${wf}" | awk -F'\t' '$1=="job"')
+	fi
 done
 
 # A stale declaration must not quietly describe a fixed problem.

@@ -223,9 +223,11 @@ Same resolution order as [`install-deps`](install-deps.md):
 | Priority | Source                        |
 | -------- | ----------------------------- |
 | 1        | explicit `DEPS_FILE` argument |
-| 2        | `jb-deps.toml` in CWD         |
-| 3        | `bootstrap.toml` in CWD       |
-| 4        | stdin                         |
+| 2        | `bootstrap.toml` in CWD       |
+| 3        | stdin                         |
+
+A legacy `jb.toml` or `jb-deps.toml` in place of `bootstrap.toml` is
+refused; see [bootstrap.toml](bootstrap-toml.md#removed-names).
 
 ______________________________________________________________________
 

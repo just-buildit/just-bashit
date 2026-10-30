@@ -105,14 +105,26 @@ EOF
 	assert_success
 }
 
-@test 'auto-discovers jb.toml in CWD' {
+@test 'auto-discovers bootstrap.toml in CWD' {
 	local tmpdir="${BATS_TEST_TMPDIR}/autodiscover"
 	mkdir -p "${tmpdir}"
-	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/jb.toml"
+	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/bootstrap.toml"
 	cd "${tmpdir}"
 	run inspect.sh -s apt
 	assert_success
 	assert_output --partial "[runtime.apt]"
+}
+
+# The legacy names are no longer read (#30): one alone is refused, naming
+# the rename, and stdin is not read in its place.
+@test 'a jb.toml alone is refused, naming the rename' {
+	local tmpdir="${BATS_TEST_TMPDIR}/legacy_jbtoml"
+	mkdir -p "${tmpdir}"
+	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/jb.toml"
+	cd "${tmpdir}"
+	run inspect.sh -s apt <"${DEPS_FILE}"
+	assert_failure 1
+	assert_output 'error: jb.toml is no longer read, rename it: git mv jb.toml bootstrap.toml'
 }
 
 @test '[tools.inspect].groups restricts default groups' {
@@ -143,16 +155,14 @@ EOF
 	assert_output --partial "[runtime.apt]"
 }
 
-@test 'jb-deps.toml takes priority over jb.toml' {
-	local tmpdir="${BATS_TEST_TMPDIR}/inspect_priority"
+@test 'a jb-deps.toml alone is refused, naming the rename' {
+	local tmpdir="${BATS_TEST_TMPDIR}/legacy_jbdeps"
 	mkdir -p "${tmpdir}"
 	printf '[runtime.apt]\npackages = ["curl"]\n' >"${tmpdir}/jb-deps.toml"
-	printf '[runtime.apt]\npackages = ["wget"]\n' >"${tmpdir}/jb.toml"
 	cd "${tmpdir}"
-	run inspect.sh -s apt
-	assert_success
-	assert_output --partial "curl"
-	refute_output --partial "wget"
+	run inspect.sh -s apt <"${DEPS_FILE}"
+	assert_failure 1
+	assert_output 'error: jb-deps.toml is no longer read, rename it: git mv jb-deps.toml bootstrap.toml'
 }
 
 @test '-v verbose output goes to stderr' {
@@ -225,7 +235,7 @@ EOF
 }
 
 @test '-w without filename defaults to jb.versions in CWD' {
-	cp "${DEPS_FILE}" "${BATS_TEST_TMPDIR}/jb-deps.toml"
+	cp "${DEPS_FILE}" "${BATS_TEST_TMPDIR}/bootstrap.toml"
 	cd "${BATS_TEST_TMPDIR}"
 	run inspect.sh -s apt -w
 	assert_success

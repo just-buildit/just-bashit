@@ -828,6 +828,51 @@ pr-watch: ## PR=<n> — report whether a PR landed or is genuinely failing (neve
 	@bash scripts/pr-watch.sh '$(PR)'
 endif
 
+# ── train ────────────────────────────────────────────────────────────────────
+# `make train PRS="12 15"` is THE way to land two or more ready PRs. Under a
+# strict ruleset (branches must be up to date) every merge knocks every other
+# open PR back to BEHIND, so landing N one at a time costs N full CI runs in
+# series. A train cherry-picks their commits, unchanged and in order, onto
+# the current base as ONE PR: CI runs once, on the combined tree, which is the
+# only tree the base will ever hold. Land it by REBASE merge, so each commit
+# keeps its own message and `Closes #N`. A merge queue does not buy this: it
+# runs CI once per queued PR.
+#
+# Fails closed at each step: a PR that is not open, is a draft, targets
+# another base or has an unresolved review thread; a head that moved or
+# carries a merge commit; a pick that conflicts; a pick whose patch-id or
+# message differs from its source; TRAIN_GATE failing on the combined tree;
+# and close-keywords-check on the train's own title and body. Without PUSH=1
+# it is a dry run that leaves no branch behind. With PUSH=1 it pushes, opens
+# the train PR and closes each constituent with a link to it. It never
+# merges: `gh pr merge <train> --rebase --match-head-commit <sha>` stays the
+# gate. The script's docstring is the full contract.
+#
+#   PRS           the PR numbers, in the order their commits should land
+#   PUSH=1        publish (otherwise a dry run)
+#   TRAIN_GATE    what must pass on the combined tree (default: make lint)
+#   TRAIN_BASE    the branch the PRs target (default: main)
+#   TRAIN_BRANCH  the train's branch (default: train/<n>-<n>...)
+#   TRAIN_TITLE   the train PR's title (default: train: #<n>, #<n>)
+#
+# Always on, like close-keywords-check: it needs only python3, git and gh,
+# which every repo here already has.
+TRAIN_GATE   ?= make lint
+TRAIN_BASE   ?= main
+TRAIN_BRANCH ?=
+TRAIN_TITLE  ?=
+STD_TARGETS    += train
+VENDORED_FILES += scripts/train.py
+
+train: ## PRS="<n> <n>..." [PUSH=1] — land ready PRs as ONE PR, so CI runs once (never merges)
+	@test -n '$(strip $(PRS))' || { \
+	    echo 'usage: make train PRS="<n> <n> ..." [PUSH=1]'; exit 2; }
+	@python3 scripts/train.py --base '$(TRAIN_BASE)' \
+	    --gate '$(TRAIN_GATE)' \
+	    $(if $(strip $(TRAIN_BRANCH)),--branch '$(TRAIN_BRANCH)') \
+	    $(if $(strip $(TRAIN_TITLE)),--title '$(TRAIN_TITLE)') \
+	    $(if $(filter 1,$(PUSH)),--push) $(PRS)
+
 # ── HAS_RELEASE ──────────────────────────────────────────────────────────────
 # The release workflow, in dependency order: release-branch (bump on a branch)
 # -> PR -> merge -> tag-release -> release-watch, with `ship` doing the last
@@ -1505,12 +1550,22 @@ endif
 #   CI_IMAGE_CI_WORKFLOW   the workflow a repin dispatches, since a push or PR
 #                          made with GITHUB_TOKEN starts none
 #   CI_IMAGE_USER          the uid ci-shell runs as (the runner's is 1001)
+#   CI_IMAGE_BASE_REGISTRY where an official base is fetched from, e.g.
+#                          public.ecr.aws/docker/library; empty: Docker Hub,
+#                          as named, with no retry (the old behaviour)
+#   CI_IMAGE_BASE_MIRROR   where it is fetched from when that registry stays
+#                          unreachable (rate limit, quota), e.g.
+#                          mirror.gcr.io/library; empty: no fallback
+#
+# The pin names each base registry-free (`ubuntu:24.04@sha256:...`): a
+# digest is the same image on every registry carrying it, so setting or
+# changing either registry owes no repin.
 #
 # The project's own extras -- a tool no package manager has -- go in an
 # optional docker/ci-extra.sh, whose --fingerprint lines join the fingerprint.
 ifeq ($(HAS_CI_IMAGE),1)
 STD_TARGETS += ci-image-config ci-image-check ci-image-build ci-image-smoke \
-               ci-shell
+               ci-image-base ci-shell
 
 CI_IMAGE_REPO         ?=
 CI_IMAGE_BASES        ?= ubuntu:24.04
@@ -1519,6 +1574,8 @@ CI_IMAGE_SMOKE_TARGET ?=
 CI_IMAGE_LANDING      ?= pr
 CI_IMAGE_CI_WORKFLOW  ?= ci.yml
 CI_IMAGE_USER         ?= 1001
+CI_IMAGE_BASE_REGISTRY ?=
+CI_IMAGE_BASE_MIRROR   ?=
 CI_IMAGE_PIN          := .github/ci-images.env
 VENDORED_FILES        += scripts/ci-image.py docker/ci.Dockerfile \
                          .github/workflows/ci-image.yml
@@ -1526,7 +1583,9 @@ VENDORED_FILES        += scripts/ci-image.py docker/ci.Dockerfile \
 
 $(call _std_require,CI_IMAGE_REPO,HAS_CI_IMAGE)
 
-_std_ci_image = CI_IMAGE_BASES='$(CI_IMAGE_BASES)' python3 scripts/ci-image.py
+_std_ci_image = CI_IMAGE_BASES='$(CI_IMAGE_BASES)' \
+    CI_IMAGE_BASE_REGISTRY='$(CI_IMAGE_BASE_REGISTRY)' \
+    CI_IMAGE_BASE_MIRROR='$(CI_IMAGE_BASE_MIRROR)' python3 scripts/ci-image.py
 
 # Offline: the pin is complete, well formed, and built from this tree's
 # image sources. So it hangs off `lint` -- a PR that edits the Dockerfile,
@@ -1541,6 +1600,8 @@ ci-image-config: ## Print the CI image settings as KEY=VALUE (plumbing)
 	@printf '%s\n' 'repo=$(CI_IMAGE_REPO)' 'bases=$(CI_IMAGE_BASES)' \
 	    'groups=$(CI_IMAGE_GROUPS)' 'smoke=$(CI_IMAGE_SMOKE_TARGET)' \
 	    'landing=$(CI_IMAGE_LANDING)' 'ci_workflow=$(CI_IMAGE_CI_WORKFLOW)' \
+	    'base_registry=$(CI_IMAGE_BASE_REGISTRY)' \
+	    'base_mirror=$(CI_IMAGE_BASE_MIRROR)' \
 	    $(if $(filter 1,$(HAS_PACKAGER_IMAGE)),'packager=1' \
 	      'packager_repo=$(PACKAGER_IMAGE_REPO)' \
 	      'packager_base_amd64=$(PACKAGER_IMAGE_BASE_AMD64)' \
@@ -1553,13 +1614,22 @@ ci-image-build: ## [BASE=<image>] Build a CI image locally from the pinned input
 	@base='$(or $(BASE),$(firstword $(CI_IMAGE_BASES)))'; \
 	 k=$$($(_std_ci_image) key "$$base"); \
 	 eval "$$($(_std_ci_image) inputs)"; \
-	 ref=$$(eval echo "\$$CI_BASE_$$k"); \
+	 ref=$$($(_std_ci_image) source "$$(eval echo "\$$CI_BASE_$$k")"); \
 	 docker buildx build --load -f docker/ci.Dockerfile \
 	   --build-arg BASE="$$ref" --build-arg APT_SNAPSHOT="$$CI_APT_SNAPSHOT" \
 	   --build-arg JB_VERSION="$$CI_JB_VERSION" \
 	   --build-arg JB_SHA256="$$CI_JB_SHA256" \
 	   --build-arg CI_IMAGE_GROUPS='$(CI_IMAGE_GROUPS)' \
 	   -t "ci-image:$$k" .
+
+# Where the build fetches a pinned base from: the base itself, or under
+# CI_IMAGE_BASE_REGISTRY, or CI_IMAGE_BASE_MIRROR when the registry stays
+# unreachable. A probe of the manifest under retry, pulling nothing: a buildx
+# docker-container build pulls its FROM inside BuildKit, where nothing
+# retries it, so the workflow asks here first and builds from the answer.
+ci-image-base: ## REF=<pinned base> Print where to fetch a pinned base from
+	@test -n '$(REF)' || { echo "usage: make ci-image-base REF=<base@digest>"; exit 1; }
+	@$(_std_ci_image) source '$(REF)'
 
 # Run INSIDE an image (IMAGE=<ref>), as CI_IMAGE_USER, on this checkout.
 ci-image-smoke: ## IMAGE=<ref> Run CI_IMAGE_SMOKE_TARGET inside an image
@@ -1823,11 +1893,11 @@ _STD_SECTION = case "$$t" in \
     coverage|coverage-gate) tsec="Coverage";; \
     bump-version|version-check|release-branch|tag-release|release-watch \
         |ship|ci-changes|ci-tree-tested|ci-docs|ci-check-name \
-        |ci-changes-wiring-check|pr-watch) tsec="Release";; \
+        |ci-changes-wiring-check|pr-watch|train) tsec="Release";; \
     changelog-check|changelog-sections-check|changelog-assemble \
         |changelog-assembled-check|changelog-version-check) tsec="Changelog";; \
     test-examples) tsec="Examples";; \
-    ci-image-config|ci-image-check|ci-image-build|ci-image-smoke|ci-shell) \
+    ci-image-config|ci-image-check|ci-image-build|ci-image-smoke|ci-image-base|ci-shell) \
         tsec="CI-image";; \
     packager-image-check|packager-image-build|packager-image-smoke) tsec="Packager-image";; \
     standard-check|standard-update|standard-files|help-check|ghost-check|hook-dispatch-check|hook-stage-check|tracked-paths-check|workflow-timeout-check|workflow-dispatch-check|close-keywords-check) \

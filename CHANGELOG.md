@@ -2,6 +2,120 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`deploy-docs` no longer fails on a pure version-bump commit (#151).** A
+    release PR runs no test matrix, so it uploads no `test-report-xml`, and
+    the step that reused the PR run's reports failed the download, so the
+    run went red and the docs site's test-report and coverage pages were
+    not republished for the release commit.
+    `scripts/docs-reports.sh` now falls back to the newest successful `main`
+    run that kept the reports, and when none did, deploys without them with
+    a `::warning::`. Only an API error fails the step.
+
+## [0.11.0] - 2026-10-27
+
+### Added
+
+- **`jbx just-makeit:NAME` resolves against the just-makeit site.** A new
+    built-in namespace rooted at `https://just-buildit.github.io/just-makeit`,
+    resolved like the default one: its `aliases.toml`, then a direct
+    `NAME.sh` / `NAME.py` probe. The built-in namespaces are now one table
+    that the resolver, the unknown-namespace error and `-h` all read.
+
+## [0.10.0] - 2026-10-26
+
+### Added
+
+- **`jbx --no-verify` skips TLS certificate checks on jbx's own downloads.**
+    This is for networks whose proxy re-signs TLS with a CA the box does not
+    trust, where every fetch failed with a certificate error. It reaches
+    every curl call jbx makes: the script, the `aliases.toml` lookup, the
+    just-bashit co-fetch bundle, the bare-name probe and the nested uv
+    install. `just-runit install --no-verify` passes it to every tool it
+    fetches. It is long-only, because `-k` is the checksum. It is read only
+    before SPEC, so a script's own `--no-verify` argument still reaches the
+    script. It warns on every run, and pairs with `-k HASH`.
+- **jbx runs a script by its path in a repository, on any forge (#136).**
+    `[FORGE+]https://HOST[:PORT]/PROJECT//PATH[@REF]` replaces spelling out
+    each host's raw-content URL. `//` separates the repository from the
+    path, and `REF` defaults to the repository's default branch. github.com,
+    gitlab.com, codeberg.org and bitbucket.org are known. Any other host
+    names its forge (`github+`, `gitlab+`, `gitea+`/`forgejo+`), so
+    self-hosted Gitea, GitLab and GitHub Enterprise work, ports included.
+    Each raw layout was measured against live repositories. The SPEC
+    resolves to the raw URL and is then fetched as before, so caching,
+    `-k`, `-n` and argument forwarding are unchanged. HTTP, SSH, credentials
+    in the URL and unknown hosts are refused, each with an explicit error.
+
+### Fixed
+
+- **`jbx -l` lists a script whatever the caller's shell environment
+    (#121 follow-up).** The child that sources the script inherited two
+    things from the caller. Through an exported `SHELLOPTS` it got jbx's own
+    `set -euo pipefail`, and `compgen -A function` returns 1 while no
+    function exists yet, so the child died on its first line. Through
+    `BASH_ENV` it got kcov's tracer, whose `PS4` names `BASH_SOURCE`, and a
+    script with `set -u` made the next traced line fail. `make coverage`
+    went red on main while `make test` passed. The child now runs without
+    either, from bash's defaults.
+
+- **`CI passed` waits for `coverage`.** A red `coverage` merged #142,
+    because the one required check did not wait for it. `make   workflow-check` now fails on any pull-request job that `CI passed` does
+    not wait for, unless the job runs after it.
+
+- **Getting Started installs `jbx` (#116).** Its Installation section only
+    offered the release tarball, so a reader who started there never got the
+    one-line `get-jb.sh` installer every adopter points at. It now leads with
+    that line and links Getting just-runit for the details. The tarball route
+    stays for sourcing the libraries, and its instructions were wrong: the
+    tarball has no top-level directory and no README, and its libraries are
+    under `src/just_bashit/`. It now extracts into `just-bashit/`, the path
+    every example in the docs sources from.
+
+- **`jbx -n` leaves the cache untouched for just-bashit scripts and
+    aliases (#122).** A `just-bashit:` spec, a `jbs/` URL and an alias into
+    `jbs/` (`install-deps`, `setup-system`) took the co-fetch path before
+    `-n` was checked, so the whole bundle was written to the cache, or a
+    fresh cached one used without fetching; the aliases.toml lookup cached
+    its file too, and the nested run that installs uv for a Python script
+    dropped `-n`. All of them now fetch fresh into the run's temporary
+    directory, removed on exit, so the bundle's libraries still resolve
+    beside the script.
+
+- **`jbx -l` no longer runs the script it lists (#121).** `-l` lists a
+    shell script's functions by sourcing it in a child bash, so a script
+    without a main guard ran in full -- `jbx -l setup-system` set the
+    machine up. `-l` now reads the script first and refuses, naming the
+    line, one whose top level runs a command; a top level of function
+    definitions, assignments, `source`, `set` and the like, or work behind a
+    main guard (`if [[ "${BASH_SOURCE[0]}" == "$0" ]]`, or the libraries'
+    `(return 0 2>/dev/null) ||`), is still sourced and listed, library
+    functions included. Python scripts are parsed, as before.
+
+- **The tree-unchanged test gate covers every run and every outcome
+    (#113).** It lived inline in `make test`'s recipe, so `make test-fast`
+    and `make coverage` ran without it, and a bats failure aborted the
+    recipe before the after-diff: a red run that also damaged the tree
+    reported only the test failure. It is now one script,
+    `scripts/tree_unchanged.sh`, wrapped around all three; it diffs after a
+    failing run too and keeps that run's exit status. Its sabotage proof is
+    kept as `test/tree-unchanged.bats`, and a new `BATS_ARGS` (default
+    `test`) runs a subset through make:
+    `make test-fast BATS_ARGS='-f deps test/setup-system.bats'`.
+
+### Removed
+
+- **BREAKING: `jb.toml` and `jb-deps.toml` are no longer read (#30).**
+    `install-deps`, `inspect`, `setup-system` and `just-runit install` read
+    them, with a warning, since 0.5.0 renamed the file to `bootstrap.toml`;
+    every adopter has since renamed. A directory holding one of them and no
+    `bootstrap.toml` is now refused, with one line naming the fix
+    (`git mv jb.toml bootstrap.toml`), rather than treated as having no
+    manifest and silently installing or reporting nothing. A
+    `bootstrap.toml` beside a legacy file is read and the legacy file
+    ignored; an explicit path argument is read whatever else is present.
+
 ## [0.9.0] - 2026-10-06
 
 ### Added

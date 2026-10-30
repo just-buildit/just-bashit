@@ -111,3 +111,86 @@ _no_cache_run() {
 	assert_failure
 	assert_output --partial 'fetch failed'
 }
+
+# A jbs script, and an alias into jbs/, took a path that ran before _acquire
+# looked at -n: the co-fetch wrote the whole bundle to cache/jbs/ (and reused
+# it while fresh), and the aliases.toml lookup cached its file, so `jbx -n
+# install-deps` neither fetched fresh nor left nothing behind
+# (just-bashit#122). The fixtures are the real libraries, so the co-fetch
+# finds every one, and the probe proves its siblings still sit beside it.
+_jbs_fixtures() {
+	local fx="${BATS_TEST_TMPDIR}/fixtures"
+	mkdir -p "${fx}"
+	cp "${PROJECT_ROOT}"/src/just_bashit/*.sh "${fx}/"
+	# shellcheck disable=SC2016  # the probe's own text, expanded when it runs
+	printf '%s\n' 'd="$(dirname "${BASH_SOURCE[0]}")"' \
+		'[[ -f "${d}/logging.sh" ]] && echo "probe ran beside its siblings"' \
+		>"${fx}/probe.sh"
+	printf '[aliases]\nprobe-alias = "https://just-buildit.github.io/jbs/probe.sh"\n' \
+		>"${fx}/aliases.toml"
+}
+
+@test '-n runs a just-bashit: spec, then leaves nothing behind' {
+	_jbs_fixtures
+	_no_cache_run just-bashit:probe
+	assert_success
+	assert_output 'probe ran beside its siblings'
+}
+
+@test '-n runs a jbs/ URL, then leaves nothing behind' {
+	_jbs_fixtures
+	_no_cache_run https://just-buildit.github.io/jbs/probe.sh
+	assert_success
+	assert_output 'probe ran beside its siblings'
+}
+
+@test '-n runs an alias into jbs/, then leaves nothing behind' {
+	_jbs_fixtures
+	_no_cache_run probe-alias
+	assert_success
+	assert_output 'probe ran beside its siblings'
+}
+
+# -n is also "fetch fresh": a cached bundle or aliases.toml that is still
+# within its TTL must be neither used nor touched.
+@test '-n ignores a fresh cached jbs bundle and aliases.toml' {
+	_jbs_fixtures
+	local fx="${BATS_TEST_TMPDIR}/fixtures" cache="${BATS_TEST_TMPDIR}/cache"
+	_serve_fixtures "${fx}"
+	echo 'echo stale probe' >"${fx}/probe.sh"
+	XDG_CACHE_HOME="${cache}" run just-runit probe-alias
+	assert_output 'stale probe'
+	local before
+	before="$(cd "${cache}" && find . -type f -exec cksum {} + | sort)"
+
+	echo 'echo fresh probe' >"${fx}/probe.sh"
+	printf '[aliases]\nprobe-alias = "https://fixture.invalid/other.sh"\n' \
+		>"${fx}/aliases.toml"
+	echo 'echo fresh alias' >"${fx}/other.sh"
+	XDG_CACHE_HOME="${cache}" run just-runit -n probe-alias
+	assert_success
+	assert_output 'fresh alias'
+	XDG_CACHE_HOME="${cache}" run just-runit -n just-bashit:probe
+	assert_success
+	assert_output 'fresh probe'
+	assert_equal "$(cd "${cache}" && find . -type f -exec cksum {} + | sort)" \
+		"${before}"
+}
+
+# With no uv, a Python script installs it through a nested run of jbx. That
+# run must inherit -n, or the installer lands in the cache.
+@test '-n reaches the nested run that installs uv' {
+	local fx="${BATS_TEST_TMPDIR}/fixtures" uvbin="${BATS_TEST_TMPDIR}/uvbin"
+	mkdir -p "${fx}" "${uvbin}"
+	printf '%s\n' "mkdir -p '${uvbin}'" \
+		"printf '#!/bin/sh\\necho \"uv stub: \$1\"\\n' >'${uvbin}/uv'" \
+		"chmod +x '${uvbin}/uv'" >"${fx}/install.sh"
+	echo 'print("python ran")' >"${fx}/tool.py"
+	local farm
+	farm="$(_bin_without uv)"
+	PATH="${uvbin}:${PROJECT_ROOT}/src/just_bashit:${farm}" \
+		_no_cache_run https://fixture.invalid/tool.py
+	assert_success
+	assert_output --partial 'uv stub:'
+	refute [ -e "${BATS_TEST_TMPDIR}/cache/just-runit" ]
+}

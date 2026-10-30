@@ -30,29 +30,28 @@ ARTIFACT         = just-bashit.tar.gz
 # The tarball is the release artifact CI uploads, so it is built by the same
 # target that produces the report it contains.
 #
-# A test run must leave the tree as it found it. It did not: a cleanup line
-# here globbed bats-*/*.json and deleted the package.json both bats
-# submodules track, so every `make test` left them dirty. The check compares
-# `git status` before and after rather than requiring it empty, so it holds
-# on a working tree with edits in it, and --ignore-submodules=none makes it
-# look inside the submodules, where that damage was. The snapshot lives in
-# the git dir, which no status reports and the tarball does not include.
-TREE_BEFORE = $(shell git rev-parse --git-path make-test-tree-before)
-TREE_STATUS = git status --porcelain --ignore-submodules=none
+# A test run must leave the tree as it found it. scripts/tree_unchanged.sh
+# is that gate, defined once and wrapped around every command that runs the
+# suite -- test, test-fast and coverage -- so none of them can skip it (#113).
+# It diffs `git status` before and after, inside the submodules too, and runs
+# the after-diff even when bats fails, so a red run that also damaged the
+# tree says both. The tarball is outside it: it writes $(ARTIFACT), which is
+# gitignored, and only after a green run.
+TREE_UNCHANGED = bash scripts/tree_unchanged.sh
+
+# What bats runs: the whole suite by default. Override it to run a subset
+# through make rather than calling bats by hand, which bypasses the gate:
+#     make test-fast BATS_ARGS='-f deps test/setup-system.bats'
+BATS_ARGS ?= test
 
 define TEST_CMD
-@test -n "$(TREE_BEFORE)" || { echo "make test checks the tree with git," \
-    "and git cannot read this checkout (its message is above)" >&2; exit 1; }
-$(TREE_STATUS) >$(TREE_BEFORE)
 mkdir -p $(REPORT_PATH)
-$(BATS) --report-formatter junit --output $(REPORT_PATH) \
-    --print-output-on-failure test
+$(TREE_UNCHANGED) $(BATS) --report-formatter junit --output $(REPORT_PATH) \
+    --print-output-on-failure $(BATS_ARGS)
 tar -czf $(ARTIFACT) src $(REPORT_PATH)
-$(TREE_STATUS) | diff $(TREE_BEFORE) - >&2 || { \
-    echo "make test changed the working tree (diff above)" >&2; exit 1; }
 endef
 
-TEST_FAST_CMD = $(BATS) --abort test
+TEST_FAST_CMD = $(TREE_UNCHANGED) $(BATS) --abort $(BATS_ARGS)
 
 # bats, bats-support and bats-assert are submodules, and a plain clone (what
 # sync-repos does on a new machine) leaves all three empty: `make test` then
@@ -192,7 +191,7 @@ COVERAGE_MIN = 60
 # `coverage: $(REPORT_PATH)` order-only prerequisite is what used to do this.
 define COVERAGE_CMD
 mkdir -p $(REPORT_PATH)
-kcov --include-pattern=/src --exclude-pattern=/test \
+$(TREE_UNCHANGED) kcov --include-pattern=/src --exclude-pattern=/test \
     $(REPORT_PATH)/coverage $(BATS) test
 endef
 

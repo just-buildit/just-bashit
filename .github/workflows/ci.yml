@@ -219,6 +219,12 @@ jobs:
       - name: Install dependencies (bootstrap.toml)
         run: bash src/just_bashit/install-deps.sh --verbose
 
+      # Root in the container, the checkout owned by the runner's user: the
+      # same "dubious ownership" refusal as the test job, and `make coverage`
+      # runs the same tree-unchanged gate, so it needs the same trust.
+      - name: Trust the checkout for git
+        run: git config --global --add safe.directory '*'
+
       - name: Run tests with coverage
         run: make coverage
 
@@ -280,7 +286,7 @@ jobs:
     name: CI passed
     # `changes` too: if it fails, nothing below it ran, and that is not a
     # pass. A job it skipped (an already-tested tree) is `skipped`, which is.
-    needs: [changes, test, test-macos, test-windows, lint]
+    needs: [changes, test, test-macos, test-windows, coverage, lint]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -388,32 +394,20 @@ jobs:
       - run: zensical build --clean
 
       # Which run's reports to publish: this one's when it ran the matrix,
-      # else the merged PR's -- the run that tested this tree. The same PR
-      # ci-tree-tested found: merged, associated with this commit, and its
-      # head's CI run succeeded. Nothing found is a failure, not a deploy
-      # without reports.
+      # else the merged PR's, else the newest successful main run that kept
+      # them (a release PR is a version bump and ran no matrix, gh-151). None
+      # at all is a warning, not a failure: docs and the Pages mirror still
+      # deploy. scripts/docs-reports.sh holds the logic; test/docs-reports.bats
+      # drives it with gh stubbed.
       - name: Which run's reports
         id: reports
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
           TESTED: ${{ needs.test.result }}
-        run: |
-          if [ "$TESTED" = success ]; then
-            echo "run-id=${{ github.run_id }}" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          head=$(gh api "repos/$REPO/commits/$GITHUB_SHA/pulls" \
-                   --jq '[.[] | select(.merged_at != null)][0].head.sha')
-          run=$(gh run list -R "$REPO" --workflow ci.yml --commit "$head" \
-                  --status success --json databaseId --jq '.[0].databaseId')
-          if [ -z "$head" ] || [ -z "$run" ]; then
-            echo "::error::matrix skipped, but no successful PR run for $GITHUB_SHA (head ${head:-none})"
-            exit 1
-          fi
-          echo "reports from PR head $head, run $run"
-          echo "run-id=$run" >> "$GITHUB_OUTPUT"
+        run: bash scripts/docs-reports.sh
 
       - name: Download test report XML
+        if: steps.reports.outputs.run-id != ''
         uses: actions/download-artifact@v8
         with:
           name: test-report-xml
@@ -422,6 +416,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Generate test report HTML
+        if: steps.reports.outputs.run-id != ''
         run: |
           python3 - <<'PYEOF'
           import glob
@@ -435,6 +430,7 @@ jobs:
           junit2html test-report-xml/merged.xml site/test-report/index.html
 
       - name: Download coverage report
+        if: steps.reports.outputs.run-id != ''
         uses: actions/download-artifact@v8
         with:
           name: coverage-report

@@ -14,7 +14,7 @@ IFS=$'\n\t'
 
 _CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/just-runit"
 _ME="$(basename "$0")"
-_VERSION="0.9.0"
+_VERSION="0.11.0"
 _DEFAULT_TTL=3600
 
 # Default namespace base URL (just-buildit org pages root).
@@ -25,6 +25,16 @@ _JB_DEFAULT_BASE="https://just-buildit.github.io"
 # Served from the Pages CDN (mirror of src/just_bashit/), NOT
 # raw.githubusercontent, which rate-limits shared CI runner IPs.
 _JBS_BASE="https://just-buildit.github.io/jbs"
+
+# The built-in namespaces, one row each: "NAME BASE-URL". The resolver, its
+# unknown-namespace error and the help text all read this table, so a
+# namespace is added in one place. just-bashit is listed for the help and the
+# error only: it resolves through the co-fetch bundle, not through a base.
+_NAMESPACES=(
+	"just-buildit ${_JB_DEFAULT_BASE}"
+	"just-bashit ${_JBS_BASE}"
+	"just-makeit ${_JB_DEFAULT_BASE}/just-makeit"
+)
 # All src/ libs; fetched together so relative inter-source calls resolve.
 _JBS_LIBS=(
 	datetime environment file format
@@ -159,35 +169,36 @@ if [[ ${_ME} == "just-runit" ]]; then
 		exit 0
 		;;
 	install)
+		# --no-verify reaches every fetch below, which run the runner with -f.
+		_install_opts=()
+		if [[ ${2:-} == --no-verify ]]; then
+			_install_opts=(--no-verify)
+		elif [[ -n ${2:-} ]]; then
+			echo "${_ME} install: unknown argument '${2}'" >&2
+			exit 1
+		fi
 		# Find the bootstrap manifest walking up from CWD.
 		#
-		# `bootstrap.toml` is the name; `jb.toml` is accepted and deprecated.
-		# The old name pointed at the wrong tool — `jb` reads as just-buildit,
-		# the PEP 517 backend, which never opens this file. The new one says
-		# what the file declares instead: what must exist before the language
-		# ecosystem's own package manager can run.
-		#
-		# Both names are read during the transition because this script is
-		# fetched live from the CDN on every CI run, so a hard cutover would
-		# break every repo that had not yet renamed, in the window between the
-		# publish and their rename. Removal is tracked separately.
+		# The legacy name `jb.toml` is no longer read (#30). The nearest one
+		# met on the walk, before any bootstrap.toml, is REFUSED rather than
+		# skipped: skipping it would install from some ancestor's manifest
+		# instead of the project's own, or report none at all.
 		_toml=""
 		_dir="${PWD}"
 		while [[ "${_dir}" != "/" ]]; do
-			for _cand in bootstrap.toml jb.toml; do
-				if [[ -f "${_dir}/${_cand}" ]]; then
-					_toml="${_dir}/${_cand}"
-					break 2
-				fi
-			done
+			if [[ -f "${_dir}/bootstrap.toml" ]]; then
+				_toml="${_dir}/bootstrap.toml"
+				break
+			fi
+			if [[ -f "${_dir}/jb.toml" ]]; then
+				echo "${_ME}: ${_dir}/jb.toml is no longer read, rename it: git mv jb.toml bootstrap.toml" >&2
+				exit 1
+			fi
 			_dir="$(dirname "${_dir}")"
 		done
 		if [[ -z "${_toml}" ]]; then
 			echo "${_ME}: no bootstrap.toml found (searched up from ${PWD})" >&2
 			exit 1
-		fi
-		if [[ "$(basename "${_toml}")" == "jb.toml" ]]; then
-			echo "${_ME}: ${_toml} — jb.toml is deprecated, rename it to bootstrap.toml" >&2
 		fi
 		printf '  reading %s\n' "${_toml}"
 		# Extract all source = "..." values from [tools.*] sections.
@@ -206,7 +217,8 @@ if [[ ${_ME} == "just-runit" ]]; then
 		# (just-bashit#117).
 		for _src in "${_sources[@]}"; do
 			printf '  -> %s ' "${_src}"
-			if "${_runner}" -f "${_src}" >/dev/null 2>&1; then
+			if "${_runner}" "${_install_opts[@]+"${_install_opts[@]}"}" \
+				-f "${_src}" >/dev/null 2>&1; then
 				printf 'ok\n'
 				((_ok++)) || true
 			else
@@ -256,11 +268,22 @@ OPT_LIST=0
 OPT_FETCH=0
 OPT_TTL="${_DEFAULT_TTL}"
 OPT_CHECKSUM=""
+OPT_NO_VERIFY=0
+_CURL_TLS=()
 OPT_PASS=()
 OPTARG=""
 OPTIND=1
 
 # ---- help -------------------------------------------------------------------
+
+# One line per built-in namespace, from the _NAMESPACES table.
+_ns_help=""
+for _row in "${_NAMESPACES[@]}"; do
+	_ns_help+="$(printf '  %-21s %s/' "${_row%% *}" "${_row#* }")"
+	[[ ${_row%% *} == "${_JB_DEFAULT_NS}" ]] && _ns_help+="   (default)"
+	_ns_help+=$'\n'
+done
+_ns_help="${_ns_help%$'\n'}"
 
 read -r -d '' HELP <<-EOF || true
 	Usage: ${_ME} [OPTIONS] SPEC [FUNCTION [ARGS...]]
@@ -275,10 +298,15 @@ read -r -d '' HELP <<-EOF || true
 	  gh:USER/REPO/PATH     GitHub raw, default branch main
 	  gh:USER/REPO/PATH@REF GitHub raw at a specific ref/tag/sha
 	  https://URL           direct URL
+	  [FORGE+]https://HOST[:PORT]/PROJECT//PATH[@REF]
+	                        a script in a repository, by its path in the
+	                        repo; REF defaults to HEAD (the default branch).
+	                        FORGE: github, gitlab, gitea (forgejo), bitbucket;
+	                        optional for github.com, gitlab.com, codeberg.org
+	                        and bitbucket.org. Public repos only, HTTPS only.
 
 	Namespaces:
-	  just-buildit          ${_JB_DEFAULT_BASE}/   (default)
-	  just-bashit           ${_JBS_BASE}/
+	${_ns_help}
 
 	Resolution order for NAME / NS:NAME:
 	  1. aliases.toml at namespace base
@@ -286,14 +314,23 @@ read -r -d '' HELP <<-EOF || true
 
 	Options:
 	  -h        Show this message and exit.
-	  -l        List functions defined by SPEC then exit.
+	  -l        List functions defined by SPEC then exit. A shell script is
+	            sourced to list them, so one whose top level runs a command
+	            (no main guard) is refused, naming the line. Python is
+	            parsed, never run.
 	  -f        Fetch only — cache SPEC, print its path, run nothing.
 	  -r        Refresh — ignore and overwrite cached copy.
-	  -n        No-cache — fetch fresh and discard (nothing written).
+	  -n        No-cache — fetch fresh, discard on exit (cache untouched).
 	  -c        Clean environment (minimal, like sudo without -E).
 	  -p VARS   Comma-separated var names to pass through with -c.
 	  -t TTL    Cache TTL in seconds (default 3600). 0 = keep forever.
 	  -k HASH   Verify script before running: sha256:HASH or md5:HASH.
+	  --no-verify
+	            Skip TLS certificate checks on ${_ME}'s own downloads
+	            (curl --insecure), e.g. behind a TLS-intercepting proxy.
+	            Warns when used. Pair it with -k HASH so the script is
+	            still verified. Downloads the script itself makes are
+	            not affected.
 	  -v        Verbose.
 
 	Language detection (automatic):
@@ -304,9 +341,12 @@ read -r -d '' HELP <<-EOF || true
 	Examples:
 	  ${_ME} install-deps -s apt
 	  ${_ME} just-bashit:logging log "hello"
+	  ${_ME} just-makeit:install-deps
 	  ${_ME} just-bashit:datetime iso-8601-basic -m
 	  ${_ME} gh:user/repo/tools/deploy.sh run --env prod
 	  ${_ME} gh:user/repo/tool.sh@v2.1.0 setup
+	  ${_ME} https://gitlab.com/group/sub/repo//bin/tool.sh@v2 run
+	  ${_ME} gitea+https://git.example.com:3000/ops/tools//deploy.sh deploy
 	  ${_ME} https://example.com/tool.sh
 	  ${_ME} https://example.com/tool.py --flag value
 	  ${_ME} -l just-bashit:logging
@@ -315,6 +355,47 @@ read -r -d '' HELP <<-EOF || true
 EOF
 
 # ---- parse options ----------------------------------------------------------
+
+# --no-verify is the one long option, and getopts reads none, so it is taken
+# out here first. Only the options before SPEC are scanned: an argument after
+# SPEC belongs to the script, so `jbx tool.sh fn --no-verify` passes the flag
+# to fn. The scan has to know which options take a value (p, t, k), so a value
+# such as `-k --no-verify` is not mistaken for the flag, nor for SPEC, and the
+# same for a cluster ending in one (`-nk HASH`).
+_opts=()
+while [[ $# -gt 0 ]]; do
+	case "${1}" in
+	--no-verify)
+		OPT_NO_VERIFY=1
+		shift
+		;;
+	--)
+		_opts+=("${1}")
+		shift
+		break
+		;;
+	-?*)
+		_opts+=("${1}")
+		_cluster="${1#-}"
+		shift
+		# A value-taking letter consumes the rest of the cluster, or, as
+		# its last letter, the next argument.
+		while [[ -n ${_cluster} ]]; do
+			_c="${_cluster:0:1}"
+			_cluster="${_cluster:1}"
+			if [[ ${_c} == [ptk] ]]; then
+				if [[ -z ${_cluster} && $# -gt 0 ]]; then
+					_opts+=("${1}")
+					shift
+				fi
+				break
+			fi
+		done
+		;;
+	*) break ;;
+	esac
+done
+set -- "${_opts[@]+"${_opts[@]}"}" "$@"
 
 while getopts ":hlfrncvp:t:k:" option; do
 	case $option in
@@ -339,6 +420,11 @@ while getopts ":hlfrncvp:t:k:" option; do
 	esac
 done
 shift "$((OPTIND - 1))"
+
+if [[ ${OPT_NO_VERIFY} -eq 1 ]]; then
+	_CURL_TLS=(--insecure)
+	echo "${_ME}: warning: --no-verify: TLS certificates are not checked" >&2
+fi
 
 [[ $# -eq 0 ]] && {
 	echo "${HELP}"
@@ -369,17 +455,23 @@ _err() {
 
 # Parse aliases.toml from NS_BASE/aliases.toml and look up a name.
 # Returns the resolved URL, or empty string if not found.
+#
+# Under -n the file goes to main's per-run directory, never the cache, and as
+# that directory starts empty it is always fetched fresh (just-bashit#122).
 _lookup_alias() {
 	local base="${1}" name="${2}"
 	local aliases_url="${base}/aliases.toml"
 	local key
 	key=$(printf '%s' "${base}" | _sha256)
 	local aliases_cache="${_CACHE_DIR}/aliases-${key}.toml"
+	if [[ ${OPT_NO_CACHE} -eq 1 ]]; then
+		aliases_cache="${_NO_CACHE_DIR}/aliases-${key}.toml"
+	fi
 
 	if [[ ${OPT_REFRESH} -eq 1 ]] || ! _cache_valid "${aliases_cache}"; then
-		mkdir -p "${_CACHE_DIR}"
+		mkdir -p "${aliases_cache%/*}"
 		_log "fetching ${aliases_url}"
-		if ! curl -sSL --proto '=https' --tlsv1.2 --max-time 10 \
+		if ! curl -sSL "${_CURL_TLS[@]+"${_CURL_TLS[@]}"}" --proto '=https' --tlsv1.2 --max-time 10 \
 			-o "${aliases_cache}.new" "${aliases_url}" 2>/dev/null; then
 			rm -f "${aliases_cache}.new"
 			echo ""
@@ -429,7 +521,7 @@ _lookup_alias() {
 _head_ok() {
 	local url="${1}"
 	local code
-	code=$(curl -sSL --proto '=https' --tlsv1.2 --max-time 5 \
+	code=$(curl -sSL "${_CURL_TLS[@]+"${_CURL_TLS[@]}"}" --proto '=https' --tlsv1.2 --max-time 5 \
 		-o /dev/null -w '%{http_code}' --head "${url}" 2>/dev/null)
 	[[ ${code} == "200" || ${code} == "301" || ${code} == "302" ]]
 }
@@ -440,18 +532,17 @@ _resolve_ns() {
 	local ns="${1}" name="${2}"
 
 	# Map namespace to base URL.
-	local base
-	case "${ns}" in
-	just-buildit) base="${_JB_DEFAULT_BASE}" ;;
-	just-bashit)
+	local base="" row known=""
+	for row in "${_NAMESPACES[@]}"; do
+		known+="${known:+, }${row%% *}"
+		[[ ${row%% *} == "${ns}" ]] && base="${row#* }"
+	done
+	[[ -n ${base} ]] || _err "unknown namespace '${ns}'; known: ${known}"
+	if [[ ${ns} == just-bashit ]]; then
 		# just-bashit uses the co-fetch mechanism; return internal marker.
 		echo "jbs:${name}"
 		return
-		;;
-	*)
-		_err "unknown namespace '${ns}'; known: just-buildit, just-bashit"
-		;;
-	esac
+	fi
 
 	# 1. Check aliases.toml first (one cached round-trip covers all names).
 	local alias_url
@@ -481,12 +572,127 @@ _resolve_ns() {
 
 # ---- URL resolution ---------------------------------------------------------
 
+# Repository form (just-bashit#136): a script named by its path inside a
+# repository, rather than by a host-specific raw-content URL.
+#
+#   [FORGE+]https://HOST[:PORT]/PROJECT//PATH[@REF]
+#
+# `//` separates the repository from the path, as Terraform module sources and
+# go-getter do: a colon cannot, since the scheme and a port already use one,
+# and no URL path holds `//` legitimately, so a plain script URL is unaffected.
+# REF is a branch, tag or commit SHA, HEAD (the default branch) when omitted.
+#
+# FORGE names the raw-file layout. The four public hosts are known; any other
+# host must say which forge serves it, because jbx does not guess a layout.
+# Each layout was measured against live repositories (just-bashit#136):
+#   github     raw.githubusercontent.com/O/R/REF/PATH, or HOST/O/R/raw/REF/PATH
+#   gitlab     HOST/GROUP/.../PROJECT/-/raw/REF/PATH (nested groups)
+#   gitea      HOST/O/R/raw/REF/PATH (Gitea, Forgejo, Codeberg)
+#   bitbucket  bitbucket.org/O/R/raw/REF/PATH (Cloud only)
+#
+# Prints the raw HTTPS URL, which then goes through the ordinary fetch, so
+# caching, -r, -n, -k and argument forwarding are unchanged. Every refusal
+# names what to do instead, and none echoes credentials.
+_resolve_repo() {
+	local spec="${1}" forge="" rest authority host project path ref="HEAD"
+	if [[ ${spec} =~ ^([a-z]+)\+([a-z][a-z0-9+.-]*://.*)$ ]]; then
+		forge="${BASH_REMATCH[1]}"
+		spec="${BASH_REMATCH[2]}"
+	fi
+	case "${forge}" in
+	"" | github | gitlab | gitea | bitbucket) ;;
+	forgejo) forge=gitea ;;
+	*) _err "unknown forge '${forge}': use github, gitlab, gitea (or forgejo) or bitbucket" ;;
+	esac
+	[[ ${spec} == https://* ]] ||
+		_err "a repository is fetched over HTTPS only: ${spec%%://*}:// is not supported"
+
+	rest="${spec#https://}"
+	authority="${rest%%/*}"
+	rest="${rest#*/}"
+	# Credentials would be written to logs and cache metadata, and jbx sends
+	# none anyway: refuse them, naming the host but never the secret.
+	[[ ${authority} == *@* ]] &&
+		_err "credentials in a repository URL are refused (${authority##*@}): jbx fetches public repositories only"
+	host="${authority%%:*}"
+	[[ -n ${host} ]] || _err "no host in repository URL: ${spec}"
+
+	project="${rest%%//*}"
+	path="${rest#*//}"
+	if [[ ${path} == *@* ]]; then
+		ref="${path##*@}"
+		path="${path%@*}"
+	fi
+	project="${project%/}"
+	project="${project%.git}"
+
+	if [[ -z ${forge} ]]; then
+		case "${host}" in
+		github.com) forge=github ;;
+		gitlab.com) forge=gitlab ;;
+		codeberg.org) forge=gitea ;;
+		bitbucket.org) forge=bitbucket ;;
+		*) _err "jbx does not know which forge serves ${authority}; name it, e.g. gitea+https://${authority}/... (github, gitlab, gitea, bitbucket)" ;;
+		esac
+	fi
+
+	local -a parts
+	IFS=/ read -ra parts <<<"${project}"
+	local part
+	for part in "${parts[@]}"; do
+		[[ -n ${part} ]] || _err "empty segment in repository path '${project}'"
+	done
+	if [[ ${forge} == gitlab ]]; then
+		[[ ${#parts[@]} -ge 2 ]] ||
+			_err "a GitLab project is GROUP/.../PROJECT, not '${project}'"
+	else
+		[[ ${#parts[@]} -eq 2 ]] ||
+			_err "a ${forge} repository is OWNER/REPO, not '${project}'"
+	fi
+
+	[[ -n ${path} && ${path} != /* ]] ||
+		_err "no script path after '//' in ${spec%@*}: name the file inside the repository"
+	IFS=/ read -ra parts <<<"${path}"
+	for part in "${parts[@]}"; do
+		[[ -n ${part} && ${part} != ".." ]] ||
+			_err "bad script path '${path}': no empty or '..' segments"
+	done
+	[[ -n ${ref} ]] || _err "empty ref after '@' in ${spec}"
+	[[ ${ref} != */* ]] ||
+		_err "ref '${ref}' contains '/', which is ambiguous in a raw URL: pin a tag or commit SHA"
+	[[ ${ref} =~ ^[A-Za-z0-9._-]+$ ]] || _err "bad ref '${ref}'"
+
+	case "${forge}" in
+	github)
+		if [[ ${host} == github.com ]]; then
+			echo "https://raw.githubusercontent.com/${project}/${ref}/${path}"
+		else
+			echo "https://${authority}/${project}/raw/${ref}/${path}"
+		fi
+		;;
+	gitlab) echo "https://${authority}/${project}/-/raw/${ref}/${path}" ;;
+	gitea) echo "https://${authority}/${project}/raw/${ref}/${path}" ;;
+	bitbucket)
+		[[ ${host} == bitbucket.org ]] ||
+			_err "only Bitbucket Cloud (bitbucket.org) is supported: Server/Data Center serves raw files on another layout"
+		echo "https://${authority}/${project}/raw/${ref}/${path}"
+		;;
+	esac
+}
+
 _resolve() {
 	local raw="${1}"
 	case "${raw}" in
 	just-bashit:*)
 		# Explicit just-bashit namespace; use co-fetch mechanism.
 		echo "jbs:${raw#just-bashit:}"
+		;;
+	[a-z]*+*://* | *://*/*//*)
+		# A repository and a path inside it (just-bashit#136).
+		_resolve_repo "${raw}"
+		;;
+	*@*:*//*)
+		_err "SSH repository URLs are not supported; use the HTTPS form: [FORGE+]https://HOST/PROJECT//PATH"
 		;;
 	*://*)
 		case "${raw}" in
@@ -578,7 +784,7 @@ _fetch_to() {
 	# and returns non-zero on >=400, and the retries ride out transient
 	# throttling so a blip retries instead of reddening the build.
 	_curl_retry_opts_init
-	if ! curl -sSL --fail "${_CURL_RETRY_OPTS[@]}" --connect-timeout 30 \
+	if ! curl -sSL --fail "${_CURL_TLS[@]+"${_CURL_TLS[@]}"}" "${_CURL_RETRY_OPTS[@]}" --connect-timeout 30 \
 		-o "${dest}" "${url}"; then
 		rm -f "${dest}"
 		_err "fetch failed (no usable response from ${url})"
@@ -590,9 +796,16 @@ _fetch_to() {
 
 # For just-bashit scripts, all src/ libs are co-fetched into cache/jbs/ so
 # that relative inter-source calls (e.g. logging.sh -> format.sh) resolve.
+#
+# Under -n the bundle goes to jbs/ inside main's per-run directory instead,
+# which starts empty, so it is always fetched fresh: the siblings still
+# resolve beside the script, and main's EXIT trap removes them. This path is
+# taken before _acquire's own -n branch, so it ignored -n and wrote, or
+# reused, the cached bundle (just-bashit#122).
 _acquire_jbs() {
 	local lib="${1}"
 	local jbs_dir="${_CACHE_DIR}/jbs"
+	[[ ${OPT_NO_CACHE} -eq 1 ]] && jbs_dir="${_NO_CACHE_DIR}/jbs"
 	mkdir -p "${jbs_dir}"
 
 	local needs_fetch=0
@@ -699,8 +912,850 @@ _detect_lang() {
 
 # ---- list functions ---------------------------------------------------------
 
+# _toplevel_cmd FILE -- the first top-level command in FILE that would RUN
+# something when FILE is sourced, as "LINE<TAB>TEXT" on stdout, and exit 1;
+# exit 0, printing nothing, when FILE's top level only declares.
+#
+# -l lists a script's functions by sourcing it (_list_fns), so a script
+# whose top level does work -- `setup-system` has no main guard -- used to
+# be RUN by a flag that reads as inspection (just-bashit#121). This is the
+# check -l makes first. Allowed at top level:
+#
+#   - comments and blank lines
+#   - function definitions (`name() {`, `name ()`, `function name {`, with
+#     any compound body); the body is skipped whatever it holds
+#   - assignments, alone or chained with && / || (`IFS=$'\n\t'`,
+#     `arr=(a b)`, `[[ -n $X ]] && Y=1 || Y=2`); a `read` fed by a heredoc
+#     or here-string, which only assigns (`read -r -d '' HELP <<-'EOF'`)
+#   - the builtins source . set shopt declare typeset readonly export true :
+#     and the tests [[ ]] [ ] test
+#   - a main guard, whose body never runs when the file is sourced:
+#     `if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then ... fi` (= or -ef, either
+#     operand order, quoted or not, `$BASH_SOURCE` or `${0}` too), the same
+#     test followed by `&& cmd` (or `!=` by `|| cmd`), `if ! (return 0
+#     2>/dev/null); then ... fi`, and `(return 0 2>/dev/null) || cmd`, the
+#     "must be sourced" line every just-bashit library opens with
+#
+# Anything else -- a plain command, `trap`, `exit`, a top-level if/while/
+# for/case/{ }/( ) that is not a guard -- is reported. It is a guard against
+# running a script by accident, not a sandbox: a command substitution inside
+# an assignment or a test (`DIR=$(cd ... && pwd)`) still runs, as do the top
+# levels of the libraries the file sources, since listing what they define
+# is why -l sources at all.
+#
+# It is a lexer, not a line matcher, because a function body ends at the
+# brace that closes it and nowhere else: it tracks quotes, ${...}, $(...),
+# $((...)), backticks, heredocs (bodies skipped, `<<-` tab-stripped),
+# [[ ]], case patterns and the if/case/loop/brace/paren nesting, so a `}`
+# or `fi` inside a string or a heredoc closes nothing. Pure bash, for the
+# reason _lookup_alias is. A construct still open at end of file is
+# reported too, rather than guessed at.
+_toplevel_cmd() {
+	local LC_ALL=C
+	local line="" c nx rest top d ch q
+	local -i lno=0 i=0 n=0 sp=0 j=0 strip=0
+	# The context stack, and per-entry state: a case's "seen in" and "in
+	# pattern position", an arithmetic context's paren depth, and the word
+	# state a $(...) saves and puts back.
+	local -a st=() cin=() cpat=() ard=() tk=() tkl=() tkt=() hd=() hdp=()
+	local -a s_cur=() s_taint=() s_wcmd=() s_cmd=() s_nw=() s_pop=()
+	local -a s_fnhdr=() s_fnkw=() s_redir=() s_wline=() s_wtext=()
+	# The word being read: its text, whether quoting or an expansion makes
+	# it unable to be a reserved word (taint), and whether it began in
+	# command position (wcmd). cmd: the next word is in command position.
+	# nw: words so far in this simple command. pop: an && / || / | is
+	# waiting for its right side. fnhdr / fnkw: a function header is
+	# waiting for its body / for its name.
+	local cur="" wtext="" etext=""
+	local -i taint=0 wcmd=0 cmd=1 nw=0 pop=0 fnhdr=0 fnkw=0 redir=0
+	local -i cont=0 wline=0 eline=0 eelse=0 nonif=0
+	local OPEN=$'\x1e' CLOSE=$'\x1f' PH=$'\x1d'
+	local ordre="^[^[:space:]#\\\\'\"\`\$<>&|;()]+"
+
+	while IFS= read -r line || [[ -n ${line} ]]; do
+		lno+=1
+		if ((${#hd[@]})); then
+			d="${line}"
+			if [[ ${hd[0]:0:1} == 1 ]]; then
+				while [[ ${d} == $'\t'* ]]; do d="${d#$'\t'}"; done
+			fi
+			[[ ${d} == "${hd[0]:1}" ]] && hd=("${hd[@]:1}")
+			continue
+		fi
+		i=0
+		n=${#line}
+		while ((i < n)); do
+			c="${line:i:1}"
+			top=""
+			((sp)) && top="${st[sp - 1]}"
+			case "${top}" in
+			SQ)
+				rest="${line:i}"
+				if [[ ${rest} == *"'"* ]]; then
+					rest="${rest%%"'"*}"
+					i+=${#rest}+1
+					_tl_pop
+				else
+					i=n
+				fi
+				continue
+				;;
+			AQ | BT)
+				q="'"
+				[[ ${top} == BT ]] && q='`'
+				if [[ ${c} == "\\" ]]; then
+					i+=2
+				elif [[ ${c} == "${q}" ]]; then
+					i+=1
+					_tl_pop
+				else
+					i+=1
+				fi
+				continue
+				;;
+			DQ | PE | AR | AP)
+				_tl_inner || return 1
+				continue
+				;;
+			esac
+			# Code: the top level, a { } / ( ) group, a function body, an
+			# if / case / loop, a $(...), or a [[ ]].
+			nx="${line:i+1:1}"
+			case "${c}" in
+			' ' | $'\t')
+				_tl_endword
+				i+=1
+				;;
+			'#')
+				if [[ -z ${cur} ]]; then
+					i=n
+				else
+					cur+="${c}"
+					i+=1
+				fi
+				;;
+			"\\")
+				if ((i + 1 >= n)); then
+					cont=1
+					i=n
+				else
+					_tl_wchar "${PH}"
+					i+=2
+				fi
+				;;
+			"'" | '"' | '`')
+				_tl_wchar "${PH}"
+				case "${c}" in
+				"'") _tl_push SQ ;;
+				'"') _tl_push DQ ;;
+				*) _tl_push BT ;;
+				esac
+				i+=1
+				;;
+			'$')
+				case "${nx}" in
+				'(' | '{' | "'")
+					_tl_wchar "${PH}"
+					_tl_dollar
+					;;
+				*)
+					_tl_wchar '$'
+					i+=1
+					;;
+				esac
+				;;
+			'<' | '>' | '&' | '|' | ';' | '(' | ')')
+				# Inside [[ ]] these are its own operators: they end a
+				# word, and the word may be the ]] that closes it.
+				[[ ${top} == DB ]] && _tl_endword
+				if ((sp)) && [[ ${st[sp - 1]} == DB ]]; then
+					i+=1
+				else
+					_tl_op || return 1
+				fi
+				;;
+			*)
+				if [[ ${line:i} =~ ${ordre} ]]; then
+					_tl_wchar "${BASH_REMATCH[0]}"
+					i+=${#BASH_REMATCH[0]}
+				else
+					_tl_wchar "${c}"
+					i+=1
+				fi
+				;;
+			esac
+		done
+		# End of line: a newline, unless escaped or inside a quote.
+		if ((cont)); then
+			cont=0
+		else
+			top=""
+			((sp)) && top="${st[sp - 1]}"
+			case "${top}" in
+			SQ | AQ | BT | DQ | PE | AR | AP) ;;
+			DB) _tl_endword ;;
+			*) _tl_sep nl || return 1 ;;
+			esac
+		fi
+		if ((${#hdp[@]})); then
+			hd+=("${hdp[@]}")
+			hdp=()
+		fi
+	done <"${1}"
+
+	_tl_endword
+	if ((sp || ${#hd[@]})); then
+		((${#tk[@]})) || eline=lno
+		printf '%s\tunterminated at end of file: %s\n' "${eline}" \
+			"${etext%"${etext##*[![:space:]]}"}"
+		return 1
+	fi
+	_tl_judge
+}
+
+# The helpers below are _toplevel_cmd's: they read and write its locals.
+
+# nonif counts the open contexts that are not an if: the judge sees
+# inside a top-level if, whose branches must declare too, and nothing
+# deeper.
+_tl_push() {
+	st[sp]="${1}"
+	sp=$((sp + 1))
+	[[ ${1} == IF ]] || nonif=$((nonif + 1))
+}
+
+_tl_pop() {
+	sp=$((sp - 1))
+	[[ ${st[sp]} == IF ]] || nonif=$((nonif - 1))
+	unset 'st[sp]'
+}
+
+# _tl_wchar TEXT -- append TEXT to the word, starting one if none is open.
+_tl_wchar() {
+	if [[ -z ${cur} ]]; then
+		wcmd=cmd
+		wline=lno
+		wtext="${line:i}"
+	fi
+	[[ ${1} == "${PH}" || ${1} == "\\"* ]] && taint=1
+	cur+="${1}"
+}
+
+_tl_emit() {
+	((nonif == 0)) || return 0
+	if ((${#tk[@]} == 0)); then
+		eline=wline
+		etext="${wtext}"
+	fi
+	tk+=("${1}")
+	tkl+=("${wline}")
+	tkt+=("${wtext}")
+}
+
+# _tl_open TYPE TOKEN / _tl_close TOKEN -- enter and leave a compound
+# command. At the top level the pair is all the judge sees of it: what is
+# inside is never a top-level command.
+_tl_open() {
+	_tl_emit "${OPEN}${2}"
+	_tl_push "${1}"
+	cmd=1
+	nw=0
+	pop=0
+	fnhdr=0
+}
+
+_tl_close() {
+	_tl_pop
+	_tl_emit "${CLOSE}${1}"
+	cmd=0
+}
+
+# _tl_mark -- note where a word-less token (an opening paren) starts.
+_tl_mark() {
+	wline=lno
+	wtext="${line:i}"
+}
+
+_tl_endword() {
+	[[ -n ${cur} ]] || return 0
+	local w="${cur}" top=""
+	local -i plain=$((!taint)) atcmd=wcmd
+	cur=""
+	taint=0
+	((sp)) && top="${st[sp - 1]}"
+	if ((redir)); then
+		redir=0
+		_tl_emit "${w}"
+		return 0
+	fi
+	if ((plain)); then
+		if [[ ${top} == DB ]]; then
+			[[ ${w} == ']]' ]] && _tl_close ']]'
+			return 0
+		fi
+		if [[ ${top} == CASE ]]; then
+			if ((cin[sp - 1] == 0)) && [[ ${w} == in ]]; then
+				cin[sp - 1]=1
+				cpat[sp - 1]=1
+				return 0
+			fi
+			if ((cpat[sp - 1])) && [[ ${w} == "esac" ]]; then
+				_tl_close "esac"
+				return 0
+			fi
+		fi
+		if ((fnkw)); then
+			fnkw=0
+			fnhdr=1
+			cmd=1
+			_tl_emit "${w}"
+			return 0
+		fi
+		if ((atcmd)); then
+			case "${w}" in
+			'{')
+				_tl_open B '{'
+				return 0
+				;;
+			'}')
+				if [[ ${top} == B ]]; then
+					_tl_close '}'
+					return 0
+				fi
+				;;
+			if)
+				_tl_open IF if
+				return 0
+				;;
+			then | do)
+				cmd=1
+				_tl_emit ';'
+				return 0
+				;;
+			else | elif)
+				cmd=1
+				_tl_emit ';'
+				[[ ${top} == IF ]] && ((sp == 1)) && eelse=1
+				return 0
+				;;
+			"fi" | "done" | "esac")
+				if [[ ${top} == IF && ${w} == "fi" ||
+					${top} == LOOP && ${w} == "done" ||
+					${top} == CASE && ${w} == "esac" ]]; then
+					_tl_close "${w}"
+					return 0
+				fi
+				;;
+			case)
+				_tl_open CASE case
+				cin[sp - 1]=0
+				cpat[sp - 1]=0
+				cmd=0
+				return 0
+				;;
+			while | until | for | select)
+				_tl_open LOOP "${w}"
+				[[ ${w} == for || ${w} == select ]] && cmd=0
+				return 0
+				;;
+			'[[')
+				_tl_open DB '[['
+				return 0
+				;;
+			function)
+				fnkw=1
+				_tl_emit function
+				return 0
+				;;
+			'!' | time)
+				_tl_emit "${w}"
+				return 0
+				;;
+			esac
+		fi
+	fi
+	_tl_emit "${w}"
+	cmd=0
+	nw=$((nw + 1))
+	pop=0
+	fnhdr=0
+}
+
+# _tl_sep KIND -- a newline (nl), `;` or `&`: the end of a command, and of a
+# top-level one when nothing is open.
+_tl_sep() {
+	_tl_endword
+	if [[ ${1} == nl ]] && ((fnhdr || pop)); then
+		return 0
+	fi
+	cmd=1
+	nw=0
+	pop=0
+	if ((sp == 0)); then
+		_tl_judge || return 1
+		tk=()
+		tkl=()
+		tkt=()
+		eelse=0
+	else
+		_tl_emit ';'
+	fi
+	return 0
+}
+
+# _tl_save / _tl_restore -- a $(...) or <(...) reads words of its own; the
+# word it sits in carries on after it.
+_tl_save() {
+	s_cur[sp]="${cur}"
+	s_taint[sp]=taint
+	s_wcmd[sp]=wcmd
+	s_cmd[sp]=cmd
+	s_nw[sp]=nw
+	s_pop[sp]=pop
+	s_fnhdr[sp]=fnhdr
+	s_fnkw[sp]=fnkw
+	s_redir[sp]=redir
+	s_wline[sp]=wline
+	s_wtext[sp]="${wtext}"
+	_tl_push CS
+	cur=""
+	taint=0
+	cmd=1
+	nw=0
+	pop=0
+	fnhdr=0
+	fnkw=0
+	redir=0
+}
+
+_tl_restore() {
+	_tl_pop
+	cur="${s_cur[sp]}"
+	taint=$((s_taint[sp]))
+	wcmd=$((s_wcmd[sp]))
+	cmd=$((s_cmd[sp]))
+	nw=$((s_nw[sp]))
+	pop=$((s_pop[sp]))
+	fnhdr=$((s_fnhdr[sp]))
+	fnkw=$((s_fnkw[sp]))
+	redir=$((s_redir[sp]))
+	wline=$((s_wline[sp]))
+	wtext="${s_wtext[sp]}"
+}
+
+# _tl_dollar -- $( $(( ${ $' at line[i]: enter it.
+_tl_dollar() {
+	case "${line:i+1:1}" in
+	'(')
+		if [[ ${line:i+2:1} == '(' ]]; then
+			_tl_push AR
+			ard[sp - 1]=0
+			i+=3
+		else
+			_tl_save
+			i+=2
+		fi
+		;;
+	'{')
+		_tl_push PE
+		i+=2
+		;;
+	"'")
+		_tl_push AQ
+		i+=2
+		;;
+	esac
+}
+
+# _tl_inner -- one step inside "...", ${...}, $((...)) or an array's ( ).
+_tl_inner() {
+	local re
+	case "${top}" in
+	DQ) re="^[^\\\\\"\`\$]+" ;;
+	PE) re="^[^\\\\\"'\`\$}]+" ;;
+	AR) re="^[^()\\\\\"'\`\$]+" ;;
+	AP) re="^[^()\\\\\"'\`\$#]+" ;;
+	esac
+	if [[ ${line:i} =~ ${re} ]]; then
+		i+=${#BASH_REMATCH[0]}
+		return 0
+	fi
+	case "${c}" in
+	"\\") i+=2 ;;
+	'"')
+		if [[ ${top} == DQ ]]; then
+			_tl_pop
+		else
+			_tl_push DQ
+		fi
+		i+=1
+		;;
+	"'")
+		# Literal inside "...${x:-'}"...; a quote anywhere else here.
+		if [[ ${top} == PE && ${st[sp - 2]:-} == DQ ]]; then
+			:
+		else
+			_tl_push SQ
+		fi
+		i+=1
+		;;
+	'`')
+		_tl_push BT
+		i+=1
+		;;
+	'$')
+		case "${line:i+1:1}" in
+		'(' | '{' | "'") _tl_dollar ;;
+		*) i+=1 ;;
+		esac
+		;;
+	'}')
+		_tl_pop
+		i+=1
+		;;
+	'#')
+		# A comment in an array, when it starts a word.
+		if ((i == 0)) || [[ ${line:i-1:1} == [[:space:]\(] ]]; then
+			i=n
+		else
+			i+=1
+		fi
+		;;
+	'(')
+		if [[ ${top} == AR ]]; then
+			ard[sp - 1]=$((ard[sp - 1] + 1))
+		else
+			_tl_push AP
+		fi
+		i+=1
+		;;
+	')')
+		if [[ ${top} == AR ]] && ((ard[sp - 1] > 0)); then
+			ard[sp - 1]=$((ard[sp - 1] - 1))
+			i+=1
+		elif [[ ${top} == AR ]]; then
+			_tl_pop
+			i+=1
+			[[ ${line:i:1} == ')' ]] && i+=1
+		else
+			_tl_pop
+			i+=1
+		fi
+		;;
+	*) i+=1 ;;
+	esac
+	return 0
+}
+
+# _tl_op -- < > & | ; ( ) in code: redirections, heredocs, operators,
+# separators, groups, function headers and case patterns.
+_tl_op() {
+	local top="" ahead
+	((sp)) && top="${st[sp - 1]}"
+	local -i patpos=0
+	[[ ${top} == CASE ]] && ((cpat[sp - 1])) && patpos=1
+	case "${c}" in
+	'<' | '>')
+		if [[ ${nx} == '(' ]]; then
+			# <(...) / >(...): a command substitution inside a word.
+			_tl_wchar "${PH}"
+			_tl_save
+			i+=2
+		elif [[ ${c}${nx} == '<<' && ${line:i+2:1} != '<' ]]; then
+			_tl_heredoc
+		else
+			# A redirection: [N]op target, kept as one word.
+			[[ ${cur} =~ ^[0-9]+$ ]] || _tl_endword
+			[[ -n ${cur} ]] || _tl_mark
+			while [[ ${line:i:1} == [\<\>\&\|] ]]; do
+				cur+="${line:i:1}"
+				i+=1
+			done
+			while [[ ${line:i:1} == [[:blank:]] ]]; do i+=1; done
+			wcmd=0
+			redir=1
+		fi
+		;;
+	'&')
+		if [[ ${nx} == '&' ]]; then
+			_tl_pipe '&&'
+		elif [[ ${nx} == '>' ]]; then
+			_tl_endword
+			_tl_mark
+			cur='&'
+			i+=1
+			c='>'
+			nx="${line:i+1:1}"
+			_tl_op
+		else
+			i+=1
+			_tl_sep '&' || return 1
+		fi
+		;;
+	'|')
+		if ((patpos)); then
+			_tl_endword
+			i+=1
+		elif [[ ${nx} == '|' || ${nx} == '&' ]]; then
+			_tl_pipe "|${nx}"
+		else
+			_tl_pipe '|'
+		fi
+		;;
+	';')
+		if [[ ${top} == CASE && (${nx} == ';' || ${nx} == '&') ]]; then
+			_tl_endword
+			i+=2
+			[[ ${line:i:1} == '&' ]] && i+=1
+			cpat[sp - 1]=1
+			cmd=0
+		else
+			i+=1
+			_tl_sep ';' || return 1
+		fi
+		;;
+	'(')
+		ahead="${line:i+1}"
+		ahead="${ahead#"${ahead%%[![:blank:]]*}"}"
+		if ((patpos)) && [[ -z ${cur} ]]; then
+			i+=1
+		elif [[ -n ${cur} ]]; then
+			if ((!taint && wcmd)) && [[ ${ahead} == ')'* ]]; then
+				# name() -- a function header.
+				cur+='()'
+				i+=1
+				while [[ ${line:i:1} != ')' ]]; do i+=1; done
+				i+=1
+				_tl_emit "${cur}"
+				cur=""
+				fnkw=0
+				fnhdr=1
+				cmd=1
+			else
+				# arr=( ... ), or an extglob @( ... ): part of the word.
+				_tl_wchar "${PH}"
+				_tl_push AP
+				i+=1
+			fi
+		elif ((nw == 1 || fnhdr)) && [[ ${ahead} == ')'* ]]; then
+			# name () -- a function header, spaced.
+			i+=1
+			while [[ ${line:i:1} != ')' ]]; do i+=1; done
+			i+=1
+			_tl_emit '()'
+			fnhdr=1
+			cmd=1
+		elif [[ ${nx} == '(' ]]; then
+			# (( ... )) -- arithmetic, at any position (`for ((`).
+			_tl_mark
+			_tl_emit "${OPEN}(("
+			_tl_emit "${CLOSE}))"
+			_tl_push AR
+			ard[sp - 1]=0
+			i+=2
+		elif ((cmd)); then
+			_tl_mark
+			_tl_open P '('
+			i+=1
+		else
+			_tl_wchar "${PH}"
+			_tl_push AP
+			i+=1
+		fi
+		;;
+	')')
+		if ((patpos)); then
+			_tl_endword
+			cpat[sp - 1]=0
+			cmd=1
+			nw=0
+			i+=1
+		elif [[ ${top} == P ]]; then
+			_tl_endword
+			i+=1
+			_tl_close ')'
+		elif [[ ${top} == CS ]]; then
+			_tl_endword
+			i+=1
+			_tl_restore
+		else
+			printf '%s\tunbalanced ): %s\n' "${lno}" "${line}"
+			return 1
+		fi
+		;;
+	esac
+	return 0
+}
+
+# _tl_pipe OP -- && || | |&: the command goes on past it.
+_tl_pipe() {
+	_tl_endword
+	_tl_emit "${1}"
+	i+=${#1}
+	cmd=1
+	nw=0
+	pop=1
+}
+
+# _tl_heredoc -- << or <<- at line[i]: queue its delimiter; the body starts
+# on the next line and is skipped there.
+_tl_heredoc() {
+	_tl_endword
+	_tl_mark
+	strip=0
+	j=$((i + 2))
+	if [[ ${line:j:1} == - ]]; then
+		strip=1
+		j+=1
+	fi
+	while [[ ${line:j:1} == [[:blank:]] ]]; do j+=1; done
+	d=""
+	q=""
+	while ((j < n)); do
+		ch="${line:j:1}"
+		if [[ -n ${q} ]]; then
+			if [[ ${ch} == "${q}" ]]; then
+				q=""
+			else
+				d+="${ch}"
+			fi
+		else
+			case "${ch}" in
+			"'" | '"') q="${ch}" ;;
+			"\\")
+				j+=1
+				d+="${line:j:1}"
+				;;
+			[[:space:]] | ';' | '&' | '|' | '<' | '>' | '(' | ')') break ;;
+			*) d+="${ch}" ;;
+			esac
+		fi
+		j+=1
+	done
+	hdp+=("${strip}${d}")
+	_tl_emit '<<'
+	i=j
+}
+
+# _tl_judge -- is the top-level command in tk[] one that only declares? If
+# not, print it as "LINE<TAB>TEXT" and fail.
+_tl_judge() {
+	local -i nt=${#tk[@]} k=0
+	((nt)) || return 0
+	local t first="" t0="${tk[0]}"
+	local -i hdoc=0 at=0
+	local S='"?\$\{?BASH_SOURCE(\[0\])?\}?"?' Z='"?\$\{?0\}?"?'
+	local sp_='[[:space:]]*' T='\[\[?[[:space:]]+' TE='[[:space:]]+\]\]?'
+	local EX="(${S}${sp_}(==|=|-ef)${sp_}${Z}|${Z}${sp_}(==|=|-ef)${sp_}${S})"
+	local SR="(${S}${sp_}!=${sp_}${Z}|${Z}${sp_}!=${sp_}${S})"
+	local RG="\(?${sp_}return([[:space:]]+0)?${sp_}(2>${sp_}/dev/null)?"
+	RG+="${sp_}\)?${sp_}(2>${sp_}/dev/null)?"
+	local re
+
+	# A function definition: header, the body's open and close, and
+	# nothing after them but redirections.
+	if [[ ${t0} == function ]]; then
+		k=2
+		[[ ${tk[2]:-} == '()' ]] && k=3
+	elif [[ ${t0} =~ ^[^=${PH}]+\(\)$ ]]; then
+		k=1
+	elif [[ ${tk[1]:-} == '()' ]]; then
+		k=2
+	fi
+	if ((k)) && [[ ${tk[k]:-} == "${OPEN}"* &&
+		${tk[k + 1]:-} == "${CLOSE}"* ]] && _tl_only_redirs $((k + 2)); then
+		return 0
+	fi
+
+	# A main guard. The || / && the guard relies on must be the only kind
+	# in the list: `guard && main || cmd` runs cmd when sourced.
+	re="^${RG}${sp_}\|\|"
+	[[ ${etext} =~ ${re} ]] && ! _tl_has '&&' && return 0
+	re="^${T}${EX}${TE}${sp_}&&"
+	[[ ${etext} =~ ${re} ]] && ! _tl_has '||' && return 0
+	re="^${T}${SR}${TE}${sp_}\|\|"
+	[[ ${etext} =~ ${re} ]] && ! _tl_has '&&' && return 0
+	re="^if[[:space:]]+(${T}${EX}${TE}|!${sp_}${RG})${sp_}(;|$)"
+	if [[ ${t0} == "${OPEN}if" && ${etext} =~ ${re} ]] && ((!eelse)) &&
+		_tl_only_redirs "$(_tl_fi_end)"; then
+		return 0
+	fi
+
+	# Otherwise every command of the && / || / | list must declare.
+	# An if is judged branch by branch: its condition and each command
+	# of its branches, as tokens split at ; then elif else and fi.
+	for ((k = 0; k <= nt; k++)); do
+		t='&&'
+		((k < nt)) && t="${tk[k]}"
+		case "${t}" in
+		'&&' | '||' | '|' | '|&' | ';' | "${OPEN}if" | "${CLOSE}fi")
+			case "${first}" in
+			'' | source | . | set | shopt | declare | typeset | readonly | \
+				export | unset | true | : | test | '[' | "${OPEN}[[") ;;
+			read) ((hdoc)) || break ;;
+			*) break ;;
+			esac
+			first=""
+			hdoc=0
+			continue
+			;;
+		esac
+		if [[ ${t} =~ ^[0-9]*\&?[\<\>] ]]; then
+			[[ ${t} == '<<'* ]] && hdoc=1
+		elif [[ -z ${first} ]] &&
+			[[ ! ${t} =~ ^[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?\+?= ]]; then
+			first="${t}"
+			at=k
+		fi
+	done
+	[[ -z ${first} ]] && return 0
+	t="${tkt[at]}"
+	printf '%s\t%s\n' "${tkl[at]}" "${t%"${t##*[![:space:]]}"}"
+	return 1
+}
+
+# _tl_fi_end -- the index just past the fi that closes the if tk[] opens.
+_tl_fi_end() {
+	local -i k=0 depth=0
+	for ((k = 0; k < ${#tk[@]}; k++)); do
+		case "${tk[k]}" in
+		"${OPEN}if") depth=$((depth + 1)) ;;
+		"${CLOSE}fi")
+			depth=$((depth - 1))
+			if ((depth == 0)); then
+				echo $((k + 1))
+				return 0
+			fi
+			;;
+		esac
+	done
+	echo "${#tk[@]}"
+}
+
+_tl_has() {
+	local t
+	for t in "${tk[@]}"; do
+		[[ ${t} == "${1}" ]] && return 0
+	done
+	return 1
+}
+
+# _tl_only_redirs K -- tk[K..] holds nothing but redirections.
+_tl_only_redirs() {
+	local t
+	for t in "${tk[@]:${1}}"; do
+		[[ ${t} =~ ^[0-9]*\&?[\<\>] ]] || return 1
+	done
+	return 0
+}
+
+# _list_fns SCRIPT LANG SPEC -- print the functions SCRIPT defines, one per
+# line. Python is parsed (ast), never run. Anything else is treated as
+# bash / sh and SOURCED in a child bash, so the functions it gets from the
+# libraries it sources are listed too -- but only once _toplevel_cmd finds
+# nothing at its top level that would run (just-bashit#121).
 _list_fns() {
-	local script="${1}" lang="${2}"
+	local script="${1}" lang="${2}" spec="${3}" found
 	if [[ ${lang} == "python" ]]; then
 		python3 - "${script}" <<'PYEOF'
 import ast, sys
@@ -714,7 +1769,24 @@ print('\n'.join(names))
 PYEOF
 		return
 	fi
-	bash -c "
+	if ! found=$(_toplevel_cmd "${script}"); then
+		# shellcheck disable=SC2016  # the guard is shown, not expanded
+		_err "$(printf '%s\n' \
+			"-l will not source ${spec}: line ${found%%$'\t'*} of ${script}" \
+			"runs a command at its top level:" \
+			"  ${found#*$'\t'}" \
+			"-l lists functions by sourcing the script, so it lists one only" \
+			"when its top level declares (functions, assignments, source, set)" \
+			"and its work sits behind a main guard, such as" \
+			'  if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi')"
+	fi
+	# The child starts from bash's default options, not this script's
+	# `set -euo pipefail`. Exported SHELLOPTS (kcov exports it to trace
+	# children) carried errexit in, and `compgen -A function` returns 1 while
+	# no function exists yet, so the child died on its first line; with
+	# nounset too, kcov's PS4 naming BASH_SOURCE failed in every subshell.
+	# Listing a script's functions must not depend on jbx's own options.
+	env -u BASH_ENV -u SHELLOPTS -u BASHOPTS bash -c "
         _b=\$(compgen -A function)
         # shellcheck source=/dev/null
         source '${script}' 2>/dev/null || true
@@ -732,7 +1804,11 @@ _run_python() {
 
 	if ! command -v uv >/dev/null 2>&1; then
 		_log "uv not found — installing via jb run"
-		"${0}" https://astral.sh/uv/install.sh
+		# -n reaches the nested run too, so the installer is not cached.
+		local nested=()
+		[[ ${OPT_NO_CACHE} -eq 1 ]] && nested=(-n)
+		[[ ${OPT_NO_VERIFY} -eq 1 ]] && nested+=(--no-verify)
+		"${0}" "${nested[@]+"${nested[@]}"}" https://astral.sh/uv/install.sh
 		hash -r 2>/dev/null || true
 		command -v uv >/dev/null 2>&1 ||
 			_err "uv install failed; try manually: jb run https://astral.sh/uv/install.sh"
@@ -804,16 +1880,17 @@ _run() {
 
 # ---- main -------------------------------------------------------------------
 
-URL=$(_resolve "${RAW_SPEC}")
-_log "resolved: ${URL}"
-
 # -n fetches into a directory this shell owns, so it is THIS shell's EXIT
 # trap that removes it, after the script has run -- not the trap of the
-# $(...) subshell _acquire runs in.
+# $(...) subshell _acquire runs in. Made before _resolve, whose aliases.toml
+# lookup fetches into it too (just-bashit#122).
 if [[ ${OPT_NO_CACHE} -eq 1 ]]; then
 	_NO_CACHE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/just-runit.XXXXXX")
 	trap 'rm -rf "${_NO_CACHE_DIR}"' EXIT
 fi
+
+URL=$(_resolve "${RAW_SPEC}")
+_log "resolved: ${URL}"
 
 SCRIPT=$(_acquire "${URL}")
 _log "script: ${SCRIPT}"
@@ -830,7 +1907,7 @@ SCRIPT_LANG=$(_detect_lang "${SCRIPT}" "${RAW_SPEC}")
 _log "language: ${SCRIPT_LANG}"
 
 if [[ ${OPT_LIST} -eq 1 ]]; then
-	_list_fns "${SCRIPT}" "${SCRIPT_LANG}"
+	_list_fns "${SCRIPT}" "${SCRIPT_LANG}" "${RAW_SPEC}"
 	exit 0
 fi
 
