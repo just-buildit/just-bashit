@@ -66,14 +66,25 @@ The `certs` step queries Windows via `powershell.exe`:
 Get-ChildItem -Path Cert:\LocalMachine\Root, Cert:\CurrentUser\Root
 ```
 
-It exports these root certificates in PEM format into
-`/usr/local/share/ca-certificates/windows-roots.crt` (or the equivalent anchor
-path on Fedora, RHEL, and Arch) and runs the distro's certificate updater
-(`update-ca-certificates` or `update-ca-trust`). The updater merges the
-distro's Mozilla CA bundle and the exported Windows root certificates into the
-system certificate bundle (`/etc/ssl/certs/ca-certificates.crt`).
+It writes them, once each, as one PEM file named `windows-roots.crt` in the
+distro's anchor directory, then runs that distro's updater, which merges them
+with the distro's Mozilla CA bundle into the system bundle that `curl`, `git`
+and OpenSSL read:
 
-On non-WSL machines, this step is safely skipped.
+| Distro                 | Anchor directory                            | Updater                   |
+| ---------------------- | ------------------------------------------- | ------------------------- |
+| Debian, Ubuntu, Alpine | `/usr/local/share/ca-certificates`          | `update-ca-certificates`  |
+| Fedora, RHEL           | `/etc/pki/ca-trust/source/anchors`          | `update-ca-trust extract` |
+| Arch                   | `/etc/ca-certificates/trust-source/anchors` | `update-ca-trust extract` |
+| openSUSE               | `/etc/pki/trust/anchors`                    | `update-ca-certificates`  |
+
+The store is picked by which anchor directory exists, not by which updater is
+on `PATH`. Re-running the step is how a root added on Windows reaches WSL; when
+the export has not changed it writes nothing and needs no `sudo`. If the
+updater fails, the anchor file is removed again, so the next run retries.
+
+The step is skipped, with the reason in the summary, off WSL, on a distro none
+of these rows matches, and when `powershell.exe` cannot be found.
 
 ______________________________________________________________________
 

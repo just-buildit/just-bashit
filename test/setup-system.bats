@@ -1606,41 +1606,147 @@ _admin_channel_stub() {
 }
 
 # ---------------------------------------------------------------------------
-# certs — WSL certificate sync
+# certs — Windows trusted roots into the WSL trust store
 # ---------------------------------------------------------------------------
 
+# _certs_fixture [STORE_DIR] -- a fake WSL with a Windows root store of two
+# certificates, a trust-store tree under JB_CERTS_ROOT holding STORE_DIR
+# (default Debian's), and stubs for powershell.exe, sudo and both updaters
+# that record each call in ${CALLS}. CERTS_UPDATER_EXIT sets the updaters'
+# exit status; CERTS_PS_OUT replaces what powershell.exe prints.
+_certs_fixture() {
+	local store="${1:-/usr/local/share/ca-certificates}" u
+	echo "Linux version 5.15.153.1-microsoft-standard-WSL2" >"${JB_PROC_VERSION}"
+	export JB_CERTS_ROOT="${BATS_TEST_TMPDIR}/root"
+	mkdir -p "${JB_CERTS_ROOT}${store}"
+	export CALLS="${BATS_TEST_TMPDIR}/calls"
+	: >"${CALLS}"
+	local stubs="${BATS_TEST_TMPDIR}/certs-stubs"
+	mkdir -p "${stubs}"
+	cat >"${stubs}/powershell.exe" <<-'EOF2'
+		#!/usr/bin/env bash
+		echo "powershell.exe" >>"${CALLS}"
+		if [[ -n ${CERTS_PS_OUT+set} ]]; then
+			printf '%s' "${CERTS_PS_OUT}"
+			exit 0
+		fi
+		printf -- '-----BEGIN CERTIFICATE-----\r\nQUFB\r\n-----END CERTIFICATE-----\r\n'
+		printf -- '-----BEGIN CERTIFICATE-----\r\nQkJC\r\n-----END CERTIFICATE-----\r\n'
+	EOF2
+	cat >"${stubs}/sudo" <<-'EOF2'
+		#!/usr/bin/env bash
+		exec "$@"
+	EOF2
+	for u in update-ca-certificates update-ca-trust; do
+		cat >"${stubs}/${u}" <<-EOF2
+			#!/usr/bin/env bash
+			echo "${u} \$*" >>"\${CALLS}"
+			exit "\${CERTS_UPDATER_EXIT:-0}"
+		EOF2
+	done
+	chmod +x "${stubs}"/*
+	export PATH="${stubs}:${PATH}"
+}
+
 @test 'certs: skipped when not running on WSL' {
-	local proc_ver="${BATS_TEST_TMPDIR}/proc_version"
-	echo "Linux version 6.8.0-generic" >"${proc_ver}"
-	JB_PROC_VERSION="${proc_ver}" run setup-system.sh -s certs
+	run setup-system.sh -s certs
 	assert_success
 	assert_output --partial "certs:   skipped (not WSL)"
 }
 
-@test 'certs: dry run on WSL previews certificate sync' {
-	local proc_ver="${BATS_TEST_TMPDIR}/proc_version"
-	echo "Linux version 5.15.153.1-microsoft-standard-WSL2" >"${proc_ver}"
-	local stubs="${BATS_TEST_TMPDIR}/stubs"
-	mkdir -p "${stubs}"
-	cat >"${stubs}/powershell.exe" <<-EOF
-		#!/bin/bash
-		exit 0
-	EOF
-	chmod +x "${stubs}/powershell.exe"
-	PATH="${stubs}:${PATH}" JB_PROC_VERSION="${proc_ver}" run setup-system.sh -n -s certs
+@test 'certs: installs the Windows roots and runs the updater once' {
+	_certs_fixture
+	local crt="${JB_CERTS_ROOT}/usr/local/share/ca-certificates/windows-roots.crt"
+	run setup-system.sh -s certs
 	assert_success
-	assert_output --partial "certs —"
-	assert_output --partial "would query Windows Trusted Root certificates"
+	assert_output --partial "certs:   ok (2 Windows roots in ${crt})"
+	# Carriage returns from PowerShell are gone, or the PEM does not parse.
+	run grep -c $'\r' "${crt}"
+	assert_output "0"
+	run grep -c -- '-----BEGIN CERTIFICATE-----' "${crt}"
+	assert_output "2"
+	run cat "${CALLS}"
+	assert_output "$(printf 'powershell.exe\nupdate-ca-certificates ')"
+}
+
+@test 'certs: a re-run with nothing new neither writes nor updates' {
+	_certs_fixture
+	run setup-system.sh -s certs
+	assert_success
+	: >"${CALLS}"
+	run setup-system.sh -s certs
+	assert_success
+	assert_output --partial "certs:   ok (2 Windows roots, unchanged)"
+	run cat "${CALLS}"
+	assert_output "powershell.exe"
+}
+
+@test 'certs: a failed update removes the anchor and the run goes on' {
+	_certs_fixture
+	local crt="${JB_CERTS_ROOT}/usr/local/share/ca-certificates/windows-roots.crt"
+	CERTS_UPDATER_EXIT=1 run setup-system.sh -s certs,git
+	assert_success
+	assert_output --partial "certs:   failed (update-ca-certificates)"
+	# The step after it still ran, and the summary was printed.
+	assert_output --partial "git:"
+	assert [ ! -e "${crt}" ]
+	# So the next run retries rather than calling it unchanged.
+	: >"${CALLS}"
+	run setup-system.sh -s certs
+	assert_output --partial "certs:   ok (2 Windows roots in ${crt})"
+}
+
+@test 'certs: an empty export writes nothing' {
+	_certs_fixture
+	CERTS_PS_OUT="" run setup-system.sh -s certs
+	assert_success
+	assert_output --partial "certs:   failed (empty export)"
+	assert [ ! -e "${JB_CERTS_ROOT}/usr/local/share/ca-certificates/windows-roots.crt" ]
+	run cat "${CALLS}"
+	assert_output "powershell.exe"
+}
+
+@test 'certs: the anchor directory picks the store, not the updater on PATH' {
+	# Arch: update-ca-certificates may be on PATH too (as on openSUSE), but
+	# Arch reads only its own anchors directory.
+	_certs_fixture /etc/ca-certificates/trust-source/anchors
+	run setup-system.sh -s certs
+	assert_success
+	assert [ -e "${JB_CERTS_ROOT}/etc/ca-certificates/trust-source/anchors/windows-roots.crt" ]
+	assert [ ! -e "${JB_CERTS_ROOT}/usr/local/share/ca-certificates" ]
+	run cat "${CALLS}"
+	assert_output "$(printf 'powershell.exe\nupdate-ca-trust extract')"
+}
+
+@test 'certs: skipped on a distro with no trust store it knows' {
+	_certs_fixture
+	rm -rf "${JB_CERTS_ROOT}"
+	run setup-system.sh -s certs
+	assert_success
+	assert_output --partial "certs:   skipped (no known trust store)"
+	run cat "${CALLS}"
+	assert_output ""
+}
+
+@test 'certs: dry run prints the commands and changes nothing' {
+	_certs_fixture
+	local crt="${JB_CERTS_ROOT}/usr/local/share/ca-certificates/windows-roots.crt"
+	run setup-system.sh -n -s certs
+	assert_success
+	assert_output --regexp "would run: (sudo )?install -m 0644 <exported roots> ${crt}"
+	assert_output --regexp "would run: (sudo )?update-ca-certificates"
 	assert_output --partial "certs:   ok (dry run)"
+	assert [ ! -e "${crt}" ]
+	run cat "${CALLS}"
+	assert_output ""
 }
 
 @test 'certs: skipped on WSL when powershell.exe is absent' {
-	local proc_ver="${BATS_TEST_TMPDIR}/proc_version"
-	echo "Linux version 5.15.153.1-microsoft-standard-WSL2" >"${proc_ver}"
+	_certs_fixture
+	rm "${BATS_TEST_TMPDIR}/certs-stubs/powershell.exe"
 	local p
 	p="$(_path_without powershell.exe)"
-	touch "${BATS_TEST_TMPDIR}/empty_mounts"
-	PATH="${p}" JB_PROC_MOUNTS="${BATS_TEST_TMPDIR}/empty_mounts" JB_PROC_VERSION="${proc_ver}" run setup-system.sh -s certs
+	PATH="${p}" run setup-system.sh -s certs
 	assert_success
 	assert_output --partial "powershell.exe not found"
 	assert_output --partial "certs:   skipped (no powershell.exe)"

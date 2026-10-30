@@ -208,6 +208,27 @@ _run() {
 _have() { command -v "$1" >/dev/null 2>&1; }
 
 # ---------------------------------------------------------------------------
+# _sudo_init — the privilege prefix, derived the same way install-deps
+# derives its own: nothing when already root, sudo when it exists, and bare
+# otherwise so the failure comes from the command that actually needed root.
+#
+# An ARRAY, because IFS is newline+tab here: an empty string variable would
+# expand to one empty argument rather than to nothing.
+# ---------------------------------------------------------------------------
+_SUDO=()
+_sudo_init() {
+	if [[ $(id -u) -ne 0 ]] && _have sudo; then
+		_SUDO=(sudo)
+	fi
+}
+
+# _priv CMD... — _run with that prefix in front, so --dry-run prints
+# exactly the command a real run would execute, sudo included.
+_priv() {
+	_run "${_SUDO[@]+"${_SUDO[@]}"}" "$@"
+}
+
+# ---------------------------------------------------------------------------
 # _asset NAME — path to a readable copy of a sibling file, fetching it from
 # the Pages CDN when this script is running standalone from jbx's cache.
 #
@@ -493,18 +514,67 @@ step_deps() {
 # ---------------------------------------------------------------------------
 _PROC_VERSION="${JB_PROC_VERSION:-/proc/version}"
 
-# _on_wsl -- true inside a WSL distro.
+# _on_wsl -- true inside a WSL distro. The certs step (Windows roots), the
+# ssh step (box key adoption) and the sshd step (path translator) ask it.
 _on_wsl() {
 	[[ -r ${_PROC_VERSION} ]] && grep -qi microsoft "${_PROC_VERSION}"
 }
 
 # ---------------------------------------------------------------------------
 # certs — WSL only: export Windows Trusted Root certificates via PowerShell
-# and install them into the distro trust store (which merges them with the
-# Mozilla CA bundle).
+# and install them as one anchor file in the distro trust store, whose
+# updater merges them with the Mozilla CA bundle.
 # ---------------------------------------------------------------------------
+
+# Prefixed onto every trust-store path, so the suite can install into a
+# throwaway tree instead of the runner's real /etc.
+_CERTS_ROOT="${JB_CERTS_ROOT:-}"
+
+# Each distro family's anchor directory and the updater that reads it, one
+# row each. The directory is what the distro's ca-certificates package
+# creates, so its presence is the signal -- not the updater alone: openSUSE
+# has update-ca-certificates but reads /etc/pki/trust/anchors, and Arch has
+# update-ca-trust but reads /etc/ca-certificates/trust-source/anchors, so
+# choosing by updater wrote an anchor neither would ever read.
+_CERTS_STORES=(
+	"/usr/local/share/ca-certificates update-ca-certificates"           # Debian, Ubuntu, Alpine
+	"/etc/pki/ca-trust/source/anchors update-ca-trust extract"          # Fedora, RHEL
+	"/etc/ca-certificates/trust-source/anchors update-ca-trust extract" # Arch
+	"/etc/pki/trust/anchors update-ca-certificates"                     # openSUSE
+)
+
+# _certs_have_updater NAME -- is NAME runnable as root? sbin is checked by
+# path because a non-root PATH on Debian does not include it, while sudo's
+# secure_path does.
+_certs_have_updater() {
+	_have "$1" || [[ -x /usr/sbin/$1 || -x /sbin/$1 ]]
+}
+
+# _certs_store -- print the first row whose directory exists and whose
+# updater is installed, or return 1.
+_certs_store() {
+	local row dir updater
+	for row in "${_CERTS_STORES[@]}"; do
+		dir="${row%% *}"
+		updater="${row#* }"
+		updater="${updater%% *}"
+		if [[ -d ${_CERTS_ROOT}${dir} ]] && _certs_have_updater "${updater}"; then
+			printf '%s\n' "${row}"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# The PowerShell that prints every Windows trusted root as PEM, once each:
+# CurrentUser\Root shows the machine's roots as well, so without the
+# thumbprint dedupe most certificates would appear twice. PowerShell's own
+# strings are single-quoted: a double quote is what the WSL interop layer
+# has to re-escape on the way into a Windows command line.
+_CERTS_PS="Get-ChildItem -Path Cert:\\LocalMachine\\Root, Cert:\\CurrentUser\\Root -ErrorAction SilentlyContinue | Where-Object { \$_.RawData } | Sort-Object -Property Thumbprint -Unique | ForEach-Object { '-----BEGIN CERTIFICATE-----'; [System.Convert]::ToBase64String(\$_.RawData, 'InsertLineBreaks'); '-----END CERTIFICATE-----' }"
+
 step_certs() {
-	_head "certs — sync Windows trusted root certificates into WSL"
+	_head "certs — Windows trusted root certificates"
 
 	if ! _on_wsl; then
 		_info "not WSL — no Windows root certificates to import"
@@ -512,96 +582,76 @@ step_certs() {
 		return 0
 	fi
 
+	local row cert_dir cert_file updater=()
+	if ! row="$(_certs_store)"; then
+		_warn "no trust store this step knows (with its updater installed)"
+		_result "certs:   skipped (no known trust store)"
+		return 0
+	fi
+	cert_dir="${_CERTS_ROOT}${row%% *}"
+	cert_file="${cert_dir}/windows-roots.crt"
+	IFS=' ' read -r -a updater <<<"${row#* }"
+
 	local ps_exe
-	ps_exe="$(win-exe powershell.exe)" || ps_exe=""
-	if [[ -z ${ps_exe} ]]; then
+	if ! ps_exe="$(win-exe powershell.exe)"; then
 		_warn "powershell.exe not found — cannot export Windows certificates"
 		_result "certs:   skipped (no powershell.exe)"
 		return 0
 	fi
 
-	# Determine distro certificate store directory and update command
-	local cert_dir update_cmd=()
-	if [[ -d /usr/local/share/ca-certificates ]] || _have update-ca-certificates; then
-		cert_dir="/usr/local/share/ca-certificates"
-		update_cmd=(update-ca-certificates)
-	elif [[ -d /etc/pki/ca-trust/source/anchors ]] || _have update-ca-trust; then
-		cert_dir="/etc/pki/ca-trust/source/anchors"
-		update_cmd=(update-ca-trust extract)
-	elif [[ -d /etc/ca-certificates/trust-source/anchors ]] || _have trust; then
-		cert_dir="/etc/ca-certificates/trust-source/anchors"
-		update_cmd=(trust extract-compat)
-	else
-		cert_dir="/usr/local/share/ca-certificates"
-		update_cmd=(update-ca-certificates)
-	fi
-
-	local cert_file="${cert_dir}/windows-roots.crt"
-
+	_sudo_init
 	if [[ ${DRY_RUN} -eq 1 ]]; then
-		_info "would query Windows Trusted Root certificates via ${ps_exe}"
-		_info "would install exported certificates to ${cert_file}"
-		local sudo_pfx=()
-		if [[ $(id -u) -ne 0 ]] && _have sudo; then
-			sudo_pfx=(sudo)
-		fi
-		(
-			IFS=' '
-			_info "would run: ${sudo_pfx[*]} mkdir -p ${cert_dir}"
-			_info "would run: ${sudo_pfx[*]} cp <exported-certs> ${cert_file}"
-			_info "would run: ${sudo_pfx[*]} chmod 644 ${cert_file}"
-			_info "would run: ${sudo_pfx[*]} ${update_cmd[*]}"
-		)
+		_info "would export Windows trusted roots via ${ps_exe}"
+		_priv install -m 0644 "<exported roots>" "${cert_file}"
+		_priv "${updater[@]}"
 		_result "certs:   ok (dry run)"
 		return 0
 	fi
 
-	local tmp_crt
-	tmp_crt="$(mktemp /tmp/jb-windows-roots.XXXXXX.crt)" || {
-		_warn "cannot create temporary certificate file"
-		_result "certs:   failed (mktemp failed)"
-		return 1
-	}
-
-	_info "exporting Windows Root certificates..."
-	local ps_cmd
-	ps_cmd="Get-ChildItem -Path Cert:\LocalMachine\Root, Cert:\CurrentUser\Root -ErrorAction SilentlyContinue | Where-Object { \$_.RawData } | ForEach-Object { '-----BEGIN CERTIFICATE-----'; [System.Convert]::ToBase64String(\$_.RawData, 'InsertLineBreaks'); '-----END CERTIFICATE-----' }"
-
-	if ! "${ps_exe}" -NoProfile -Command "${ps_cmd}" | tr -d '\r' >"${tmp_crt}" 2>/dev/null; then
+	local tmp_crt count
+	tmp_crt="$(mktemp "${TMPDIR:-/tmp}/jb-windows-roots.XXXXXX")"
+	_info "exporting Windows trusted root certificates"
+	if ! "${ps_exe}" -NoProfile -NonInteractive -Command "${_CERTS_PS}" |
+		tr -d '\r' >"${tmp_crt}"; then
 		rm -f "${tmp_crt}"
-		_warn "failed to export certificates from Windows PowerShell"
-		_result "certs:   failed (powershell query error)"
-		return 1
+		_warn "PowerShell could not export the Windows root store"
+		_result "certs:   failed (export)"
+		return 0
 	fi
-
-	local count
-	count=$(grep -c -- '-----BEGIN CERTIFICATE-----' "${tmp_crt}" || true)
+	count="$(grep -c -- '-----BEGIN CERTIFICATE-----' "${tmp_crt}" || true)"
 	if [[ ${count} -eq 0 ]]; then
 		rm -f "${tmp_crt}"
-		_warn "no certificates exported from Windows root store"
+		_warn "the Windows root store exported no certificates"
 		_result "certs:   failed (empty export)"
-		return 1
-	fi
-	_info "found ${count} certificate(s) from Windows"
-
-	local sudo_cmd=()
-	if [[ $(id -u) -ne 0 ]] && _have sudo; then
-		sudo_cmd=(sudo)
+		return 0
 	fi
 
-	"${sudo_cmd[@]+"${sudo_cmd[@]}"}" mkdir -p "${cert_dir}"
-	"${sudo_cmd[@]+"${sudo_cmd[@]}"}" cp "${tmp_crt}" "${cert_file}"
-	"${sudo_cmd[@]+"${sudo_cmd[@]}"}" chmod 644 "${cert_file}"
+	# Re-running is how a new Windows root reaches WSL, and an unchanged
+	# export needs neither root nor the updater. That shortcut is only sound
+	# because a failed update below removes the anchor again: a file left
+	# behind by one would otherwise read as "unchanged" forever.
+	if cmp -s "${tmp_crt}" "${cert_file}"; then
+		rm -f "${tmp_crt}"
+		_result "certs:   ok (${count} Windows roots, unchanged)"
+		return 0
+	fi
+
+	if ! _priv install -m 0644 "${tmp_crt}" "${cert_file}"; then
+		rm -f "${tmp_crt}"
+		_warn "could not write ${cert_file}"
+		_result "certs:   failed (write ${cert_file})"
+		return 0
+	fi
 	rm -f "${tmp_crt}"
 
-	_info "updating WSL certificate store (${update_cmd[*]})..."
-	if "${sudo_cmd[@]+"${sudo_cmd[@]}"}" "${update_cmd[@]}"; then
-		_result "certs:   ok (${count} cert(s) installed into ${cert_file})"
-	else
-		_warn "certificate update command failed (${update_cmd[*]})"
-		_result "certs:   failed (${update_cmd[0]} failed)"
-		return 1
+	_info "updating the trust store (${updater[*]})"
+	if ! _priv "${updater[@]}"; then
+		_priv rm -f "${cert_file}" || true
+		_warn "${updater[*]} failed — ${cert_file} removed again"
+		_result "certs:   failed (${updater[0]})"
+		return 0
 	fi
+	_result "certs:   ok (${count} Windows roots in ${cert_file})"
 }
 
 # shell — the bashrc/profile templates plus their one-line hooks.
@@ -1357,27 +1407,6 @@ _pwsh_arch() {
 }
 
 # ---------------------------------------------------------------------------
-# _pwsh_sudo_init — the privilege prefix, derived the same way install-deps
-# derives its own: nothing when already root, sudo when it exists, and bare
-# otherwise so the failure comes from the command that actually needed root.
-#
-# An ARRAY, because IFS is newline+tab here: an empty string variable would
-# expand to one empty argument rather than to nothing.
-# ---------------------------------------------------------------------------
-_PWSH_SUDO=()
-_pwsh_sudo_init() {
-	if [[ $(id -u) -ne 0 ]] && _have sudo; then
-		_PWSH_SUDO=(sudo)
-	fi
-}
-
-# _pwsh_priv CMD... — _run with that prefix in front, so --dry-run prints
-# exactly the command a real run would execute, sudo included.
-_pwsh_priv() {
-	_run "${_PWSH_SUDO[@]+"${_PWSH_SUDO[@]}"}" "$@"
-}
-
-# ---------------------------------------------------------------------------
 # _pwsh_install_linux — the pinned tarball into /opt, symlinked onto PATH.
 # ---------------------------------------------------------------------------
 _pwsh_install_linux() {
@@ -1409,14 +1438,14 @@ _pwsh_install_linux() {
 		return 1
 	fi
 
-	_pwsh_sudo_init
+	_sudo_init
 	# -f on the symlink, not a bare ln: re-running this step is how an
 	# upgrade lands, and a second ln over an existing link is an error
 	# rather than a no-op.
-	if _pwsh_priv mkdir -p "${_PWSH_DIR}" &&
-		_pwsh_priv tar zxf "${tarball}" -C "${_PWSH_DIR}" &&
-		_pwsh_priv chmod +x "${_PWSH_DIR}/pwsh" &&
-		_pwsh_priv ln -sf "${_PWSH_DIR}/pwsh" "${_PWSH_LINK}"; then
+	if _priv mkdir -p "${_PWSH_DIR}" &&
+		_priv tar zxf "${tarball}" -C "${_PWSH_DIR}" &&
+		_priv chmod +x "${_PWSH_DIR}/pwsh" &&
+		_priv ln -sf "${_PWSH_DIR}/pwsh" "${_PWSH_LINK}"; then
 		_run rm -f "${tarball}"
 		return 0
 	fi
