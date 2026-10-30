@@ -3,13 +3,13 @@ load 'test_helper/common-setup'
 _common_setup
 bats_require_minimum_version 1.5.0
 
-# `jbx -l SPEC` lists a shell script's functions by SOURCING it in a child
-# bash, so the functions it gets from the libraries it sources are listed
-# too. A script whose top level does work therefore ran, in full, under a
-# flag that reads as inspection: `jbx -l setup-system` set the machine up
-# (just-bashit#121). -l now reads the script first and refuses one whose top
-# level runs a command, naming the line; it sources only a script whose top
-# level declares, or keeps its work behind a main guard.
+# `jbx -l SPEC` lists a shell script's functions. It used to SOURCE the
+# script in a child bash, so a script whose top level does work ran, in
+# full, under a flag that reads as inspection: `jbx -l setup-system` set the
+# machine up (just-bashit#121). Refusing a top level that runs a command
+# still left `X=$(cmd)` running cmd, an assignment (just-bashit#143). -l now
+# reads the script and runs none of it: every test here counts the side
+# effects of the fixture's top level, and requires none.
 
 setup() {
 	fixtures="${BATS_TEST_TMPDIR}/fixtures"
@@ -19,14 +19,49 @@ setup() {
 	export XDG_CACHE_HOME="${BATS_TEST_TMPDIR}/cache"
 }
 
-@test '-l refuses a script with a top-level command, and does not run it' {
-	printf '#!/usr/bin/env bash\nhello() { :; }\ntouch %q\n' "${ran}" \
-		>"${fixtures}/tool.sh"
+@test '-l lists a script with a top-level command, and does not run it' {
+	printf '#!/usr/bin/env bash\nhello() { :; }\ntouch %q\nbye() { :; }\n' \
+		"${ran}" >"${fixtures}/tool.sh"
 	run just-runit -l https://fixture.invalid/tool.sh
-	assert_failure
-	assert_output --partial 'will not source https://fixture.invalid/tool.sh'
-	assert_output --partial 'line 3 of'
-	assert_output --partial "touch ${ran}"
+	assert_success
+	assert_output "$(printf 'hello\nbye' | sort)"
+	refute [ -e "${ran}" ]
+}
+
+# just-bashit#143: an assignment's command substitution ran when -l
+# sourced the script, whatever the gate before it allowed.
+@test '-l runs no command substitution in a top-level assignment' {
+	cat >"${fixtures}/tool.sh" <<-EOF
+		X=\$(echo sub >>${ran})
+		_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && echo dir >>${ran})"
+		[[ -n \$(echo test >>${ran}) ]] && Y=1
+		f() { :; }
+	EOF
+	run just-runit -l https://fixture.invalid/tool.sh
+	assert_success
+	assert_output 'f'
+	refute [ -e "${ran}" ]
+}
+
+@test '-l lists a function defined after an empty array assignment' {
+	# shellcheck disable=SC2016  # the fixture's own expansions
+	printf '_R=()\n_result() { _R+=("$1"); }\n' >"${fixtures}/tool.sh"
+	run just-runit -l https://fixture.invalid/tool.sh
+	assert_success
+	assert_output '_result'
+}
+
+@test '-l lists the functions a top-level if defines, and runs neither branch' {
+	cat >"${fixtures}/tool.sh" <<-EOF
+		if [[ \$(echo cond >>${ran}) ]]; then
+			on() { :; }
+		else
+			off() { :; }
+		fi
+	EOF
+	run just-runit -l https://fixture.invalid/tool.sh
+	assert_success
+	assert_output "$(printf 'off\non')"
 	refute [ -e "${ran}" ]
 }
 
@@ -75,7 +110,7 @@ setup() {
 	refute [ -e "${ran}" ]
 }
 
-@test '-l refuses a command hidden after a function whose body has a heredoc' {
+@test '-l does not run a command after a function whose body has a heredoc' {
 	cat >"${fixtures}/tool.sh" <<-EOF
 		helper() {
 			cat <<'TXT'
@@ -85,25 +120,57 @@ setup() {
 		touch ${ran}
 	EOF
 	run just-runit -l https://fixture.invalid/tool.sh
-	assert_failure
-	assert_output --partial 'line 6 of'
+	assert_success
+	assert_output 'helper'
 	refute [ -e "${ran}" ]
 }
 
+@test '-l refuses a script it cannot read to the end, naming the line' {
+	printf 'f() { :; }\ng() {\n\techo\n' >"${fixtures}/tool.sh"
+	run just-runit -l https://fixture.invalid/tool.sh
+	assert_failure
+	assert_output --partial '-l cannot read https://fixture.invalid/tool.sh'
+	assert_output --partial 'unterminated at end of file'
+}
+
 @test '-l still lists the functions a script gets from a library it sources' {
-	printf 'from_lib() { :; }\n' >"${BATS_TEST_TMPDIR}/lib.sh"
+	# The library's top level does work too: it is read, not run.
+	printf 'from_lib() { :; }\ntouch %q\n' "${ran}" \
+		>"${BATS_TEST_TMPDIR}/lib.sh"
 	printf 'source %q\nown() { :; }\n' "${BATS_TEST_TMPDIR}/lib.sh" \
 		>"${fixtures}/tool.sh"
 	run just-runit -l https://fixture.invalid/tool.sh
 	assert_success
 	assert_output "$(printf 'from_lib\nown')"
+	refute [ -e "${ran}" ]
 }
 
-@test '-l refuses setup-system, which has no main guard' {
+# A library named through an expansion is found by its last component
+# beside the script -- where jbx co-fetches just-bashit's -- not by running
+# the expansion; one that is not there is named on stderr.
+@test '-l finds a library sourced through an expansion beside the script' {
+	cp "${PROJECT_ROOT}"/src/just_bashit/*.sh "${fixtures}/"
+	run --separate-stderr just-runit -l just-bashit:logging
+	assert_success
+	assert_line 'log'
+	assert_line 'color-echo'
+	assert [ -z "${stderr}" ]
+	# shellcheck disable=SC2016  # the fixture's own expansions
+	printf 'source "$(echo %q)/gone.sh"\nown() { :; }\n' "${ran}" \
+		>"${fixtures}/tool.sh"
+	run --separate-stderr just-runit -l https://fixture.invalid/tool.sh
+	assert_success
+	assert_output 'own'
+	assert [ -n "${stderr}" ]
+	[[ ${stderr} == *'gone.sh'*'found only by running the script'* ]] || false
+	refute [ -e "${ran}" ]
+}
+
+@test '-l lists setup-system, which has no main guard, without running it' {
 	cp "${PROJECT_ROOT}/src/just_bashit/setup-system.sh" "${fixtures}/"
 	run just-runit -l https://fixture.invalid/setup-system.sh
-	assert_failure
-	assert_output --partial 'runs a command at its top level'
+	assert_success
+	assert_line 'step_pwsh'
 }
 
 # Every just-bashit library opens with the "must be sourced" guard,
