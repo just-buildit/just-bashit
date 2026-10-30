@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- **`jbx -l` reads a function whose body ends `[[ ... ]]`.** The reader that
+    lists functions without running the script took the newline after a
+    closing `]]` as part of the test rather than the end of the command, so
+    the next line's `}` read as an argument and the function never closed:
+    `jbx -l` refused the script, "unterminated at end of file". Only a
+    newline inside an open `[[ ]]` now continues it.
+
 - **`jbx SPEC FUNCTION` runs the script's top level once, not twice (#141).**
     It sourced the script in a separate child only to check that FUNCTION
     exists, then sourced it again to call it. One child now sources it,
