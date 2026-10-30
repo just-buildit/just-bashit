@@ -40,7 +40,13 @@ _fake_net() {
 		} >"${fakes}/${tool}"
 		chmod +x "${fakes}/${tool}"
 	done
-	PATH="${fakes}:$(_bin_without curl wget ping)"
+	local farm
+	farm="$(_bin_without curl wget ping)"
+	# The probe runs each tool under GNU timeout, which macOS has only from
+	# Homebrew's coreutils -- outside the system dirs the farm is built from.
+	# Linked alone, so its directory's other programs stay off PATH.
+	[[ -e ${farm}/timeout ]] || ln -s "$(command -v timeout)" "${fakes}/timeout"
+	PATH="${fakes}:${farm}"
 }
 
 @test 'test-internet-access help' {
