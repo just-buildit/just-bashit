@@ -12,6 +12,7 @@
     `scripts/docs-reports.sh` now falls back to the newest successful `main`
     run that kept the reports, and when none did, deploys without them with
     a `::warning::`. Only an API error fails the step.
+
 - **The test suite no longer reaches the network (#147).** Six
     `network.bats` tests probed live example.com, pypi.org and google.com,
     so a 503 from a third party's CDN turned an unrelated PR red; one
