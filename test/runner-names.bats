@@ -13,6 +13,13 @@ _common_setup
 # first argument is not one; `jbx` never takes subcommands, so a script
 # genuinely named `install` stays reachable as `jbx install`.
 
+# Every fetch these tests provoke is answered offline, from an empty fixture
+# directory: each one 404s, which is the failure they expect (#147).
+setup() {
+	mkdir -p "${BATS_TEST_TMPDIR}/fixtures"
+	_serve_fixtures "${BATS_TEST_TMPDIR}/fixtures"
+}
+
 _runner_as() { # $1 = name to invoke it under; rest = args
 	local name="${1}"
 	shift
