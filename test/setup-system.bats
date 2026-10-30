@@ -180,15 +180,16 @@ _write_deps_toml() {
 	run setup-system.sh -n
 	assert_success
 	assert_output --partial "deps —"
-	assert_output --partial "certs —"
 	assert_output --partial "shell —"
 	assert_output --partial "ssh —"
 	assert_output --partial "git —"
 	assert_output --partial "tools —"
 	assert_output --partial "pwsh —"
 	assert_output --partial "claude —"
-	# Opt-in: it opens a listening port, so only -s or the toml selects it.
+	# Opt-in: sshd opens a listening port and certs widens what the machine
+	# trusts, so only -s or the toml selects either.
 	refute_output --partial "sshd —"
+	refute_output --partial "certs —"
 }
 
 @test 'dry run prints a summary' {
@@ -1609,8 +1610,21 @@ _admin_channel_stub() {
 # certs — Windows trusted roots into the WSL trust store
 # ---------------------------------------------------------------------------
 
-# _certs_fixture [STORE_DIR] -- a fake WSL with a Windows root store of two
-# certificates, a trust-store tree under JB_CERTS_ROOT holding STORE_DIR
+# Two thumbprints, and the file each root lands in.
+_TP_A="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+_TP_B="BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+
+# _certs_export TP... -- what _CERTS_PS prints for these roots, CRLF and all.
+_certs_export() {
+	local tp
+	for tp in "$@"; do
+		printf '# %s\r\n-----BEGIN CERTIFICATE-----\r\n%s\r\n-----END CERTIFICATE-----\r\n' \
+			"${tp}" "${tp:0:4}"
+	done
+}
+
+# _certs_fixture [STORE_DIR] -- a fake WSL whose Windows root store holds
+# roots A and B, a trust-store tree under JB_CERTS_ROOT holding STORE_DIR
 # (default Debian's), and stubs for powershell.exe, sudo and both updaters
 # that record each call in ${CALLS}. CERTS_UPDATER_EXIT sets the updaters'
 # exit status; CERTS_PS_OUT replaces what powershell.exe prints.
@@ -1618,20 +1632,18 @@ _certs_fixture() {
 	local store="${1:-/usr/local/share/ca-certificates}" u
 	echo "Linux version 5.15.153.1-microsoft-standard-WSL2" >"${JB_PROC_VERSION}"
 	export JB_CERTS_ROOT="${BATS_TEST_TMPDIR}/root"
-	mkdir -p "${JB_CERTS_ROOT}${store}"
+	export CERTS_DIR="${JB_CERTS_ROOT}${store}"
+	mkdir -p "${CERTS_DIR}"
 	export CALLS="${BATS_TEST_TMPDIR}/calls"
 	: >"${CALLS}"
+	CERTS_PS_OUT="$(_certs_export "${_TP_A}" "${_TP_B}")"
+	export CERTS_PS_OUT
 	local stubs="${BATS_TEST_TMPDIR}/certs-stubs"
 	mkdir -p "${stubs}"
 	cat >"${stubs}/powershell.exe" <<-'EOF2'
 		#!/usr/bin/env bash
 		echo "powershell.exe" >>"${CALLS}"
-		if [[ -n ${CERTS_PS_OUT+set} ]]; then
-			printf '%s' "${CERTS_PS_OUT}"
-			exit 0
-		fi
-		printf -- '-----BEGIN CERTIFICATE-----\r\nQUFB\r\n-----END CERTIFICATE-----\r\n'
-		printf -- '-----BEGIN CERTIFICATE-----\r\nQkJC\r\n-----END CERTIFICATE-----\r\n'
+		printf '%s' "${CERTS_PS_OUT}"
 	EOF2
 	cat >"${stubs}/sudo" <<-'EOF2'
 		#!/usr/bin/env bash
@@ -1648,23 +1660,40 @@ _certs_fixture() {
 	export PATH="${stubs}:${PATH}"
 }
 
+# _certs_ls -- the anchor directory's file names, sorted, on one line.
+_certs_ls() {
+	(cd "${CERTS_DIR}" && ls | sort | tr '\n' ' ')
+}
+
+_crt() { printf 'jb-windows-root-%s.crt' "$(tr 'A-F' 'a-f' <<<"$1")"; }
+
+@test 'certs: a default run leaves the trust store alone' {
+	_certs_fixture
+	run setup-system.sh -x deps,tools,pwsh,claude
+	assert_success
+	refute_output --partial "certs —"
+	run cat "${CALLS}"
+	assert_output ""
+}
+
 @test 'certs: skipped when not running on WSL' {
 	run setup-system.sh -s certs
 	assert_success
 	assert_output --partial "certs:   skipped (not WSL)"
 }
 
-@test 'certs: installs the Windows roots and runs the updater once' {
+@test 'certs: installs one file per Windows root and runs the updater once' {
 	_certs_fixture
-	local crt="${JB_CERTS_ROOT}/usr/local/share/ca-certificates/windows-roots.crt"
 	run setup-system.sh -s certs
 	assert_success
-	assert_output --partial "certs:   ok (2 Windows roots in ${crt})"
+	assert_output --partial "certs:   ok (2 Windows roots in ${CERTS_DIR})"
+	assert_equal "$(_certs_ls)" "$(_crt "${_TP_A}") $(_crt "${_TP_B}") "
+	# Exactly one certificate each, so openssl rehash links every one.
+	run grep -c -- '-----BEGIN CERTIFICATE-----' "${CERTS_DIR}/$(_crt "${_TP_A}")"
+	assert_output "1"
 	# Carriage returns from PowerShell are gone, or the PEM does not parse.
-	run grep -c $'\r' "${crt}"
+	run grep -c $'\r' "${CERTS_DIR}/$(_crt "${_TP_B}")"
 	assert_output "0"
-	run grep -c -- '-----BEGIN CERTIFICATE-----' "${crt}"
-	assert_output "2"
 	run cat "${CALLS}"
 	assert_output "$(printf 'powershell.exe\nupdate-ca-certificates ')"
 }
@@ -1681,19 +1710,48 @@ _certs_fixture() {
 	assert_output "powershell.exe"
 }
 
-@test 'certs: a failed update removes the anchor and the run goes on' {
+@test 'certs: a root Windows no longer exports is removed, and only ours' {
 	_certs_fixture
-	local crt="${JB_CERTS_ROOT}/usr/local/share/ca-certificates/windows-roots.crt"
+	run setup-system.sh -s certs
+	assert_success
+	echo "the author's own" >"${CERTS_DIR}/corp-extra.crt"
+	CERTS_PS_OUT="$(_certs_export "${_TP_A}")"
+	: >"${CALLS}"
+	run setup-system.sh -s certs
+	assert_success
+	assert_output --partial "certs:   ok (1 Windows roots in ${CERTS_DIR})"
+	assert_equal "$(_certs_ls)" "corp-extra.crt $(_crt "${_TP_A}") "
+	run cat "${CALLS}"
+	assert_output "$(printf 'powershell.exe\nupdate-ca-certificates ')"
+}
+
+@test 'certs: a failed update puts the previous roots back and the run goes on' {
+	_certs_fixture
+	run setup-system.sh -s certs
+	assert_success
+	local before
+	before="$(_certs_ls)"
+	# B dropped and a new C added, then the updater fails.
+	CERTS_PS_OUT="$(_certs_export "${_TP_A}" CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC)"
 	CERTS_UPDATER_EXIT=1 run setup-system.sh -s certs,git
 	assert_success
 	assert_output --partial "certs:   failed (update-ca-certificates)"
 	# The step after it still ran, and the summary was printed.
 	assert_output --partial "git:"
-	assert [ ! -e "${crt}" ]
+	assert_equal "$(_certs_ls)" "${before}"
 	# So the next run retries rather than calling it unchanged.
-	: >"${CALLS}"
 	run setup-system.sh -s certs
-	assert_output --partial "certs:   ok (2 Windows roots in ${crt})"
+	assert_output --partial "certs:   ok (2 Windows roots in ${CERTS_DIR})"
+	assert_equal "$(_certs_ls)" \
+		"$(_crt "${_TP_A}") $(_crt CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC) "
+}
+
+@test 'certs: a failed first install leaves no Windows root behind' {
+	_certs_fixture
+	CERTS_UPDATER_EXIT=1 run setup-system.sh -s certs
+	assert_success
+	assert_output --partial "certs:   failed (update-ca-certificates)"
+	assert_equal "$(_certs_ls)" ""
 }
 
 @test 'certs: an empty export writes nothing' {
@@ -1701,7 +1759,7 @@ _certs_fixture() {
 	CERTS_PS_OUT="" run setup-system.sh -s certs
 	assert_success
 	assert_output --partial "certs:   failed (empty export)"
-	assert [ ! -e "${JB_CERTS_ROOT}/usr/local/share/ca-certificates/windows-roots.crt" ]
+	assert_equal "$(_certs_ls)" ""
 	run cat "${CALLS}"
 	assert_output "powershell.exe"
 }
@@ -1712,7 +1770,7 @@ _certs_fixture() {
 	_certs_fixture /etc/ca-certificates/trust-source/anchors
 	run setup-system.sh -s certs
 	assert_success
-	assert [ -e "${JB_CERTS_ROOT}/etc/ca-certificates/trust-source/anchors/windows-roots.crt" ]
+	assert [ -e "${CERTS_DIR}/$(_crt "${_TP_A}")" ]
 	assert [ ! -e "${JB_CERTS_ROOT}/usr/local/share/ca-certificates" ]
 	run cat "${CALLS}"
 	assert_output "$(printf 'powershell.exe\nupdate-ca-trust extract')"
@@ -1730,13 +1788,12 @@ _certs_fixture() {
 
 @test 'certs: dry run prints the commands and changes nothing' {
 	_certs_fixture
-	local crt="${JB_CERTS_ROOT}/usr/local/share/ca-certificates/windows-roots.crt"
 	run setup-system.sh -n -s certs
 	assert_success
-	assert_output --regexp "would run: (sudo )?install -m 0644 <exported roots> ${crt}"
+	assert_output --regexp "would run: (sudo )?install -m 0644 <each exported root> ${CERTS_DIR}/jb-windows-root-<thumbprint>.crt"
 	assert_output --regexp "would run: (sudo )?update-ca-certificates"
 	assert_output --partial "certs:   ok (dry run)"
-	assert [ ! -e "${crt}" ]
+	assert_equal "$(_certs_ls)" ""
 	run cat "${CALLS}"
 	assert_output ""
 }
@@ -1750,4 +1807,36 @@ _certs_fixture() {
 	assert_success
 	assert_output --partial "powershell.exe not found"
 	assert_output --partial "certs:   skipped (no powershell.exe)"
+}
+
+# _profile_ssl -- SSL_CERT_FILE as a shell sourcing the installed profile
+# sees it, with a system bundle under JB_CERTS_ROOT.
+_profile_ssl() {
+	setup-system.sh -s shell >/dev/null
+	export JB_CERTS_ROOT="${BATS_TEST_TMPDIR}/root"
+	mkdir -p "${JB_CERTS_ROOT}/etc/ssl/certs"
+	: >"${JB_CERTS_ROOT}/etc/ssl/certs/ca-certificates.crt"
+	run bash -c ". '${HOME}/.config/just-bashit/profile.sh'; echo \"ssl=\${SSL_CERT_FILE:-unset}\""
+}
+
+@test 'profile points SSL_CERT_FILE at the system bundle on WSL' {
+	echo "Linux version 5.15.153.1-microsoft-standard-WSL2" >"${JB_PROC_VERSION}"
+	unset SSL_CERT_FILE
+	_profile_ssl
+	assert_success
+	assert_output --partial "ssl=${JB_CERTS_ROOT}/etc/ssl/certs/ca-certificates.crt"
+}
+
+@test 'profile leaves SSL_CERT_FILE alone off WSL' {
+	unset SSL_CERT_FILE
+	_profile_ssl
+	assert_success
+	assert_output --partial "ssl=unset"
+}
+
+@test 'profile keeps an SSL_CERT_FILE already set on WSL' {
+	echo "Linux version 5.15.153.1-microsoft-standard-WSL2" >"${JB_PROC_VERSION}"
+	SSL_CERT_FILE=/the/users/own.pem _profile_ssl
+	assert_success
+	assert_output --partial "ssl=/the/users/own.pem"
 }

@@ -21,7 +21,7 @@ ______________________________________________________________________
 | Step     | What it does                                                                                                                                                                                                                                                    |
 | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `deps`   | Installs a baseline toolchain — C compiler, `make`, `cmake`, `pkg-config`, `git`, `curl`, ssh — then the packages of any `bootstrap.toml` in the current directory, both via [`install-deps`](install-deps.md).                                                 |
-| `certs`  | **WSL only**. Exports Windows Trusted Root certificates via PowerShell and installs them into the WSL distro trust store alongside the Mozilla CA bundle.                                                                                                       |
+| `certs`  | **Opt-in, WSL only**. Installs Windows' trusted root certificates into the distro trust store beside its Mozilla bundle, one file per root, and removes any Windows no longer trusts. See below.                                                                |
 | `shell`  | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                                                                                                                           |
 | `ssh`    | Tightens permissions across `~/.ssh` — repairing a directory copied from Windows, FAT, a zip or git — then creates an ed25519 key named after this host if there is no key at all. Prints the public key.                                                       |
 | `sshd`   | **Opt-in, Windows only** (WSL or native MSYS2 / Git Bash). Runs Windows' own OpenSSH server as a boot-time service — key-only, keys from `github.com/<user>.keys`, `pwsh.exe` as the login shell — so the machine answers ssh even when WSL is down. See below. |
@@ -32,8 +32,9 @@ ______________________________________________________________________
 
 They always run in that order, whatever order you list them in — packages
 land before the steps that need `git`, `curl` and `ssh-keygen`. Every step
-runs by default except `sshd`, which opens a listening port and so runs only
-when named with `-s` or in `bootstrap.toml`.
+runs by default except `sshd`, which opens a listening port, and `certs`, which
+widens what the machine trusts; each runs only when named with `-s` or in
+`bootstrap.toml`.
 
 ```bash
 jbx setup-system -s shell,ssh      # only these
@@ -60,16 +61,24 @@ installed in Windows' certificate store, but absent from the Linux distro. As a
 result, command-line tools (`curl`, `git`, `uv`, `apt`, Python) fail with TLS/SSL
 verification errors.
 
-The `certs` step queries Windows via `powershell.exe`:
+The `certs` step runs only when asked for:
+
+```bash
+jbx setup-system -s certs
+```
+
+It asks Windows for its trusted roots through `powershell.exe`:
 
 ```powershell
 Get-ChildItem -Path Cert:\LocalMachine\Root, Cert:\CurrentUser\Root
 ```
 
-It writes them, once each, as one PEM file named `windows-roots.crt` in the
-distro's anchor directory, then runs that distro's updater, which merges them
-with the distro's Mozilla CA bundle into the system bundle that `curl`, `git`
-and OpenSSL read:
+Each root, once, becomes its own file, `jb-windows-root-<thumbprint>.crt`,
+directly in the distro's anchor directory, and the distro's updater then merges
+them with its Mozilla CA bundle into the system bundle that `curl`, `git` and
+OpenSSL read. One certificate per file is what `openssl rehash` needs to link
+each into `/etc/ssl/certs`; directly in the anchor directory because p11-kit
+(Fedora, Arch, openSUSE) and Alpine's updater do not read subdirectories.
 
 | Distro                 | Anchor directory                            | Updater                   |
 | ---------------------- | ------------------------------------------- | ------------------------- |
@@ -79,12 +88,21 @@ and OpenSSL read:
 | openSUSE               | `/etc/pki/trust/anchors`                    | `update-ca-certificates`  |
 
 The store is picked by which anchor directory exists, not by which updater is
-on `PATH`. Re-running the step is how a root added on Windows reaches WSL; when
-the export has not changed it writes nothing and needs no `sudo`. If the
-updater fails, the anchor file is removed again, so the next run retries.
+on `PATH`.
+
+Re-running the step is how a change on Windows reaches WSL. A root Windows no
+longer exports is removed, so a dropped corporate root does not stay trusted;
+files in the anchor directory without the `jb-windows-root-` prefix are never
+touched. When nothing has changed it writes nothing and needs no `sudo`. If the
+updater fails, the roots installed before the run are put back, so the next run
+retries.
 
 The step is skipped, with the reason in the summary, off WSL, on a distro none
 of these rows matches, and when `powershell.exe` cannot be found.
+
+On WSL the bash profile also sets `SSL_CERT_FILE` to the system bundle when it
+is unset, so a tool that ships its own bundle, such as `uv`, sees these roots
+too. Off WSL it leaves `SSL_CERT_FILE` alone.
 
 ______________________________________________________________________
 

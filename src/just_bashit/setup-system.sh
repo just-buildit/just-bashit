@@ -26,9 +26,10 @@ _STEPS_ALL=(deps certs shell ssh sshd git tools pwsh claude)
 _STEPS_ALL_STR="deps certs shell ssh sshd git tools pwsh claude"
 
 # Steps that run only when named with -s or in bootstrap.toml. sshd opens a
-# listening port on the machine, which is not something a default run gets
-# to decide on the user's behalf.
-_STEPS_OPT_IN_STR="sshd"
+# listening port on the machine, and certs widens what the machine trusts,
+# with sudo: neither is something a default run gets to decide on the
+# user's behalf.
+_STEPS_OPT_IN_STR="certs sshd"
 
 DRY_RUN=0
 VERBOSE=0
@@ -54,9 +55,10 @@ read -r -d '' HELP <<-'EOF' || true
 	          pkg-config, git, curl, ssh), then the packages of any
 	          bootstrap.toml in the current directory (delegates to
 	          install-deps).
-	  certs   WSL only: Export Windows Trusted Root certificates via
-	          PowerShell and install them into the WSL distro trust
-	          store with the Mozilla CA bundle.
+	  certs   WSL only, and only when asked for (-s certs): install
+	          Windows' trusted root certificates into the distro trust
+	          store beside its Mozilla bundle, one file per root, and
+	          remove any Windows no longer trusts.
 	  shell   Install the opinionated bash configuration to
 	          ~/.config/just-bashit/{bashrc,profile}.sh and add one source
 	          line to ~/.bashrc and ~/.profile. Your files stay yours.
@@ -99,8 +101,9 @@ read -r -d '' HELP <<-'EOF' || true
 	       --template-profile [PATH]
 	                             Write the profile template to PATH (or stdout).
 
-	Default steps: all of them except sshd. To restrict the default set, declare
-	steps = [...] under [tools.setup-system] in bootstrap.toml.
+	Default steps: all of them except certs and sshd. To restrict the
+	default set, declare steps = [...] under [tools.setup-system] in
+	bootstrap.toml.
 
 	Examples:
 	  setup-system.sh --dry-run           # see the whole plan, touch nothing
@@ -521,9 +524,9 @@ _on_wsl() {
 }
 
 # ---------------------------------------------------------------------------
-# certs — WSL only: export Windows Trusted Root certificates via PowerShell
-# and install them as one anchor file in the distro trust store, whose
-# updater merges them with the Mozilla CA bundle.
+# certs — WSL only, opt-in: export Windows Trusted Root certificates via
+# PowerShell and install them, one anchor file per root, in the distro trust
+# store, whose updater merges them with the Mozilla CA bundle.
 # ---------------------------------------------------------------------------
 
 # Prefixed onto every trust-store path, so the suite can install into a
@@ -566,12 +569,73 @@ _certs_store() {
 	return 1
 }
 
-# The PowerShell that prints every Windows trusted root as PEM, once each:
+# The PowerShell that prints every Windows trusted root as PEM, once each,
+# each preceded by a "# <thumbprint>" line that names its file:
 # CurrentUser\Root shows the machine's roots as well, so without the
 # thumbprint dedupe most certificates would appear twice. PowerShell's own
 # strings are single-quoted: a double quote is what the WSL interop layer
 # has to re-escape on the way into a Windows command line.
-_CERTS_PS="Get-ChildItem -Path Cert:\\LocalMachine\\Root, Cert:\\CurrentUser\\Root -ErrorAction SilentlyContinue | Where-Object { \$_.RawData } | Sort-Object -Property Thumbprint -Unique | ForEach-Object { '-----BEGIN CERTIFICATE-----'; [System.Convert]::ToBase64String(\$_.RawData, 'InsertLineBreaks'); '-----END CERTIFICATE-----' }"
+_CERTS_PS="Get-ChildItem -Path Cert:\\LocalMachine\\Root, Cert:\\CurrentUser\\Root -ErrorAction SilentlyContinue | Where-Object { \$_.RawData } | Sort-Object -Property Thumbprint -Unique | ForEach-Object { '# ' + \$_.Thumbprint; '-----BEGIN CERTIFICATE-----'; [System.Convert]::ToBase64String(\$_.RawData, 'InsertLineBreaks'); '-----END CERTIFICATE-----' }"
+
+# Every file this step owns in the anchor directory starts with this, so a
+# root Windows no longer exports can be found and removed, and nothing else
+# in the directory is ever touched. One file per certificate, directly in the
+# anchor directory and not in a subdirectory: Debian's openssl rehash skips a
+# file holding more than one certificate, and p11-kit (Fedora, Arch,
+# openSUSE) and Alpine's updater do not descend into subdirectories.
+_CERTS_PREFIX="jb-windows-root-"
+
+# _certs_split EXPORT DIR -- write each certificate of EXPORT (the output of
+# _CERTS_PS) to DIR/<prefix><thumbprint>.crt and print how many. A thumbprint
+# that is not 40 hex digits names no file, so its certificate is dropped.
+_certs_split() {
+	local dump="$1" dir="$2" line out="" n=0
+	while IFS= read -r line; do
+		if [[ ${line} =~ ^#\ ([0-9A-Fa-f]{40})$ ]]; then
+			out="${dir}/${_CERTS_PREFIX}$(tr 'A-F' 'a-f' <<<"${BASH_REMATCH[1]}").crt"
+			: >"${out}"
+			n=$((n + 1))
+		elif [[ ${line} == "#"* ]]; then
+			out=""
+		elif [[ -n ${out} ]]; then
+			printf '%s\n' "${line}" >>"${out}"
+		fi
+	done <"${dump}"
+	printf '%s\n' "${n}"
+}
+
+# _certs_owned DIR -- the files this step owns in DIR, one per line.
+_certs_owned() {
+	local f
+	for f in "$1/${_CERTS_PREFIX}"*.crt; do
+		[[ -e ${f} ]] && printf '%s\n' "${f}"
+	done
+	return 0
+}
+
+# _certs_put SRC_DIR DEST_DIR -- make DEST_DIR's owned files exactly
+# SRC_DIR's: install each, then remove any owned file SRC_DIR lacks.
+_certs_put() {
+	local src="$1" dest="$2" f
+	for f in "${src}/${_CERTS_PREFIX}"*.crt; do
+		[[ -e ${f} ]] || continue
+		_priv install -m 0644 "${f}" "${dest}/${f##*/}" || return 1
+	done
+	for f in $(_certs_owned "${dest}"); do
+		[[ -e "${src}/${f##*/}" ]] || _priv rm -f "${f}" || return 1
+	done
+}
+
+# _certs_same A B -- do directories A and B hold the same owned files, with
+# the same contents?
+_certs_same() {
+	local f
+	[[ "$(_certs_owned "$1" | sed 's|.*/||')" == "$(_certs_owned "$2" | sed 's|.*/||')" ]] ||
+		return 1
+	for f in $(_certs_owned "$1"); do
+		cmp -s "${f}" "$2/${f##*/}" || return 1
+	done
+}
 
 step_certs() {
 	_head "certs — Windows trusted root certificates"
@@ -582,14 +646,13 @@ step_certs() {
 		return 0
 	fi
 
-	local row cert_dir cert_file updater=()
+	local row cert_dir updater=()
 	if ! row="$(_certs_store)"; then
 		_warn "no trust store this step knows (with its updater installed)"
 		_result "certs:   skipped (no known trust store)"
 		return 0
 	fi
 	cert_dir="${_CERTS_ROOT}${row%% *}"
-	cert_file="${cert_dir}/windows-roots.crt"
 	IFS=' ' read -r -a updater <<<"${row#* }"
 
 	local ps_exe
@@ -602,56 +665,64 @@ step_certs() {
 	_sudo_init
 	if [[ ${DRY_RUN} -eq 1 ]]; then
 		_info "would export Windows trusted roots via ${ps_exe}"
-		_priv install -m 0644 "<exported roots>" "${cert_file}"
+		_priv install -m 0644 "<each exported root>" \
+			"${cert_dir}/${_CERTS_PREFIX}<thumbprint>.crt"
+		_priv rm -f "<each ${_CERTS_PREFIX}*.crt no longer exported>"
 		_priv "${updater[@]}"
 		_result "certs:   ok (dry run)"
 		return 0
 	fi
 
-	local tmp_crt count
-	tmp_crt="$(mktemp "${TMPDIR:-/tmp}/jb-windows-roots.XXXXXX")"
+	# new: this export, one file per root. old: what is installed now, kept
+	# so a failed update can put it back.
+	local tmp new old dump count
+	tmp="$(mktemp -d "${TMPDIR:-/tmp}/jb-windows-roots.XXXXXX")"
+	new="${tmp}/new"
+	old="${tmp}/old"
+	dump="${tmp}/export.pem"
+	mkdir -p "${new}" "${old}"
+
 	_info "exporting Windows trusted root certificates"
 	if ! "${ps_exe}" -NoProfile -NonInteractive -Command "${_CERTS_PS}" |
-		tr -d '\r' >"${tmp_crt}"; then
-		rm -f "${tmp_crt}"
+		tr -d '\r' >"${dump}"; then
+		rm -rf "${tmp}"
 		_warn "PowerShell could not export the Windows root store"
 		_result "certs:   failed (export)"
 		return 0
 	fi
-	count="$(grep -c -- '-----BEGIN CERTIFICATE-----' "${tmp_crt}" || true)"
+	count="$(_certs_split "${dump}" "${new}")"
 	if [[ ${count} -eq 0 ]]; then
-		rm -f "${tmp_crt}"
+		rm -rf "${tmp}"
 		_warn "the Windows root store exported no certificates"
 		_result "certs:   failed (empty export)"
 		return 0
 	fi
 
-	# Re-running is how a new Windows root reaches WSL, and an unchanged
-	# export needs neither root nor the updater. That shortcut is only sound
-	# because a failed update below removes the anchor again: a file left
-	# behind by one would otherwise read as "unchanged" forever.
-	if cmp -s "${tmp_crt}" "${cert_file}"; then
-		rm -f "${tmp_crt}"
+	# Re-running is how a new or removed Windows root reaches WSL, and an
+	# unchanged export needs neither root nor the updater. That shortcut is
+	# only sound because a failed update below puts the old set back: a set
+	# left behind by one would otherwise read as "unchanged" forever.
+	if _certs_same "${new}" "${cert_dir}"; then
+		rm -rf "${tmp}"
 		_result "certs:   ok (${count} Windows roots, unchanged)"
 		return 0
 	fi
 
-	if ! _priv install -m 0644 "${tmp_crt}" "${cert_file}"; then
-		rm -f "${tmp_crt}"
-		_warn "could not write ${cert_file}"
-		_result "certs:   failed (write ${cert_file})"
-		return 0
-	fi
-	rm -f "${tmp_crt}"
+	local f
+	for f in $(_certs_owned "${cert_dir}"); do
+		cp "${f}" "${old}/"
+	done
 
 	_info "updating the trust store (${updater[*]})"
-	if ! _priv "${updater[@]}"; then
-		_priv rm -f "${cert_file}" || true
-		_warn "${updater[*]} failed — ${cert_file} removed again"
+	if ! _certs_put "${new}" "${cert_dir}" || ! _priv "${updater[@]}"; then
+		_certs_put "${old}" "${cert_dir}" || true
+		rm -rf "${tmp}"
+		_warn "${updater[*]} failed — the previous Windows roots are back"
 		_result "certs:   failed (${updater[0]})"
 		return 0
 	fi
-	_result "certs:   ok (${count} Windows roots in ${cert_file})"
+	rm -rf "${tmp}"
+	_result "certs:   ok (${count} Windows roots in ${cert_dir})"
 }
 
 # shell — the bashrc/profile templates plus their one-line hooks.
