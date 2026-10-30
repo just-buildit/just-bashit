@@ -4,6 +4,23 @@
 
 ### Fixed
 
+- **`jbx SPEC FUNCTION` runs the script's top level once, not twice (#141).**
+    It sourced the script in a separate child only to check that FUNCTION
+    exists, then sourced it again to call it. One child now sources it,
+    checks, and calls. A FUNCTION the script does not define exits 127 (was
+    1), still naming it.
+
+- **`jbx -l` runs nothing from the script (#143).** It sourced the script to
+    list its functions, so a top-level `X=$(cmd)` ran `cmd`, and so did the
+    top level of every library the script sources. It now reads the script
+    with the lexer that used to gate it, and the files it sources the same
+    way, found by their path as written: a literal path as is, a path built
+    from an expansion (`"${_SCRIPT_DIR}/toml.sh"`) by its last component
+    beside the script, where jbx co-fetches just-bashit's. One it cannot
+    find is named on stderr. Since nothing runs, `-l` no longer refuses a
+    script without a main guard: `jbx -l setup-system` lists its functions.
+    An empty array (`_R=()`) no longer hides the function on the next line.
+
 - **`deploy-docs` no longer fails on a pure version-bump commit (#151).** A
     release PR runs no test matrix, so it uploads no `test-report-xml`, and
     the step that reused the PR run's reports failed the download, so the

@@ -311,31 +311,26 @@ jbx -l just-bashit:logging
 # trim-from
 ```
 
-`-l` lists a shell script's functions by **sourcing** it, so the functions it
-gets from the libraries it sources are listed too. That would run a script
-whose top level does work, so `-l` first reads the script and refuses one
-whose top level runs a command, naming the line, and sources nothing:
-
-```text
-just-runit: error: -l will not source setup-system: line 111 of ... runs a command at its top level:
-  while [[ $# -gt 0 ]]; do
-```
-
-What a listable script's top level may hold: comments, function definitions
-(any body), assignments (alone, or chained with `&&` / `||` after a test),
-`source` / `.`, `set`, `shopt`, `declare` / `readonly` / `export` / `unset`,
-a `read` from a heredoc, an `if` whose condition and branches hold only
-these, and a main guard, whose body never runs when the file is sourced:
+`-l` lists a shell script's functions by **reading** it: nothing in the
+script runs, not its top-level commands and not the command substitutions in
+its assignments, so it lists any script, main guard or not:
 
 ```bash
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi
-(return 0 2>/dev/null) || echo "This file must be sourced."
+jbx -l just-bashit:setup-system   # lists; sets nothing up
 ```
 
-It guards against running a script by accident, not against a hostile one: a
-command substitution inside an assignment (`DIR=$(cd ... && pwd)`) still runs,
-as do the top levels of the libraries the script sources. A Python script is
-parsed (`ast`), never run, so `-l` lists any of them.
+It lists the functions defined at the script's top level and inside a
+top-level `if`, then those of each file the script sources (`source FILE` /
+`. FILE`), read the same way. A sourced file is found from its path as
+written, never by evaluating it: a literal path as it is, and a path built
+from an expansion, such as `source "${_SCRIPT_DIR}/toml.sh"`, by its last
+component beside the script, which is where jbx co-fetches a just-bashit
+script's libraries. One it cannot find is named on stderr and its functions
+are not listed. A Python script is parsed (`ast`), never run.
+
+Running is the other half of the same contract: `jbx SPEC` and
+`jbx SPEC FUNCTION` both run the script's top level exactly once, as
+sourcing it would. A FUNCTION the script does not define exits 127.
 
 **Pin to a checksum for auditable CI use:**
 
