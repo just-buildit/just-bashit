@@ -7,8 +7,29 @@ _common_setup
 # "install-deps.sh: line 1: 400:: command not found" — an error page (a 404, or
 # a raw.githubusercontent rate-limit response on a shared runner IP) silently
 # became the "script" because _fetch_to fetched with `curl -sSL` and no --fail.
+#
+# The server is a shim, not the live site (#147): a curl that answers every
+# fetch with a 400 error page, as a real curl does -- the body is written to
+# -o and the exit is 0, unless --fail is given, which makes it exit 22.
 @test "fetch fails closed on a non-200 URL (never runs the error body)" {
-	run just-runit "https://just-buildit.github.io/__just_runit_fetch_fail_test__.sh"
+	local shim="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "${shim}"
+	cat >"${shim}/curl" <<'EOF'
+#!/usr/bin/env bash
+dest="" fail=0
+while [[ $# -gt 0 ]]; do
+	case "${1}" in
+	-o) dest="${2}" && shift ;;
+	--fail) fail=1 ;;
+	esac
+	shift
+done
+[[ -n ${dest} ]] || exit 0
+((fail == 0)) || exit 22
+echo '400: Invalid request' >"${dest}"
+EOF
+	chmod +x "${shim}/curl"
+	PATH="${shim}:${PATH}" run just-runit "https://fixture.invalid/tool.sh"
 	assert_failure
 	refute_output --partial 'command not found'
 	assert_output --partial 'fetch failed'

@@ -62,10 +62,20 @@ _hide_windows_path() {
 # without its DLLs beside it -- while a hard link or a native symlink to the
 # same file runs. Measured on the windows-2025 runner, 2026-10-25; that
 # copy-shaped farm is what kept tests 270 and 370 red from 2026-10-16.
+#
+# curl, wget and ping are linked to the egress trap's shims (setup_suite.bash)
+# rather than the real tools, so a PATH of only this directory is fenced too.
 _bin_without() {
 	# shellcheck disable=SC2154  # BATS_TEST_TMPDIR is bats'
 	local bin="${BATS_TEST_TMPDIR}/bin-without" dir prog name skip
 	mkdir -p "${bin}"
+	for prog in "${JB_EGRESS_TRAP:?test/setup_suite.bash did not run}"/*; do
+		name="${prog##*/}"
+		for skip in "$@"; do
+			[[ ${name} == "${skip}" ]] && continue 2
+		done
+		cp "${prog}" "${bin}/${name}"
+	done
 	for dir in /usr/local/bin /usr/bin /bin; do
 		[[ -d ${dir} ]] || continue
 		for prog in "${dir}"/*; do
@@ -74,7 +84,8 @@ _bin_without() {
 				[[ ${name} == "${skip}" || ${name} == "${skip}.exe" ]] &&
 					continue 2
 			done
-			[[ -e "${bin}/${name}" ]] && continue
+			[[ -e "${bin}/${name}" || -e "${JB_EGRESS_TRAP}/${name%.exe}" ]] &&
+				continue
 			case "$(uname -s)" in
 			MINGW* | MSYS*)
 				ln "${prog}" "${bin}/${name}" 2>/dev/null ||
