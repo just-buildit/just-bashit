@@ -29,6 +29,17 @@
     `scripts/docs-reports.sh` now falls back to the newest successful `main`
     run that kept the reports, and when none did, deploys without them with
     a `::warning::`. Only an API error fails the step.
+- **The test suite no longer reaches the network (#147).** Six
+    `network.bats` tests probed live example.com, pypi.org and google.com,
+    so a 503 from a third party's CDN turned an unrelated PR red; one
+    `fetch.bats` and four `runner-names.bats` tests fetched from
+    just-buildit.github.io, hidden locally by a warm `~/.cache`. Each is now
+    answered by a fake curl, wget or ping, so the 200, 503, hang and
+    missing-tool cases are all asserted deterministically. The gate is
+    `test/setup_suite.bash`: it puts a trap curl, wget and ping first on
+    PATH for every test, fences git to `file://`, starts the cache cold,
+    and fails `make test` naming any test that asks for a remote host --
+    even one whose own assertions pass.
 
 ## [0.11.0] - 2026-10-27
 
