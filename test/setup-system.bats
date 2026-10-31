@@ -30,6 +30,8 @@ setup() {
 	# after this, are the only Windows it can reach.
 	: >"${BATS_TEST_TMPDIR}/mounts"
 	export JB_PROC_MOUNTS="${BATS_TEST_TMPDIR}/mounts"
+	# Nor the real token check (#184): CI's Windows runners are elevated.
+	export JB_WIN_ELEVATED=0
 	# Not on native Windows (MSYS2, Cygwin): there the suite runs ON the real
 	# Windows, its cmd.exe is the machine's own and on PATH by design, and
 	# the tests that drive it already account for that.
@@ -810,6 +812,17 @@ _win_pkg_stubs() {
 	assert_output --partial "Microsoft.PowerShell"
 }
 
+# --yes reaches install-deps (#184): its Visual Studio modify would skip
+# rather than raise a UAC prompt, and the dry run says so.
+@test 'deps --yes hands --yes to install-deps: the modify never prompts' {
+	_win_pkg_stubs
+	JB_UNAME_S=MINGW64_NT-10.0 run setup-system.sh -y -n -s deps
+	assert_success
+	assert_output --partial "skipped under --yes: needs admin -- re-run from an admin PowerShell"
+	JB_UNAME_S=MINGW64_NT-10.0 run setup-system.sh -n -s deps
+	assert_output --partial "elevated, through a UAC prompt"
+}
+
 @test 'deps without pacman runs no second winget pass' {
 	local d="${BATS_TEST_TMPDIR}/winpkg" bin
 	mkdir -p "${d}"
@@ -1380,6 +1393,9 @@ _sshd_stubs() {
 	# _admin_channel_stub turns one on. Never the real ssh or ip route.
 	printf '#!/bin/bash\nexit 255\n' >"${STUBS}/ssh"
 	export JB_WIN_HOST=192.0.2.1
+	# Not elevated by default either (CI's Windows runners are); the
+	# elevated tests set it to 1. Never the real token check (#184).
+	export JB_WIN_ELEVATED=0
 	cat >"${STUBS}/wslpath" <<-EOF
 		#!/bin/bash
 		p="\${2//\\\\//}"
@@ -1620,6 +1636,49 @@ _admin_channel_stub() {
 	STUB_RC=1 run setup-system.sh -s sshd --github-user octocat
 	assert_success
 	assert_output --partial "sshd:    failed (see above)"
+	assert [ ! -e "${CALLS}" ]
+}
+
+# An elevated token, and --yes, decide how the step elevates (#184).
+@test 'sshd: already elevated, it runs run.ps1 directly, no UAC prompt' {
+	_sshd_stubs
+	JB_WIN_ELEVATED=1 run setup-system.sh -s sshd --github-user octocat
+	assert_success
+	assert_output --partial "already elevated -- running it here, no UAC prompt"
+	refute_output --partial "approve the UAC prompt"
+	assert_output --partial "sshd:    ok (keys from github.com/octocat.keys)"
+	# powershell.exe got run.ps1 -- not launch.ps1, the -Verb RunAs hop.
+	run cat "${CALLS}.argv"
+	assert_output --partial "jb-windows-sshd\\run.ps1"
+	refute_output --partial "launch.ps1"
+}
+
+@test 'sshd: already elevated, the dry run says so' {
+	_sshd_stubs
+	JB_WIN_ELEVATED=1 run setup-system.sh -n -s sshd --github-user octocat
+	assert_success
+	assert_output --partial "run it here, already elevated, no prompt"
+	assert [ ! -e "${CALLS}" ]
+}
+
+@test 'sshd: --yes, not elevated and no channel, skips without a prompt' {
+	_sshd_stubs
+	run setup-system.sh -y -s sshd --github-user octocat
+	assert_success
+	assert_output --partial "sshd:    skipped (needs admin -- re-run from an admin PowerShell)"
+	refute_output --partial "approve the UAC prompt"
+	assert [ ! -e "${CALLS}" ]
+	run setup-system.sh -y -n -s sshd --github-user octocat
+	assert_success
+	assert_output --partial "would skip it under --yes: needs admin"
+}
+
+@test 'sshd: --yes with an admin channel still runs, over ssh' {
+	_sshd_stubs
+	_admin_channel_stub
+	run setup-system.sh -y -s sshd --github-user octocat
+	assert_success
+	assert_output --partial "sshd:    ok (keys from github.com/octocat.keys, over ssh)"
 	assert [ ! -e "${CALLS}" ]
 }
 
