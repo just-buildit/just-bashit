@@ -93,6 +93,11 @@ typed, empty ones included. Two things are PowerShell's own and happen before
 jbx sees anything: a bare `--` is consumed by PowerShell, and an unquoted
 `$name` is expanded by it.
 
+The functions also export `JB_CALLER=pwsh` for the call. `setup-system` reads
+it, so it ends by telling you to open a new PowerShell window when an install
+changed the Windows `PATH`, never to `exec bash -l`
+([closing advice](setup-system.md#the-closing-advice)).
+
 !!! warning "Windows PowerShell 5.1 and the execution policy"
 
     5.1 runs a profile only when the execution policy allows scripts, and a
