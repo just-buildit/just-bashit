@@ -44,6 +44,22 @@
 
 ### Fixed
 
+- **`setup-system` from PowerShell no longer says `exec bash -l`, and its
+    installed report on Windows lists what the winget baseline installs
+    (#179, #180).** get-jb.ps1's `jbx`/`just-runit` functions export
+    `JB_CALLER=pwsh`. Under it the bash reload reasons are dropped (every
+    call starts a fresh login bash), and the run ends with "open a new
+    PowerShell window" only when an install put a directory on the Windows
+    PATH that the window predates. The installed report's rows now come from
+    the `deps` baseline for this machine's package manager -- the package's
+    own name, its table's new `provides` list, or each `vs_requires` id by
+    install-deps' vswhere probe (now in pkg.sh, shared) -- so Windows is
+    asked about cmake, clang-cl and the C++ workload, not make, cc and
+    pkg-config. On native Windows the report also searches the registry's
+    Machine and User PATH, so a tool installed this run is reported where it
+    is instead of as missing, and the closing advice names the directory.
+    A test fails on a baseline package the report could not probe for.
+
 - **ARM64 Windows gets the native uv, and the native PowerShell MSI, even
     from an emulated x64 shell (#171).** From x64 Git Bash every signal says
     x64: `uname -m`, `PROCESSOR_ARCHITECTURE`, even `OSArchitecture` in a

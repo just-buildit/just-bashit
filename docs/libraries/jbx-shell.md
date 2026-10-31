@@ -44,6 +44,11 @@ A run started any other way (`bash setup-system.sh`, a script) exports no
 `JB_CALLER_APPLIES`, leaves no marker, and keeps the "open a new shell" hint
 with its reasons. So a stale marker is never applied to some later shell.
 
+PowerShell's `jbx` function (from `get-jb.ps1`) cannot source anything into
+PowerShell, so it does not take part in this handshake. It exports
+`JB_CALLER=pwsh` instead, and `setup-system` gives it advice that fits a
+PowerShell window ([closing advice](../setup-system.md#the-closing-advice)).
+
 ## jb_reload_marker
 
 Print the marker's path:

@@ -552,6 +552,49 @@ summary
     git:     ok (9 default(s) set)
 ```
 
+### The installed report
+
+After the summary, every run (dry runs too) lists what is on the machine:
+each tool's own `--version` and the path it runs from. The rows are the
+`deps` baseline for this machine's package manager (#180), read from the same
+table the step installs from, so the two cannot disagree. Each package
+reports as the command of its own name (`cmake`), as the commands its table
+names in `provides` (`build-essential` → `cc`, `make`), or, when it declares
+`vs_requires`, as each Visual Studio id, by the vswhere probe
+[install-deps](install-deps.md#a-package-that-provides-visual-studio-workloads)
+installs by. After those come `gh`, `uv`, `pwsh` and `claude`. On native
+Windows that means cmake, git, clang-cl, pwsh and the C++ workload, not
+make, cc and pkg-config, which the winget baseline does not install.
+
+A winget install writes the Machine or User `PATH` in the registry, which
+only new processes read. So on native Windows the report also searches the
+registry's `PATH` directories, after this shell's own. A tool installed by
+this run is reported where it is, not as `missing`, and the closing advice
+names the directory a new window would add.
+
+### The closing advice
+
+When the shell that ran it is now out of date, the run ends by saying why:
+
+```
+open a new shell, or run: exec bash -l
+    (.bashrc now sources just-bashit)
+    (/c/Program Files/CMake/bin is on the Windows PATH, not this shell's)
+```
+
+Run through the [`jbx` shell function](libraries/jbx-shell.md), it applies
+those changes to your shell instead. Run from PowerShell through
+[`get-jb.ps1`](just-runit.md#from-powershell-windows)'s functions, which
+export `JB_CALLER=pwsh`, none of the bash reasons apply: every `jbx` call
+there starts a fresh login bash. You are told to open a new PowerShell window
+only when an install put a directory on the Windows `PATH` that this window
+predates, and you get no advice at all otherwise (#179):
+
+```
+open a new PowerShell window: this one predates these PATH changes
+    (/c/Program Files/CMake/bin is on the Windows PATH, not this window's)
+```
+
 ______________________________________________________________________
 
 ## Shell compatibility

@@ -406,21 +406,88 @@ _find_bootstrap_toml() {
 # Deliberately a toolchain and nothing more. Language runtimes and project
 # libraries (python3-dev, numpy, rust) are a project's to declare, in its
 # own bootstrap.toml, which this step still installs afterwards.
+#
+# It is also what the installed report at the end of a run lists (#180), so
+# the two are one declaration read both ways: a package reports as the
+# command of its own name (cmake, git, curl), as the commands its own table
+# names in `provides`, or -- a package with `vs_requires` -- as each Visual
+# Studio id, by the same vswhere probe install-deps decides by. A package
+# whose table names neither (ca-certificates) has no row. install-deps
+# reads none of `provides`; it is the report's alone.
 read -r -d '' _BASELINE_TOML <<-'EOF' || true
 	[baseline.apt]
 	packages = ["build-essential", "cmake", "pkg-config", "git", "curl", "ca-certificates", "openssh-client", "tar", "mawk"]
 
+	[baseline.apt."build-essential"]
+	provides = ["cc", "make"]
+
+	[baseline.apt."ca-certificates"]
+
+	[baseline.apt."openssh-client"]
+	provides = ["ssh"]
+
+	[baseline.apt."mawk"]
+	provides = ["awk"]
+
 	[baseline.pacman]
 	packages = ["base-devel", "cmake", "pkgconf", "git", "curl", "openssh", "tar", "gawk"]
+
+	[baseline.pacman."base-devel"]
+	provides = ["cc", "make"]
+
+	[baseline.pacman."pkgconf"]
+	provides = ["pkg-config"]
+
+	[baseline.pacman."openssh"]
+	provides = ["ssh"]
+
+	[baseline.pacman."gawk"]
+	provides = ["awk"]
 
 	[baseline.dnf]
 	packages = ["gcc", "make", "cmake", "pkgconf-pkg-config", "diffutils", "git", "curl", "openssh-clients", "tar", "gawk"]
 
+	[baseline.dnf."gcc"]
+	provides = ["cc"]
+
+	[baseline.dnf."pkgconf-pkg-config"]
+	provides = ["pkg-config"]
+
+	[baseline.dnf."diffutils"]
+	provides = ["diff"]
+
+	[baseline.dnf."openssh-clients"]
+	provides = ["ssh"]
+
+	[baseline.dnf."gawk"]
+	provides = ["awk"]
+
 	[baseline.zypper]
 	packages = ["gcc", "make", "cmake", "pkg-config", "diffutils", "git", "curl", "openssh", "tar", "gawk"]
 
+	[baseline.zypper."gcc"]
+	provides = ["cc"]
+
+	[baseline.zypper."diffutils"]
+	provides = ["diff"]
+
+	[baseline.zypper."openssh"]
+	provides = ["ssh"]
+
+	[baseline.zypper."gawk"]
+	provides = ["awk"]
+
 	[baseline.apk]
 	packages = ["build-base", "cmake", "pkgconf", "bash", "git", "curl", "openssh-keygen", "tar"]
+
+	[baseline.apk."build-base"]
+	provides = ["cc", "make"]
+
+	[baseline.apk."pkgconf"]
+	provides = ["pkg-config"]
+
+	[baseline.apk."openssh-keygen"]
+	provides = ["ssh-keygen"]
 
 	# The compiler on macOS is the Xcode Command Line Tools, which brew itself
 	# requires, so brew has only the build tools to add.
@@ -443,12 +510,27 @@ read -r -d '' _BASELINE_TOML <<-'EOF' || true
 	[baseline.winget."Microsoft.VisualStudio.BuildTools"]
 	vs_requires = ["Microsoft.VisualStudio.Workload.VCTools"]
 
+	[baseline.winget."Kitware.CMake"]
+	provides = ["cmake"]
+
+	[baseline.winget."Git.Git"]
+	provides = ["git"]
+
+	[baseline.winget."LLVM.LLVM"]
+	provides = ["clang-cl"]
+
+	[baseline.winget."Microsoft.PowerShell"]
+	provides = ["pwsh"]
+
 	# MSYS2 as the BASH HOST only. Its MinGW gcc toolchain is gone
 	# (2026-10-03): just-makeit and doppler build native Windows with
 	# clang-cl, and a second compiler that nothing builds with is one more
 	# thing to keep working. These are the tools the scripts themselves use.
 	[baseline.msys2]
 	packages = ["make", "pkg-config", "git", "curl", "openssh"]
+
+	[baseline.msys2."openssh"]
+	provides = ["ssh"]
 EOF
 
 # _install_manifest INSTALLER FILE LABEL [ARGS...] — one install-deps run
@@ -466,6 +548,32 @@ _install_manifest() {
 	fi
 	_warn "install-deps reported a failure for ${label}"
 	return 1
+}
+
+# _baseline_adds_winget -- true on an MSYS2 host (Windows uname, pacman
+# present) with winget: its msys2 section is bash-host tools only, so the
+# native toolchain comes from the winget section as well.
+_baseline_adds_winget() {
+	_pwsh_uname_init
+	case "${_UNAME_S}" in
+	MINGW* | MSYS* | CYGWIN*)
+		_have pacman && { _have winget || _have winget.exe; }
+		;;
+	*) return 1 ;;
+	esac
+}
+
+# _baseline_sections -- the [baseline.*] sections the deps step installs on
+# this machine, one per line: the detected manager's, then winget's where
+# _baseline_adds_winget says so. The installed report lists these.
+_baseline_sections() {
+	local pm
+	pm="$(get-pkg-mgr 2>/dev/null)" || pm=""
+	[[ -n ${pm} ]] && printf '%s\n' "${pm}"
+	if [[ ${pm} != winget ]] && _baseline_adds_winget; then
+		printf 'winget\n'
+	fi
+	return 0
 }
 
 step_deps() {
@@ -486,17 +594,11 @@ step_deps() {
 	# MSYS2 (Windows uname, pacman present) gets the msys2 section above --
 	# bash-host tools, no compiler -- so the native toolchain comes from the
 	# winget section as well, when winget is there to install it.
-	_pwsh_uname_init
-	case "${_UNAME_S}" in
-	MINGW* | MSYS* | CYGWIN*)
-		if _have pacman && { _have winget || _have winget.exe; }; then
-			_install_manifest "${installer}" "${baseline}" \
-				"the native Windows toolchain (winget)" -s winget || ok=0
-			done_list="${done_list} + native Windows toolchain"
-		fi
-		;;
-	*) ;;
-	esac
+	if _baseline_adds_winget; then
+		_install_manifest "${installer}" "${baseline}" \
+			"the native Windows toolchain (winget)" -s winget || ok=0
+		done_list="${done_list} + native Windows toolchain"
+	fi
 	rm -f "${baseline}"
 
 	local deps_file=""
@@ -850,18 +952,57 @@ _ssh_harden() {
 }
 
 # ---------------------------------------------------------------------------
-# The installed report -- every tool this script is responsible for (plus
-# gh, which it does not install but every next step needs), with the version
-# and path it answers with once the steps have run. "ok" in the
-# summary says a step finished; this says what is actually on the machine,
-# which is what a person comparing two boxes, or reading a bug report, needs.
+# The installed report -- what the baseline installs on this machine, plus
+# the tools the other steps install (uv, pwsh, claude) and gh, which no step
+# installs but every next step needs; each with the version and path it
+# answers with once the steps have run. "ok" in the summary says a step
+# finished; this says what is actually on the machine, which is what a
+# person comparing two boxes, or reading a bug report, needs.
+#
+# The baseline rows come from _BASELINE_TOML itself, for the sections
+# _baseline_sections names (#180): one declaration, read by the install and
+# by the report, so a Windows box is asked about cmake, clang-cl and the
+# VCTools workload its winget section installs, not about the make, cc and
+# pkg-config a Unix list named on every platform.
 #
 # Asked of each tool itself (`--version`), not of the package manager: the
 # copy on PATH is the one that runs, and uv, claude and pwsh do not come from
 # the package manager at all. ~/.local/bin is searched too, because the run
 # that installed uv and claude into it has not got it on PATH yet.
 # ---------------------------------------------------------------------------
-_REPORT_TOOLS=(git make cc cmake pkg-config curl awk ssh gh uv pwsh claude)
+_REPORT_EXTRA=(gh uv pwsh claude)
+
+# _baseline_report_rows -- one row spec per line, in table order, for the
+# sections this machine installs: `cmd NAME` for a command, `vs ID` for a
+# Visual Studio id. Duplicates (git in two sections) are dropped.
+_baseline_report_rows() {
+	# while-read, not mapfile: setup-system runs on macOS's bash 3.2.
+	local section pkg v row seen=" "
+	local -a rows
+	while IFS= read -r section; do
+		while IFS= read -r pkg; do
+			rows=()
+			while IFS= read -r v; do rows+=("vs ${v}"); done < <(
+				printf '%s\n' "${_BASELINE_TOML}" |
+					toml_get_array baseline "${section}.\"${pkg}\"" vs_requires
+			)
+			while IFS= read -r v; do rows+=("cmd ${v}"); done < <(
+				printf '%s\n' "${_BASELINE_TOML}" |
+					toml_get_array baseline "${section}.\"${pkg}\"" provides
+			)
+			# No table of its own: the package is its own command. A table
+			# naming nothing (ca-certificates) is a package with no row.
+			if [[ ${#rows[@]} -eq 0 && ${_BASELINE_TOML} != *"[baseline.${section}.\"${pkg}\"]"* ]]; then
+				rows=("cmd ${pkg}")
+			fi
+			for row in "${rows[@]+"${rows[@]}"}"; do
+				[[ ${seen} == *" ${row} "* ]] && continue
+				seen="${seen}${row} "
+				printf '%s\n' "${row}"
+			done
+		done < <(printf '%s\n' "${_BASELINE_TOML}" | toml_get_packages baseline "${section}")
+	done < <(_baseline_sections)
+}
 
 # _tool_path NAME -- where NAME runs from, or nothing.
 _tool_path() {
@@ -896,8 +1037,122 @@ _tool_version() {
 	fi
 }
 
+# ---------------------------------------------------------------------------
+# The Windows PATH as the registry holds it, for the report (#180).
+#
+# winget's installers write the Machine or User PATH in the registry, which
+# every NEW process reads and no running one does: CMake installed by this
+# very run is on the Machine PATH and not on ours, and the report used to
+# call it "missing". So on native Windows the report probes with the
+# registry's directories appended to PATH -- appended, so the copy this
+# shell already runs still wins -- and a tool found only there is reported
+# where it is, with the closing advice naming the directory: it is
+# installed, and a new window is what reaches it. Reporting "installed, new
+# window needed" per row instead was the alternative; it says the same thing
+# once per tool, and the closing advice has to say it anyway.
+#
+# Read through Windows PowerShell's [Environment], which expands the
+# %SystemRoot%-style entries; cygpath -u turns each into a path this shell
+# can open. JB_REGISTRY_PATH overrides with a ready colon-separated list,
+# for a test.
+# ---------------------------------------------------------------------------
+_REGISTRY_PATH_ONLY=()
+
+# _WINDOW_PATH -- the registry directories a reported tool was found in and
+# this shell's PATH lacks: what a new window would add. The closing advice
+# names each.
+_WINDOW_PATH=()
+_window_because() {
+	local d
+	for d in "${_WINDOW_PATH[@]+"${_WINDOW_PATH[@]}"}"; do
+		[[ ${d} == "$1" ]] && return 0
+	done
+	_WINDOW_PATH+=("$1")
+}
+
+# _registry_path_dirs -- the Machine then User PATH directories, as local
+# paths, one per line; nothing off native Windows or without PowerShell.
+_registry_path_dirs() {
+	local ps raw d
+	if [[ -n ${JB_REGISTRY_PATH+x} ]]; then
+		tr ':' '\n' <<<"${JB_REGISTRY_PATH}"
+		return 0
+	fi
+	_pwsh_uname_init
+	case "${_UNAME_S}" in
+	MINGW* | MSYS* | CYGWIN*) ;;
+	*) return 0 ;;
+	esac
+	ps="$(_powershell_bin)" || return 0
+	_have cygpath || return 0
+	raw="$("${ps}" -NoProfile -NonInteractive -Command \
+		"[Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')" \
+		2>/dev/null | tr -d '\r')" || return 0
+	while IFS= read -r -d ';' d; do
+		[[ -n ${d} ]] && cygpath -u "${d}" 2>/dev/null
+	done <<<"${raw};"
+}
+
+# _registry_path_init -- fill _REGISTRY_PATH_ONLY with the registry's
+# directories this shell's PATH lacks, existing ones only.
+_registry_path_init() {
+	local d
+	_REGISTRY_PATH_ONLY=()
+	while IFS= read -r d; do
+		d="${d%/}"
+		[[ -n ${d} && -d ${d} ]] || continue
+		case ":${PATH}:" in
+		*":${d}:"* | *":${d}/:"*) continue ;;
+		esac
+		_REGISTRY_PATH_ONLY+=("${d}")
+	done < <(_registry_path_dirs)
+}
+
+# _report_cmd NAME -- one row for a command, probed with the registry's
+# directories after this shell's PATH. A command found only in one of them
+# records that directory for the closing advice (_WINDOW_PATH).
+_report_cmd() {
+	local name="$1" path ver search="${PATH}" d
+	for d in "${_REGISTRY_PATH_ONLY[@]+"${_REGISTRY_PATH_ONLY[@]}"}"; do
+		search="${search}:${d}"
+	done
+	path="$(PATH="${search}" _tool_path "${name}")"
+	if [[ -z ${path} ]]; then
+		printf '    %-18s %s\n' "${name}" "missing"
+		return 0
+	fi
+	for d in "${_REGISTRY_PATH_ONLY[@]+"${_REGISTRY_PATH_ONLY[@]}"}"; do
+		if [[ ${path%/*} == "${d}" ]]; then
+			_window_because "${d}"
+		fi
+	done
+	ver="$(_tool_version "${name}" "${path}")"
+	printf '    %-18s %-12s %s\n' "${name}" "${ver}" "${path}"
+	# The lint gate's module, which the pwsh step installs with it.
+	if [[ ${name} == pwsh && ${ver} != "does not run" ]]; then
+		# shellcheck disable=SC2016  # $m is PowerShell's, not bash's
+		ver="$("${path}" -NoProfile -NonInteractive -Command \
+			'$m = Get-Module -ListAvailable PSScriptAnalyzer | Select-Object -First 1; if ($m) { $m.Version.ToString() }' \
+			2>/dev/null || true)"
+		printf '    %-18s %s\n' "  PSScriptAnalyzer" "${ver:-missing}"
+	fi
+}
+
+# _report_vs ID -- one row for a Visual Studio id: the instance that has it,
+# by the vswhere probe install-deps decides an install by (pkg.sh).
+_report_vs() {
+	local id="$1" dir="" where=""
+	dir="$(_vs_installer_dir 2>/dev/null)" || dir=""
+	[[ -n ${dir} ]] && where="$(_vswhere "${dir}" -requires "${id}")"
+	if [[ -z ${where} ]]; then
+		printf '    %-18s %s\n' "${id}" "missing"
+		return 0
+	fi
+	printf '    %-18s %-12s %s\n' "${id}" "installed" "${where}"
+}
+
 _installed_report() {
-	local name path ver
+	local row name seen=" "
 	# Off in the test suite: it runs every tool's --version, and a test whose
 	# stub ssh records its calls would record `-V` instead.
 	[[ ${JB_INSTALLED_REPORT:-1} == 0 ]] && return 0
@@ -906,22 +1161,18 @@ _installed_report() {
 	else
 		_say "installed"
 	fi
-	for name in "${_REPORT_TOOLS[@]}"; do
-		path="$(_tool_path "${name}")"
-		if [[ -z ${path} ]]; then
-			printf '    %-18s %s\n' "${name}" "missing"
-			continue
-		fi
-		ver="$(_tool_version "${name}" "${path}")"
-		printf '    %-18s %-12s %s\n' "${name}" "${ver}" "${path}"
-		# The lint gate's module, which the pwsh step installs with it.
-		if [[ ${name} == pwsh && ${ver} != "does not run" ]]; then
-			# shellcheck disable=SC2016  # $m is PowerShell's, not bash's
-			ver="$("${path}" -NoProfile -NonInteractive -Command \
-				'$m = Get-Module -ListAvailable PSScriptAnalyzer | Select-Object -First 1; if ($m) { $m.Version.ToString() }' \
-				2>/dev/null || true)"
-			printf '    %-18s %s\n' "  PSScriptAnalyzer" "${ver:-missing}"
-		fi
+	_registry_path_init
+	while IFS= read -r row; do
+		name="${row#* }"
+		case "${row}" in
+		vs\ *) _report_vs "${name}" ;;
+		*) _report_cmd "${name}" ;;
+		esac
+		seen="${seen}${name} "
+	done < <(_baseline_report_rows)
+	for name in "${_REPORT_EXTRA[@]}"; do
+		[[ ${seen} == *" ${name} "* ]] && continue
+		_report_cmd "${name}"
 	done
 }
 
@@ -1833,6 +2084,25 @@ done
 _say ""
 _installed_report
 _say ""
+# Run from PowerShell, through get-jb.ps1's jbx function (JB_CALLER=pwsh,
+# #179): every jbx call there starts a fresh `bash -l`, which reads the rc
+# files and ~/.local/bin on its own, so none of the bash reasons below apply
+# and `exec bash -l` means nothing to PowerShell. What a PowerShell window
+# does lack is a directory an install put on the Windows PATH -- CMake's,
+# winget's Links -- and only a new window reads that. Said only when there
+# is one.
+if [[ ${JB_CALLER:-} == pwsh ]]; then
+	for _d in "${_PATH_ADDED[@]+"${_PATH_ADDED[@]}"}"; do
+		_window_because "${_d}"
+	done
+	if [[ ${#_WINDOW_PATH[@]} -gt 0 ]]; then
+		_say "open a new PowerShell window: this one predates these PATH changes"
+		for _d in "${_WINDOW_PATH[@]}"; do
+			_say "    (${_d} is on the Windows PATH, not this window's)"
+		done
+	fi
+	exit 0
+fi
 # A tool in ~/.local/bin that the calling shell cannot find yet: uv and
 # claude install there, and on a fresh box the PATH line that names it is
 # exactly what this run just wrote.
@@ -1850,6 +2120,13 @@ esac
 # installed uv on Windows, reaches the USER PATH and so only new shells.
 for _d in "${_PATH_ADDED[@]+"${_PATH_ADDED[@]}"}"; do
 	_reload_because "${_d} is not on this shell's PATH"
+done
+# And a tool the report found only on the Windows PATH in the registry: a
+# winget install wrote it there, where only new shells look. The jbx
+# function's marker puts it on the caller's PATH like the others.
+for _d in "${_WINDOW_PATH[@]+"${_WINDOW_PATH[@]}"}"; do
+	_reload_because "${_d} is on the Windows PATH, not this shell's"
+	_PATH_ADDED+=("${_d}")
 done
 if [[ ${#_RELOAD[@]} -gt 0 ]]; then
 	# Run through the `jbx` shell function (jbx-shell.sh), which exported
