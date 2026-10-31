@@ -18,17 +18,17 @@ ______________________________________________________________________
 
 ## Steps
 
-| Step     | What it does                                                                                                                                                                                                                                                    |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `deps`   | Installs a baseline toolchain — C compiler, `make`, `cmake`, `pkg-config`, `git`, `curl`, ssh — then the packages of any `bootstrap.toml` in the current directory, both via [`install-deps`](install-deps.md).                                                 |
-| `certs`  | **Opt-in, WSL only**. Installs Windows' trusted root certificates into the distro trust store beside its Mozilla bundle, one file per root, and removes any Windows no longer trusts. See below.                                                                |
-| `shell`  | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                                                                                                                           |
-| `ssh`    | Tightens permissions across `~/.ssh` — repairing a directory copied from Windows, FAT, a zip or git — then creates an ed25519 key named after this host if there is no key at all. Prints the public key.                                                       |
-| `sshd`   | **Opt-in, Windows only** (WSL or native MSYS2 / Git Bash). Runs Windows' own OpenSSH server as a boot-time service — key-only, keys from `github.com/<user>.keys`, `pwsh.exe` as the login shell — so the machine answers ssh even when WSL is down. See below. |
-| `git`    | Sets global git defaults that are not already set, and an unset `user.name` / `user.email` from the environment or a prompt.                                                                                                                                    |
-| `tools`  | Installs `uv` if missing, through [`install-uv`](libraries/pkg.md#install-uv): winget on Windows, which installs the native build on ARM64 (#171). Installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.               |
-| `pwsh`   | Installs PowerShell 7 and the PSScriptAnalyzer module, so `.ps1` files can be linted on this machine. Linux and macOS only — see below.                                                                                                                         |
-| `claude` | Installs Claude Code if the `claude` command is missing.                                                                                                                                                                                                        |
+| Step     | What it does                                                                                                                                                                                                                                                                                                         |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deps`   | Installs a baseline toolchain — C compiler, `make`, `cmake`, `pkg-config`, `git`, `curl`, ssh — then the packages of any `bootstrap.toml` in the current directory, both via [`install-deps`](install-deps.md).                                                                                                      |
+| `certs`  | **Opt-in, WSL only**. Installs Windows' trusted root certificates into the distro trust store beside its Mozilla bundle, one file per root, and removes any Windows no longer trusts. See below.                                                                                                                     |
+| `shell`  | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                                                                                                                                                                                |
+| `ssh`    | Tightens permissions across `~/.ssh` — repairing a directory copied from Windows, FAT, a zip or git — then creates an ed25519 key named after this host if there is no key at all. Prints the public key.                                                                                                            |
+| `sshd`   | **Opt-in, Windows only** (WSL or native MSYS2 / Git Bash). Runs Windows' own OpenSSH server as a boot-time service — key-only, keys from `github.com/<user>.keys`, `pwsh.exe` as the login shell — so the machine answers ssh even when WSL is down. See below.                                                      |
+| `git`    | Sets global git defaults that are not already set, and an unset `user.name` / `user.email` from the environment or a prompt.                                                                                                                                                                                         |
+| `tools`  | Installs `uv` if missing, through [`install-uv`](libraries/pkg.md#install-uv): winget on Windows, which installs the native build on ARM64 (#171). Installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.                                                                    |
+| `pwsh`   | Installs PowerShell 7 and the PSScriptAnalyzer module, so `.ps1` files can be linted on this machine. Linux and macOS only — see below.                                                                                                                                                                              |
+| `claude` | Installs Claude Code if the `claude` command is missing, by an installer [Anthropic recommends](https://code.claude.com/docs/en/setup): `install.sh` off Windows; on native Windows winget (`Anthropic.ClaudeCode`, the native build for the machine), else `install.ps1` ([below](#claude-code-on-native-windows)). |
 
 On native Windows the `deps` baseline is CMake, Git, PowerShell 7 and the
 MSVC Build Tools with two of their parts, by winget: the C++ workload (the
@@ -593,6 +593,31 @@ only new processes read. So on native Windows the report also searches the
 registry's `PATH` directories, after this shell's own. A tool installed by
 this run is reported where it is, not as `missing`, and the closing advice
 names the directory a new window would add.
+
+### Claude Code on native Windows
+
+Anthropic's `install.sh` refuses a Git Bash, MSYS2 or Cygwin shell ("Windows
+is not supported by this script"), so on native Windows the `claude` step
+uses one of the Windows installers Anthropic's
+[setup page](https://code.claude.com/docs/en/setup) lists (#189):
+
+- **winget**, `Anthropic.ClaudeCode`, when winget is there. winget picks the
+    machine's native build itself, `win32-arm64` on an ARM64 box even from
+    an emulated x64 Git Bash, the same reason `uv` comes from winget (#171).
+    It links `claude.exe` into `%LOCALAPPDATA%\Microsoft\WinGet\Links`,
+    which goes on this run's `PATH` and into the closing advice. A WinGet
+    install does not update itself: run `winget upgrade Anthropic.ClaudeCode`,
+    or set `CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE=1` to have Claude Code
+    run that upgrade for you.
+- **`install.ps1`**, through Windows PowerShell, when winget is absent or
+    its install fails. It leaves a self-updating install in `~/.local/bin`.
+    It picks its build from `$env:PROCESSOR_ARCHITECTURE` alone, which reads
+    `AMD64` in a PowerShell started from an emulated x64 shell on ARM64. So
+    that one PowerShell is given the machine's architecture first, from the
+    registry check `windows-sshd.ps1` makes for the PowerShell MSI
+    (`Get-MachineArch`).
+
+`jbx setup-system -n -s claude` prints the command it would run.
 
 ### The closing advice
 

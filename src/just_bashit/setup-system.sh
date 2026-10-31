@@ -1690,6 +1690,20 @@ _git_identity() {
 # puts each on the caller's PATH (its marker's `path` line).
 _PATH_ADDED=()
 
+# _path_add DIR -- put DIR first on this run's PATH, and record it in
+# _PATH_ADDED, unless PATH already has it. For a directory an installer
+# just wrote a tool into (uv, claude).
+_path_add() {
+	case ":${PATH}:" in
+	*":$1:"*) ;;
+	*)
+		PATH="$1:${PATH}"
+		_PATH_ADDED+=("$1")
+		;;
+	esac
+	hash -r
+}
+
 # tools — uv, then this repo's pre-commit hooks if that applies here.
 #
 # uv comes from pkg.sh's install-uv, which get-jb.sh and jbx share: winget
@@ -1707,14 +1721,7 @@ step_tools() {
 	else
 		_info "installing uv"
 		if uv_dir="$(install-uv)"; then
-			case ":${PATH}:" in
-			*":${uv_dir}:"*) ;;
-			*)
-				PATH="${uv_dir}:${PATH}"
-				_PATH_ADDED+=("${uv_dir}")
-				;;
-			esac
-			hash -r
+			_path_add "${uv_dir}"
 			_info "uv installed in ${uv_dir}"
 		else
 			_warn "uv was not installed"
@@ -2001,8 +2008,114 @@ step_pwsh() {
 	fi
 }
 
-# claude — Anthropic's own installer; it puts the binary in ~/.local/bin,
-# which the shell step has already put on PATH.
+# ---------------------------------------------------------------------------
+# claude — Claude Code, by one of the installers Anthropic's setup page
+# recommends (https://code.claude.com/docs/en/setup).
+#
+# Off Windows: install.sh, which puts the binary in ~/.local/bin, which the
+# shell step has already put on PATH.
+#
+# On native Windows (a MINGW/MSYS/CYGWIN uname) install.sh is no use: it
+# refuses those unames outright ("Windows is not supported by this script",
+# measured 2026-10-31, #189). There, winget (Anthropic.ClaudeCode) first,
+# the same shape as install-uv (#171): winget resolves the machine's native
+# build by itself (win32-arm64 on an ARM64 box, from an emulated x64 shell
+# too) and links the portable exe into winget's Links directory, which goes
+# on this run's PATH and into the closing advice as uv's does. A WinGet
+# install does not update itself; Anthropic documents
+# `winget upgrade Anthropic.ClaudeCode`, or CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE=1
+# to have Claude Code run that upgrade for you.
+#
+# When winget is absent or fails, install.ps1 through Windows PowerShell. It
+# chooses its build from $env:PROCESSOR_ARCHITECTURE alone, and a PowerShell
+# started from an emulated x64 shell on ARM64 Windows reads AMD64 there. So
+# the child PowerShell dot-sources windows-sshd.ps1 for Get-MachineArch --
+# the ONE machine-architecture check, a registry read the emulation does not
+# virtualise -- and sets PROCESSOR_ARCHITECTURE to the machine's value for
+# itself before running the installer. Only that child process sees it.
+# ---------------------------------------------------------------------------
+_CLAUDE_WINGET_ID="Anthropic.ClaudeCode"
+_CLAUDE_INSTALL_SH="https://claude.ai/install.sh"
+_CLAUDE_INSTALL_PS1="https://claude.ai/install.ps1"
+
+# _claude_ps1_command SSHD_PS1 -- the PowerShell command that runs
+# install.ps1 for this machine's architecture. SSHD_PS1 is the Windows path
+# of a file named windows-sshd.ps1: a dot-sourced script must end in .ps1.
+_claude_ps1_command() {
+	printf '%s' ". $(_ps_literal "$1"); \$env:PROCESSOR_ARCHITECTURE = @{ arm64 = 'ARM64'; x64 = 'AMD64' }[(Get-MachineArch)]; irm $(_ps_literal "${_CLAUDE_INSTALL_PS1}") | iex"
+}
+
+# _claude_windows — step_claude's native-Windows half. Reports into the
+# summary itself.
+_claude_windows() {
+	local w dir
+	if w="$(winget-bin)"; then
+		_info "installing Claude Code"
+		if [[ ${DRY_RUN} -eq 1 ]]; then
+			_info "would run: $(_winget_install_line "${w}" "${_CLAUDE_WINGET_ID}")"
+			_result "claude:  ok (dry run)"
+			return 0
+		fi
+		if dir="$(_winget_portable "${w}" "${_CLAUDE_WINGET_ID}" claude)"; then
+			_path_add "${dir}"
+			_info "claude installed in ${dir}; run 'claude' to sign in"
+			_result "claude:  ok (installed)"
+			return 0
+		fi
+		_warn "winget did not install ${_CLAUDE_WINGET_ID}; falling back to ${_CLAUDE_INSTALL_PS1}"
+	fi
+	_claude_ps1
+}
+
+# _claude_ps1 — install.ps1 through Windows PowerShell, the fallback.
+_claude_ps1() {
+	local ps src dir wpath cmd rc=0
+	if ! ps="$(_powershell_bin)"; then
+		_warn "neither winget nor Windows PowerShell found — cannot install Claude Code"
+		_result "claude:  skipped (no winget, no PowerShell)"
+		return 0
+	fi
+	if ! src="$(_asset windows-sshd.ps1)"; then
+		_result "claude:  failed (windows-sshd.ps1 unavailable)"
+		return 0
+	fi
+	# MSYS rewrites any argument that looks like a POSIX path before a
+	# Windows program sees it; the command below carries a URL.
+	local -x MSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1
+
+	_info "installing Claude Code (install.ps1: no winget)"
+	if [[ ${DRY_RUN} -eq 1 ]]; then
+		wpath="$(_win_path "${src}")" || wpath="${src}"
+		_info "would run: ${ps} -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"$(_claude_ps1_command "${wpath}")\""
+		_result "claude:  ok (dry run)"
+		return 0
+	fi
+	# _asset may hand back a temp copy with no .ps1 suffix, which
+	# PowerShell will not dot-source; a copy under the real name always is.
+	dir="$(mktemp -d "${TMPDIR:-/tmp}/jb-claude.XXXXXX")" || {
+		_result "claude:  failed"
+		return 0
+	}
+	cp "${src}" "${dir}/windows-sshd.ps1"
+	if wpath="$(_win_path "${dir}/windows-sshd.ps1")"; then
+		cmd="$(_claude_ps1_command "${wpath}")"
+		# -ExecutionPolicy Bypass: a Windows client's default policy,
+		# Restricted, refuses to dot-source any script file.
+		"${ps}" -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+			-Command "${cmd}" || rc=$?
+	else
+		rc=1
+	fi
+	rm -rf "${dir}"
+	if [[ ${rc} -eq 0 ]]; then
+		_info "run 'claude' to sign in"
+		_result "claude:  ok (installed)"
+	else
+		_warn "the Claude Code installer failed (install.ps1, exit ${rc})"
+		_result "claude:  failed"
+	fi
+}
+
 step_claude() {
 	_head "claude — Claude Code"
 
@@ -2011,6 +2124,12 @@ step_claude() {
 		_result "claude:  ok (already installed)"
 		return 0
 	fi
+	case "${JB_UNAME_S:-$(uname -s 2>/dev/null || echo unknown)}" in
+	MINGW* | MSYS* | CYGWIN*)
+		_claude_windows
+		return 0
+		;;
+	esac
 	if ! _have curl; then
 		_warn "curl not installed — cannot install Claude Code"
 		_result "claude:  skipped (no curl)"
@@ -2019,11 +2138,11 @@ step_claude() {
 
 	_info "installing Claude Code"
 	if [[ ${DRY_RUN} -eq 1 ]]; then
-		_info "would run: curl -fsSL https://claude.ai/install.sh | bash"
+		_info "would run: curl -fsSL ${_CLAUDE_INSTALL_SH} | bash"
 		_result "claude:  ok (dry run)"
 		return 0
 	fi
-	if curl -fsSL https://claude.ai/install.sh | bash; then
+	if curl -fsSL "${_CLAUDE_INSTALL_SH}" | bash; then
 		_info "run 'claude' to sign in"
 		_result "claude:  ok (installed)"
 	else
