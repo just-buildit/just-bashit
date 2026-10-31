@@ -41,12 +41,12 @@ _posix_only() {
 	assert_output "4"
 }
 
-# The flags are a peer of install-deps.sh's: get-jb.ps1 is fetched alone and
+# The flags are a peer of pkg.sh's: get-jb.ps1 is fetched alone and
 # cannot source that file. One list, read from both, must agree.
-@test 'get-jb.ps1: winget flags are install-deps.sh _WINGET_INSTALL_FLAGS' {
+@test 'get-jb.ps1: winget flags are pkg.sh _WINGET_INSTALL_FLAGS' {
 	local bash_flags
 	bash_flags="$(sed -n '/^_WINGET_INSTALL_FLAGS=(/,/^)/p' \
-		"${PROJECT_ROOT}/src/just_bashit/install-deps.sh" |
+		"${PROJECT_ROOT}/src/just_bashit/pkg.sh" |
 		sed '1d;$d' | tr -s ' \t\n' ' ' | sed 's/^ //;s/ $//')"
 	[ -n "${bash_flags}" ]
 	run _ps '(Get-JbWingetFlag) -join " "'

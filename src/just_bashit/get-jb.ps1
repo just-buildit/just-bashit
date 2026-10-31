@@ -89,7 +89,7 @@ function Get-JbWingetFlag {
         The flags every winget install carries: no prompt for an agreement
         or a source, so a run never stops to ask.
     .DESCRIPTION
-        The same set as install-deps.sh's _WINGET_INSTALL_FLAGS; a test
+        The same set as pkg.sh's _WINGET_INSTALL_FLAGS; a test
         holds the two equal, since this file is fetched on its own and
         cannot source that one.
     #>
