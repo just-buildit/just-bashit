@@ -30,10 +30,17 @@ ______________________________________________________________________
 | `pwsh`   | Installs PowerShell 7 and the PSScriptAnalyzer module, so `.ps1` files can be linted on this machine. Linux and macOS only — see below.                                                                                                                         |
 | `claude` | Installs Claude Code if the `claude` command is missing.                                                                                                                                                                                                        |
 
-On native Windows the `deps` baseline is clang-cl, CMake, Git, PowerShell 7
-and the MSVC Build Tools' C++ workload, by winget. A Build Tools install that
-lacks the workload has it added, and one that has it is left alone
-([how](install-deps.md#a-package-that-provides-visual-studio-workloads)).
+On native Windows the `deps` baseline is CMake, Git, PowerShell 7 and the
+MSVC Build Tools with two of their parts, by winget: the C++ workload (the
+MSVC libraries and Windows SDK clang-cl links against) and the *C++ Clang
+Compiler for Windows* component (clang-cl itself, x64 and ARM64). A Build
+Tools install that lacks either has it added, and one that has both is left
+alone
+([how](install-deps.md#a-package-that-provides-visual-studio-workloads-and-components)).
+clang-cl comes from that component, not the `LLVM.LLVM` package, because
+the component's hook puts it on PATH in a **Developer PowerShell for VS**
+(or Developer Command Prompt), the shell just-makeit builds Windows in;
+`LLVM.LLVM` put it on no PATH at all (#181).
 
 They always run in that order, whatever order you list them in — packages
 land before the steps that need `git`, `curl` and `ssh-keygen`. Every step

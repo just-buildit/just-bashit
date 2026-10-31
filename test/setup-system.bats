@@ -763,7 +763,9 @@ _baseline_section() {
 
 @test 'the Windows baselines: clang-cl and pwsh by winget, no MinGW' {
 	run _baseline_section winget
-	assert_output --partial '"LLVM.LLVM"'
+	# clang-cl is a Build Tools component (below); LLVM.LLVM installed it
+	# on no PATH (#181).
+	refute_output --partial '"LLVM.LLVM"'
 	assert_output --partial '"Microsoft.PowerShell"'
 	assert_output --partial '"Microsoft.VisualStudio.BuildTools"'
 	run _baseline_section msys2
@@ -772,9 +774,10 @@ _baseline_section() {
 }
 
 # The Build Tools id alone is the installer shell: the C++ workload clang-cl
-# links against is what its table declares, read the way install-deps reads
-# it (#67).
-@test 'the winget baseline declares the Build Tools C++ workload' {
+# links against (#67), and clang-cl itself, the component whose Developer
+# shell hook puts it on PATH (#181), are what its table declares, read the
+# way install-deps reads it.
+@test 'the winget baseline declares the C++ workload and clang-cl' {
 	# shellcheck disable=SC1091
 	source "${PROJECT_ROOT}/src/just_bashit/toml.sh"
 	local baseline
@@ -783,7 +786,8 @@ _baseline_section() {
 	run toml_get_array baseline 'winget."Microsoft.VisualStudio.BuildTools"' \
 		vs_requires <<<"${baseline}"
 	assert_success
-	assert_output "Microsoft.VisualStudio.Workload.VCTools"
+	assert_output "Microsoft.VisualStudio.Workload.VCTools
+Microsoft.VisualStudio.Component.VC.Llvm.Clang"
 }
 
 # MSYS2's section has no compiler now, so an MSYS2 host (Windows uname,
@@ -802,7 +806,7 @@ _win_pkg_stubs() {
 	JB_UNAME_S=MINGW64_NT-10.0 run setup-system.sh -n -s deps
 	assert_success
 	assert_output --partial "installing packages from the native Windows toolchain (winget)"
-	assert_output --partial "LLVM.LLVM"
+	assert_output --partial "--add Microsoft.VisualStudio.Component.VC.Llvm.Clang"
 	assert_output --partial "Microsoft.PowerShell"
 }
 

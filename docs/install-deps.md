@@ -484,30 +484,44 @@ Three things follow from winget itself rather than from any choice here:
     raises Windows' own elevation prompt. Reached from WSL as `winget.exe`, a
     sudo prefix would only run the interop call as Linux root.
 
-#### A package that provides Visual Studio workloads
+#### A package that provides Visual Studio workloads and components
 
 `Microsoft.VisualStudio.BuildTools` installs the Visual Studio Installer
-*shell*; the compiler, the MSVC libraries and the Windows SDK are a
-**workload** added to it. Its id says nothing about which workloads are
-there, so `winget list` finding it proves nothing. Such a package names what
-it provides in a table of its own, keyed by the id:
+*shell*; the MSVC libraries and the Windows SDK are a **workload** added to
+it, and clang-cl is a **component**. Its id says nothing about which
+workloads or components are there, so `winget list` finding it proves
+nothing. Such a package names what it provides in a table of its own, keyed
+by the id:
 
 ```toml
 [dev.winget]
 packages = ["Microsoft.VisualStudio.BuildTools"]
 
 [dev.winget."Microsoft.VisualStudio.BuildTools"]
-vs_requires = ["Microsoft.VisualStudio.Workload.VCTools"]
+vs_requires = [
+    "Microsoft.VisualStudio.Workload.VCTools",
+    "Microsoft.VisualStudio.Component.VC.Llvm.Clang",
+]
 ```
+
+A workload id and a component id are listed alike: `vswhere -requires`
+matches an instance only when it has every one, and the installer's `--add`
+takes either. Those two are `setup-system`'s Windows baseline. The
+component (*C++ Clang Compiler for Windows*) installs x64 and ARM64
+clang-cl under `VC\Tools\Llvm` and a Developer shell hook,
+`Common7\Tools\vsdevcmd\ext\clang_cl.bat`, that puts the one matching the
+host on PATH in a Developer PowerShell or Command Prompt. Its companion
+`Microsoft.VisualStudio.Component.VC.Llvm.ClangToolset` is MSBuild's
+`ClangCL` platform toolset, needed only to build a `.vcxproj` with it.
 
 That one list is both the probe and the install, so the two cannot disagree.
 The probe replaces the id probe for that package:
 
-| `vswhere -products * -requires <workloads>` | `winget list` | What runs                                                                                                                                                        |
-| ------------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| finds an instance                           | —             | nothing                                                                                                                                                          |
-| finds none                                  | absent        | `winget install --id <id> ... --override "--quiet --wait --norestart --add <workload>... --includeRecommended"`                                                  |
-| finds none                                  | present       | the installed VS Installer's `setup.exe modify --installPath <path> --add <workload>... --includeRecommended --quiet --norestart`, elevated through a UAC prompt |
+| `vswhere -products * -requires <ids>` | `winget list` | What runs                                                                                                                                                  |
+| ------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| finds an instance                     | —             | nothing                                                                                                                                                    |
+| finds none                            | absent        | `winget install --id <id> ... --override "--quiet --wait --norestart --add <id>... --includeRecommended"`                                                  |
+| finds none                            | present       | the installed VS Installer's `setup.exe modify --installPath <path> --add <id>... --includeRecommended --quiet --norestart`, elevated through a UAC prompt |
 
 The middle path cannot repair a present shell: winget cancels a re-install of
 an id it already lists. Nor can `winget install --force`: a newer bootstrapper
@@ -515,7 +529,7 @@ refuses to modify an older install whenever an update is pending. Both
 programs live in `%ProgramFiles(x86)%\Microsoft Visual Studio\Installer`.
 
 After either install the probe runs again, and it decides the outcome, not
-the exit code. If it finds no instance with the workloads, the run fails and
+the exit code. If it finds no instance with every id, the run fails and
 names the code, even when that code is 0: an installer that reports success
 without installing is caught. If the probe passes, the run succeeds. A code
 of 3010, or one of winget's reboot HRESULTs (`0x8A150109`-`0x8A15010B`),

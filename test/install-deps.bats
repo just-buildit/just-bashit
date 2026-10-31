@@ -1269,13 +1269,32 @@ _vs_toml() {
 	assert_output 0
 }
 
-@test 'vs_requires refuses a value that is not a workload id' {
+# The baseline's shape (#181): a workload and a component in one list. The
+# probe asks for an instance with BOTH, so a shell that has the workload but
+# not clang-cl is modified, and the one modify adds both.
+@test 'vs_requires: a workload and a component are probed and added together' {
+	local stub vs win f="${BATS_TEST_TMPDIR}/vs2.toml"
+	local comp="Microsoft.VisualStudio.Component.VC.Llvm.Clang"
+	stub="$(_winget_stub 0)"
+	vs="$(_vs_stubs 'C:\BuildTools')"
+	win="$(_win_exit_stub 0)"
+	printf '[runtime.winget]\npackages = ["Microsoft.VisualStudio.BuildTools"]\n\n[runtime.winget."Microsoft.VisualStudio.BuildTools"]\nvs_requires = ["%s", "%s"]\n' \
+		"${_VS_WL}" "${comp}" >"${f}"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		install-deps.sh -s winget "${f}"
+	assert_success
+	run cat "${VS_LOG}"
+	assert_line "vswhere -products * -requires ${_VS_WL} ${comp} -property installationPath"
+	assert_line "setup.exe modify --installPath C:\\BuildTools --add ${_VS_WL} --add ${comp} --includeRecommended --quiet --norestart"
+}
+
+@test 'vs_requires refuses a value that is not a workload or component id' {
 	local stub f="${BATS_TEST_TMPDIR}/bad.toml"
 	stub="$(_winget_stub 20)"
 	printf '[runtime.winget]\npackages = ["X.Y"]\n\n[runtime.winget."X.Y"]\nvs_requires = ["A B; rm"]\n' >"${f}"
 	run env JB_WINGET="${stub}" install-deps.sh -n -s winget "${f}"
 	assert_failure
-	assert_output --partial "not a workload id: A B; rm"
+	assert_output --partial "not a workload or component id: A B; rm"
 }
 
 # ---------------------------------------------------------------------------

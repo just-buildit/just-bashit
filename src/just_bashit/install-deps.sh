@@ -60,14 +60,16 @@ read -r -d '' HELP <<-'EOF' || true
 	  package per invocation, skipping any id `winget list` already finds.
 	  Package names there are winget ids, e.g. "Python.Python.3.13".
 
-	  A winget package that provides Visual Studio workloads names them in
-	  a table keyed by its id, probed with vswhere instead of `winget list`:
+	  A winget package that provides Visual Studio workloads or components
+	  names their ids in a table keyed by its id, probed with vswhere
+	  instead of `winget list`:
 
 	    [dev.winget."Microsoft.VisualStudio.BuildTools"]
-	    vs_requires = ["Microsoft.VisualStudio.Workload.VCTools"]
+	    vs_requires = ["Microsoft.VisualStudio.Workload.VCTools",
+	                   "Microsoft.VisualStudio.Component.VC.Llvm.Clang"]
 
-	  Absent, it is installed with --override "... --add <workload>"; present
-	  without the workloads, the VS Installer adds them (elevated).
+	  Absent, it is installed with --override "... --add <id>..."; present
+	  without them, the VS Installer adds them (elevated).
 
 	  Privilege escalation is DERIVED, not assumed: sudo is used only when
 	  the manager needs root, the caller is not already root, and sudo is
@@ -313,7 +315,8 @@ _resolve_prefix() {
 # install-uv there installs through them too (#171).
 
 # ---------------------------------------------------------------------------
-# A winget package that provides Visual Studio workloads (#67).
+# A winget package that provides Visual Studio workloads or components
+# (#67, #181).
 #
 # `Microsoft.VisualStudio.BuildTools` installs the Visual Studio Installer
 # SHELL; the C++ toolchain is a workload added to it. So the id probe answers
@@ -326,9 +329,12 @@ _resolve_prefix() {
 #   packages = ["Microsoft.VisualStudio.BuildTools"]
 #
 #   [baseline.winget."Microsoft.VisualStudio.BuildTools"]
-#   vs_requires = ["Microsoft.VisualStudio.Workload.VCTools"]
+#   vs_requires = ["Microsoft.VisualStudio.Workload.VCTools",
+#                  "Microsoft.VisualStudio.Component.VC.Llvm.Clang"]
 #
-# ONE declaration, read both ways: the probe asks vswhere for an instance
+# An id is a workload or a component alike: vswhere -requires and the
+# installer's --add take both kinds, and the second is how clang-cl
+# arrives (#181). ONE declaration, read both ways: the probe asks vswhere for an instance
 # with every id (`-requires`), and both installs `--add` every id, so what is
 # probed and what is installed cannot disagree. Three paths, decided by the
 # probe and never by an install's exit code (a re-install of a present id is
@@ -359,7 +365,7 @@ _vs_requires() {
 	local _r
 	while IFS= read -r _r; do
 		if [[ ! ${_r} =~ ^[A-Za-z0-9._-]+$ ]]; then
-			echo "error: [$1.winget.\"$2\"] vs_requires: not a workload id: ${_r}" >&2
+			echo "error: [$1.winget.\"$2\"] vs_requires: not a workload or component id: ${_r}" >&2
 			return 1
 		fi
 		printf '%s\n' "${_r}"
