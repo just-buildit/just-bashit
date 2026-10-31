@@ -18,6 +18,20 @@
 
 ### Fixed
 
+- **A failed `aliases.toml` fetch is refused, not read as "not listed"
+    (#164).** jbx resolved a bare name by fetching the namespace's
+    `aliases.toml`, and on any failure fell through to probing `NAME.sh` at
+    the base: a transient blip sent `jbx install-deps` to the org root's copy
+    of `install-deps.sh`, run without its libraries ("toml.sh: No such
+    file"). The fetch now retries as every other fetch does, then refuses,
+    naming the URL and curl's message. It uses `--fail`, so an HTTP error
+    page is refused rather than cached, and a response with no `[aliases]`
+    table is refused too. A cached copy past its TTL answers when the
+    refetch fails, with a warning; under `-r` or `-n` the failure is
+    refused. A just-bashit script fetched from the org root that sources its
+    sibling libraries is run through the co-fetch from `jbs/`. `get-jb.sh`
+    no longer installs an HTTP error page as jbx.
+
 - **`jbx -l` reads a function whose body ends `[[ ... ]]`.** The reader that
     lists functions without running the script took the newline after a
     closing `]]` as part of the test rather than the end of the command, so

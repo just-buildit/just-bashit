@@ -101,32 +101,69 @@ _bin_without() {
 # _serve_fixtures DIR -- answer every just-runit fetch from DIR, offline.
 #
 # Puts a curl first on PATH that, for `curl ... -o DEST URL`, copies
-# DIR/<the URL's last path segment> to DEST, and fails as `curl --fail` does
-# on a 404 when DIR has no such file. A call without -o (just-runit's probe
-# for --retry-all-errors) succeeds and does nothing. just-runit fetches only
-# https:// -- it refuses http:// and file:// -- so a local server cannot
-# stand in for the network; replacing curl is the seam fetch.bats uses.
+# DIR/<the URL's last path segment> to DEST. When DIR has no such file it
+# answers as a real curl does a 404: with --fail it exits 22 and writes
+# nothing, without it the error page lands in DEST and the exit is 0 -- so a
+# fetch that forgot --fail caches a page, here as on the live site. A
+# DIR/<segment>.curl-exit file holding a number N makes the fetch fail as an
+# unreachable host does, exit N with curl's message on stderr, whatever else
+# is in DIR. A `--head -w ...` probe prints 200 or 404 by the same lookup.
+# A call with no URL (just-runit's probe for --retry-all-errors) succeeds and
+# does nothing. Every URL asked for is appended to ${JB_FIXTURES_LOG}.
+#
+# just-runit fetches only https:// -- it refuses http:// and file:// -- so a
+# local server cannot stand in for the network; replacing curl is the seam
+# fetch.bats uses. The fixtures are keyed by the last segment alone and the
+# fetches are cached by URL, so a test that serves two answers for one name
+# gives each its own DIR, URL and XDG_CACHE_HOME.
 _serve_fixtures() {
 	local bin="${BATS_TEST_TMPDIR}/fixture-curl"
 	mkdir -p "${bin}"
-	cat >"${bin}/curl" <<-'EOF'
-		#!/usr/bin/env bash
-		dest="" url=""
-		while [[ $# -gt 0 ]]; do
-			case "${1}" in
-			-o)
-				dest="${2}"
-				shift 2
-				continue
-				;;
-			https://*) url="${1}" ;;
-			esac
-			shift
-		done
-		[[ -n ${dest} ]] || exit 0
-		[[ -f "${JB_FIXTURES}/${url##*/}" ]] || exit 22
-		cp "${JB_FIXTURES}/${url##*/}" "${dest}"
-	EOF
+	export JB_FIXTURES_LOG="${bin}.urls"
+	# The log's path is baked in, as setup_suite does for the trap, so a
+	# test that runs jbx under `env -i` still logs.
+	{
+		echo '#!/usr/bin/env bash'
+		printf 'log=%q\n' "${JB_FIXTURES_LOG}"
+		cat <<-'EOF'
+			dest="" url="" fail=0 head=0
+			while [[ $# -gt 0 ]]; do
+				case "${1}" in
+				-o)
+					dest="${2}"
+					shift 2
+					continue
+					;;
+				--fail) fail=1 ;;
+				--head) head=1 ;;
+				https://*) url="${1}" ;;
+				esac
+				shift
+			done
+			[[ -n ${url} ]] || exit 0
+			echo "${url}" >>"${log}"
+			f="${JB_FIXTURES}/${url##*/}"
+			if [[ -f "${f}.curl-exit" ]]; then
+				host="${url#https://}"
+				echo "curl: ($(<"${f}.curl-exit")) Could not resolve host: ${host%%/*}" >&2
+				exit "$(<"${f}.curl-exit")"
+			fi
+			if ((head == 1)); then
+				[[ -f ${f} ]] && printf 200 || printf 404
+				exit 0
+			fi
+			[[ -n ${dest} ]] || exit 0
+			if [[ ! -f ${f} ]]; then
+				if ((fail == 1)); then
+					echo 'curl: (22) The requested URL returned error: 404' >&2
+					exit 22
+				fi
+				echo '<html><body>404 Not Found</body></html>' >"${dest}"
+				exit 0
+			fi
+			cp "${f}" "${dest}"
+		EOF
+	} >"${bin}/curl"
 	chmod +x "${bin}/curl"
 	export JB_FIXTURES="${1}" PATH="${bin}:${PATH}"
 }
