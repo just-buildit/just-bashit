@@ -2179,8 +2179,10 @@ _claude_win_stubs() {
 	export LOCALAPPDATA="${BATS_TEST_TMPDIR}/lad"
 	CLAUDE_LINKS="${LOCALAPPDATA}/Microsoft/WinGet/Links"
 	mkdir -p "${BATS_TEST_TMPDIR}/cbin"
+	# Only a fetch is logged: the installed report runs `curl --version`.
 	cat >"${BATS_TEST_TMPDIR}/cbin/curl" <<-EOF
 		#!/usr/bin/env bash
+		case "\$*" in *--version*) echo "curl 8.0.0"; exit 0 ;; esac
 		echo "\$*" >>'${BATS_TEST_TMPDIR}/curl.log'
 		exit 1
 	EOF
