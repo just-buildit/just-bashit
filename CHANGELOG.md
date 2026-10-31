@@ -77,6 +77,13 @@
 
 ### Fixed
 
+- **A jbx run of the sshd step on native Windows no longer fails with
+    `windows-sshd.ps1 unavailable` (#190).** The step turns MSYS path
+    conversion off for the Windows programs it drives, then fetched the
+    script beside it with Git for Windows' curl -- a Windows program too,
+    which, handed `-o /tmp/...` unconverted, could not write it (`curl:   (23)`). The fetch now runs with conversion on. It bit every jbx run, and
+    #190 makes the step part of the default one.
+
 - **clang-cl on native Windows is the Build Tools' clang component, so a
     Developer PowerShell finds it (#181).** `LLVM.LLVM` installed
     `C:\Program Files\LLVM\bin\clang-cl.exe` and added that directory to

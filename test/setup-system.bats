@@ -1779,6 +1779,38 @@ C:\\Users\\tester\\AppData\\Local\\Temp\\jb-windows-sshd\\launch.ps1"
 	done
 }
 
+# The sshd step turns MSYS path conversion off for its Windows programs, and
+# fetches windows-sshd.ps1 after it has: Git for Windows' curl is a Windows
+# program too, and given `-o /tmp/...` unconverted it failed to write
+# (curl: (23)), so every jbx run of the step on native Windows failed. The
+# curl stub refuses to run with conversion off, as that curl effectively did.
+@test 'sshd: windows-sshd.ps1 is fetched with MSYS path conversion on' {
+	_native_stubs
+	local old="${BATS_TEST_TMPDIR}/jbx-cache" mirror="${BATS_TEST_TMPDIR}/mirror" f
+	mkdir -p "${old}" "${mirror}"
+	cp "${PROJECT_ROOT}"/src/just_bashit/*.sh "${old}/"
+	cp "${PROJECT_ROOT}/src/just_bashit/windows-sshd.ps1" "${mirror}/"
+	cat >"${STUBS}/curl" <<-'EOF'
+		#!/bin/bash
+		if [ -n "${MSYS2_ARG_CONV_EXCL+x}${MSYS_NO_PATHCONV+x}" ]; then
+			echo "curl: (23) client returned ERROR on write" >&2
+			exit 23
+		fi
+		# Plays the fetch: copies the file:// URL (the last argument) to -o.
+		while [ $# -gt 1 ]; do
+			[ "$1" = -o ] && out="$2"
+			shift
+		done
+		cp "${1#file://}" "${out}"
+	EOF
+	chmod +x "${STUBS}/curl"
+	JB_JBS_BASE="file://${mirror}" run bash "${old}/setup-system.sh" -s sshd --github-user octocat
+	assert_success
+	refute_output --partial "windows-sshd.ps1 unavailable"
+	assert_output --partial "sshd:    ok (keys from github.com/octocat.keys)"
+	assert [ -r "${old}/windows-sshd.ps1" ]
+}
+
 # An admin ssh channel to this machine's own sshd: answers the probe as
 # TESTHOST, elevated, and records (then plays) the one real command sent.
 _admin_channel_stub() {
