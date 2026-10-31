@@ -236,3 +236,27 @@ setup() {
 	assert_success
 	assert_output 'main'
 }
+
+# A line whose last word is the ]] closing a [[ ]] ends the command there,
+# as any newline does; only a newline INSIDE an open [[ ]] continues it.
+# Without that, the next line's `}` read as an argument and a function
+# whose body ended `[[ ... ]]` never closed: `jbx -l setup-system` failed
+# "unterminated at end of file" once just-bashit#132 added one.
+@test '-l reads a [[ ]] that ends its line, and one that spans lines' {
+	local name body
+	local -A shapes=(
+		[eol]=$'\t[[ -x /a ]]'
+		[eol - or]=$'\t[[ -x /a || -x /b ]]'
+		[cmd - or - eol]=$'\t_have "$1" || [[ -x /usr/sbin/$1 || -x /sbin/$1 ]]'
+		[spans]=$'\t[[ -x /a &&\n\t\t-x /b ]]'
+	)
+	for name in "${!shapes[@]}"; do
+		body="${shapes[${name}]}"
+		printf '#!/usr/bin/env bash\nf() {\n%s\n}\ntouch %q\ng() { :; }\n' \
+			"${body}" "${ran}" >"${fixtures}/${name}.sh"
+		run just-runit -l "https://fixture.invalid/${name}.sh"
+		assert_success
+		assert_output "$(printf 'f\ng')"
+	done
+	refute [ -e "${ran}" ]
+}
