@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`setup-system -s certs` puts Windows' trusted roots into WSL.** An
+    opt-in step, like `sshd`: a default run does not touch the trust store.
+    It exports `Cert:\LocalMachine\Root` and `Cert:\CurrentUser\Root`
+    through `powershell.exe`, writes each root once as its own
+    `jb-windows-root-<thumbprint>.crt` in the distro's anchor directory
+    (Debian/Ubuntu/Alpine, Fedora/RHEL, Arch, openSUSE) and runs its updater,
+    so a corporate TLS-inspection root that Windows trusts is trusted by
+    `curl`, `git` and Python too. A root Windows no longer exports is
+    removed; an unchanged export writes nothing; a failed update puts the
+    previous roots back. On WSL the bash profile also points an unset
+    `SSL_CERT_FILE` at the system bundle.
+
 ### Fixed
 
 - **`jbx -l` reads a function whose body ends `[[ ... ]]`.** The reader that
