@@ -296,3 +296,49 @@ _arch_stub() {
 	assert_output --regexp '^[0-9]+:    if \(-not \$machine\) \{ \$machine = \$env:PROCESSOR_ARCHITEW6432 \}
 [0-9]+:    if \(-not \$machine\) \{ \$machine = \$env:PROCESSOR_ARCHITECTURE \}$'
 }
+
+# ---------------------------------------------------------------------------
+# The ssh-agent service (#190): Disabled as Windows ships it, Automatic and
+# running after. Get-Service answers from $global:svc ($null: the client
+# capability is absent); Set-Service and Start-Service record their calls.
+# ---------------------------------------------------------------------------
+_agent_stubs() {
+	cat <<-'EOF2'
+		$global:calls = @()
+		$global:svc = [pscustomobject]@{ StartType = 'Disabled'; Status = 'Stopped' }
+		function Get-Service { param($Name, $ErrorAction) if ($Name -ne 'ssh-agent') { throw "wrong service $Name" }; $global:svc }
+		function Set-Service { param($Name, $StartupType) $global:calls += "set $Name $StartupType" }
+		function Start-Service { param($Name) $global:calls += "start $Name" }
+	EOF2
+}
+
+@test 'windows-sshd: -SshAgent sets a Disabled agent to Automatic and starts it' {
+	run _ps "$(_agent_stubs); Enable-SshAgentService; \$global:calls -join '|'"
+	assert_success
+	assert_output --partial "ssh-agent running, starts at boot"
+	assert_line "set ssh-agent Automatic|start ssh-agent"
+}
+
+@test 'windows-sshd: an agent already Automatic and running is left alone' {
+	run _ps "$(_agent_stubs); \$global:svc = [pscustomobject]@{ StartType = 'Automatic'; Status = 'Running' }; Enable-SshAgentService; 'calls=' + (\$global:calls -join '|')"
+	assert_success
+	assert_line "calls="
+}
+
+@test 'windows-sshd: no ssh-agent service is a note, not a failure' {
+	run _ps "$(_agent_stubs); \$global:svc = \$null; Enable-SshAgentService; 'calls=' + (\$global:calls -join '|')"
+	assert_success
+	assert_output --partial "no ssh-agent service"
+	assert_line "calls="
+}
+
+# The main body is not run here (it needs an elevated Windows), so its
+# wiring is read from the parse tree: -SshAgent, and only -SshAgent, calls
+# Enable-SshAgentService.
+@test 'windows-sshd: the main body enables the agent under -SshAgent' {
+	run _ps "\$ast = [System.Management.Automation.Language.Parser]::ParseFile('${PS1_FILE}', [ref]\$null, [ref]\$null)"'
+		$ifs = $ast.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.IfStatementAst] -and $_.Clauses[0].Item2.Extent.Text -match "Enable-SshAgentService" }
+		($ifs | ForEach-Object { $_.Clauses[0].Item1.Extent.Text }) -join "|"'
+	assert_success
+	assert_output '$SshAgent'
+}

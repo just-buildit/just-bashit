@@ -32,6 +32,9 @@ setup() {
 	export JB_PROC_MOUNTS="${BATS_TEST_TMPDIR}/mounts"
 	# Nor the real token check (#184): CI's Windows runners are elevated.
 	export JB_WIN_ELEVATED=0
+	# Nor Windows' own OpenSSH client (#190): on a native Windows runner the
+	# agent step would otherwise ask the machine's real ssh-agent service.
+	export JB_WIN_OPENSSH="${BATS_TEST_TMPDIR}/no-openssh"
 	# Not on native Windows (MSYS2, Cygwin): there the suite runs ON the real
 	# Windows, its cmd.exe is the machine's own and on PATH by design, and
 	# the tests that drive it already account for that.
@@ -193,8 +196,12 @@ _write_deps_toml() {
 	assert_output --partial "pwsh —"
 	assert_output --partial "claude —"
 	# Opt-in: sshd opens a listening port and certs widens what the machine
-	# trusts, so only -s or the toml selects either.
-	refute_output --partial "sshd —"
+	# trusts, so only -s or the toml selects either -- except sshd on native
+	# Windows, where it is a default step (#190): the Windows runner.
+	case "${OSTYPE:-}" in
+	msys* | cygwin*) assert_output --partial "sshd —" ;;
+	*) refute_output --partial "sshd —" ;;
+	esac
 	refute_output --partial "certs —"
 }
 
@@ -935,13 +942,15 @@ _baseline_section() {
 		"${PROJECT_ROOT}/src/just_bashit/setup-system.sh" | grep 'packages'
 }
 
-@test 'the Windows baselines: clang-cl and pwsh by winget, no MinGW' {
+@test 'the Windows baselines: clang-cl, pwsh and gh by winget, no MinGW' {
 	run _baseline_section winget
 	# clang-cl is a Build Tools component (below); LLVM.LLVM installed it
 	# on no PATH (#181).
 	refute_output --partial '"LLVM.LLVM"'
 	assert_output --partial '"Microsoft.PowerShell"'
 	assert_output --partial '"Microsoft.VisualStudio.BuildTools"'
+	# gh: whose keys the sshd step authorizes, a default step there (#190).
+	assert_output --partial '"GitHub.cli"'
 	run _baseline_section msys2
 	assert_success
 	refute_output --partial "mingw-w64"
@@ -1611,10 +1620,9 @@ _sshd_stubs() {
 @test 'sshd: runs on native Windows (MSYS2), translating paths with cygpath' {
 	_sshd_stubs
 	echo "MINGW64_NT-10.0-26100 3.5.4" >"${JB_PROC_VERSION}"
-	export JB_UNAME_S=MINGW64_NT-10.0-26100
 	# No wslpath on native Windows: the step must not need it.
 	mv "${STUBS}/wslpath" "${STUBS}/cygpath"
-	run setup-system.sh -s sshd --github-user octocat
+	JB_UNAME_S=MINGW64_NT-10.0-26100 run setup-system.sh -s sshd --github-user octocat
 	assert_success
 	assert_output --partial "sshd:    ok (keys from github.com/octocat.keys)"
 	assert [ -r "${WINTEMP}/jb-windows-sshd/windows-sshd.ps1" ]
@@ -1883,6 +1891,187 @@ _REBOOT_REFUSAL="windows-sshd.ps1 : reboot pending: Windows is waiting on a rebo
 	assert_success
 	assert_output --partial "over the admin ssh channel (tester@192.0.2.1), no UAC prompt"
 	assert [ ! -e "${CALLS}.ssh" ]
+}
+
+# ---------------------------------------------------------------------------
+# Native Windows (#190): sshd is a default step there, its elevated run also
+# turns on the ssh-agent service (-SshAgent), and the box key goes into that
+# agent with Windows' own ssh-add.exe. _native_stubs plays Git Bash on top of
+# _sshd_stubs: a MINGW uname, a cygpath that marks the spelling it was asked
+# for (W: for -w, M: for -m), and a System32\OpenSSH directory of stubs.
+# ssh-add.exe answers -l from AGENT (down: no service, empty, has: the box
+# key is listed) and records any other call; ssh-keygen.exe fingerprints the
+# key and refuses an empty passphrase when PASSPHRASE is set.
+# ---------------------------------------------------------------------------
+_native_stubs() {
+	_sshd_stubs
+	echo "MINGW64_NT-10.0-26100 3.5.4" >"${JB_PROC_VERSION}"
+	export JB_UNAME_S=MINGW64_NT-10.0-26100
+	rm -f "${STUBS}/wslpath"
+	cat >"${STUBS}/cygpath" <<-EOF
+		#!/bin/bash
+		case "\$1" in
+		-w) printf 'W:%s\n' "\$2" ;;
+		-m) printf 'M:%s\n' "\$2" ;;
+		*) p="\${2//\\\\//}"
+		   printf '%s\n' "${WINTEMP}\${p#C:/Users/tester/AppData/Local/Temp}" ;;
+		esac
+	EOF
+	OPENSSH="${BATS_TEST_TMPDIR}/openssh"
+	mkdir -p "${OPENSSH}"
+	export JB_WIN_OPENSSH="${OPENSSH}" OPENSSH
+	cat >"${OPENSSH}/ssh-add.exe" <<-EOF
+		#!/bin/bash
+		if [ "\$1" = -l ]; then
+			case "\${AGENT:-empty}" in
+			down) echo "Error connecting to agent: No such file or directory" >&2; exit 2 ;;
+			empty) printf 'The agent has no identities.\r\n'; exit 1 ;;
+			has) printf '256 SHA256:boxfp tester@box (ED25519)\r\n'; exit 0 ;;
+			esac
+		fi
+		printf '%s\n' "\$*" >>"${CALLS}.add"
+		exit "\${ADD_RC:-0}"
+	EOF
+	cat >"${OPENSSH}/ssh-keygen.exe" <<-'EOF'
+		#!/bin/bash
+		case "$1" in
+		-lf) printf '256 SHA256:boxfp tester@box (ED25519)\r\n' ;;
+		-y) [ -z "${PASSPHRASE:-}" ] ;;
+		esac
+	EOF
+	printf '#!/bin/bash\nexit 0\n' >"${OPENSSH}/ssh.exe"
+	chmod +x "${STUBS}"/* "${OPENSSH}"/*
+	export HOSTNAME=box
+	mkdir -p "${HOME}/.ssh"
+	printf 'PRIVATE\n' >"${HOME}/.ssh/box"
+	printf 'ssh-ed25519 AAAA tester@box\n' >"${HOME}/.ssh/box.pub"
+}
+
+# _default_steps -- the step list a plain run resolves, read from -v's log
+# with every step skipped, so nothing runs.
+_default_steps() {
+	setup-system.sh -n -v -x "deps,certs,shell,ssh,sshd,git,tools,pwsh,claude" 2>&1 |
+		sed -n 's/^ *steps: *//p'
+}
+
+@test 'sshd is a default step on native Windows' {
+	_native_stubs
+	run _default_steps
+	assert_output "deps,shell,ssh,sshd,git,tools,pwsh,claude"
+}
+
+@test 'sshd stays opt-in on Linux and from WSL' {
+	_sshd_stubs
+	run _default_steps
+	assert_output "deps,shell,ssh,git,tools,pwsh,claude"
+	echo "Linux version 6.8.0-generic" >"${JB_PROC_VERSION}"
+	run _default_steps
+	assert_output "deps,shell,ssh,git,tools,pwsh,claude"
+}
+
+@test 'sshd: native Windows asks the elevated run for the ssh-agent service too' {
+	_native_stubs
+	run setup-system.sh -s sshd --github-user octocat
+	assert_success
+	run cat "${CALLS}"
+	assert_output --partial "-GitHubUser 'octocat' -PwshVersion '"
+	assert_output --partial " -SshAgent"
+}
+
+@test 'sshd: from WSL the agent is left alone' {
+	_sshd_stubs
+	run setup-system.sh -s sshd --github-user octocat
+	assert_success
+	refute_output --partial "agent:"
+	run cat "${CALLS}"
+	refute_output --partial "SshAgent"
+}
+
+@test 'agent: the box key is added with Windows ssh-add.exe' {
+	_native_stubs
+	run setup-system.sh -s sshd
+	assert_success
+	assert_output --partial "agent:   ok (box added to the Windows agent)"
+	run cat "${CALLS}.add"
+	assert_output "W:${HOME}/.ssh/box"
+}
+
+@test 'agent: a key already listed is not added again' {
+	_native_stubs
+	AGENT=has run setup-system.sh -s sshd
+	assert_success
+	assert_output --partial "agent:   ok (box already in the Windows agent)"
+	assert [ ! -e "${CALLS}.add" ]
+}
+
+@test 'agent: no running service is reported, nothing added' {
+	_native_stubs
+	AGENT=down run setup-system.sh -s sshd
+	assert_success
+	assert_output --partial "agent:   skipped (ssh-agent service not running)"
+	assert [ ! -e "${CALLS}.add" ]
+}
+
+@test 'agent: a passphrase key under --yes is reported, never prompted for' {
+	_native_stubs
+	PASSPHRASE=1 run setup-system.sh -y -s sshd
+	assert_success
+	assert_output --partial "agent:   skipped (passphrase key: run ssh-add 'W:${HOME}/.ssh/box')"
+	assert [ ! -e "${CALLS}.add" ]
+}
+
+@test 'agent: a failing ssh-add reports failure' {
+	_native_stubs
+	ADD_RC=1 run setup-system.sh -s sshd
+	assert_success
+	assert_output --partial "agent:   failed (ssh-add 'W:${HOME}/.ssh/box')"
+}
+
+@test 'agent: no box key is a skip' {
+	_native_stubs
+	rm -f "${HOME}/.ssh/box" "${HOME}/.ssh/box.pub"
+	run setup-system.sh -s sshd
+	assert_success
+	assert_output --partial "agent:   skipped (no key ${HOME}/.ssh/box)"
+	assert [ ! -e "${CALLS}.add" ]
+}
+
+@test 'agent: a dry run asks the agent nothing and adds nothing' {
+	_native_stubs
+	# An ssh-add that fails the test on any call at all, -l included.
+	printf '#!/bin/bash\necho called >>"%s"\n' "${CALLS}.add" >"${OPENSSH}/ssh-add.exe"
+	run setup-system.sh -n -s sshd
+	assert_success
+	assert_output --partial "would add W:${HOME}/.ssh/box to the Windows ssh-agent service"
+	assert_output --partial "agent:   ok (dry run)"
+	assert [ ! -e "${CALLS}.add" ]
+}
+
+@test 'git step on native Windows points core.sshCommand at Windows ssh.exe' {
+	command -v git >/dev/null 2>&1 || skip "git not installed"
+	_native_stubs
+	run setup-system.sh -s git </dev/null
+	assert_success
+	assert_equal "$(git config --global --get core.sshCommand)" "M:${OPENSSH}/ssh.exe"
+}
+
+@test 'git step leaves an existing core.sshCommand alone' {
+	command -v git >/dev/null 2>&1 || skip "git not installed"
+	_native_stubs
+	git config --global core.sshCommand "ssh -i mine"
+	run setup-system.sh -s git </dev/null
+	assert_success
+	assert_equal "$(git config --global --get core.sshCommand)" "ssh -i mine"
+}
+
+@test 'git step off native Windows sets no core.sshCommand' {
+	command -v git >/dev/null 2>&1 || skip "git not installed"
+	_sshd_stubs
+	export JB_WIN_OPENSSH="${BATS_TEST_TMPDIR}" && touch "${BATS_TEST_TMPDIR}/ssh.exe" && chmod +x "${BATS_TEST_TMPDIR}/ssh.exe"
+	run setup-system.sh -s git </dev/null
+	assert_success
+	run git config --global --get core.sshCommand
+	assert_failure
 }
 
 # ---------------------------------------------------------------------------

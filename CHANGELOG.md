@@ -4,6 +4,21 @@
 
 ### Added
 
+- **Native Windows: sshd in the default run, the box key in the Windows
+    ssh-agent service, and gh in the baseline (#190).** On native Windows
+    (MSYS2 / Git Bash) a plain `setup-system` now runs the `sshd` step;
+    Linux, macOS and WSL keep it opt-in. Its one elevated run
+    (`windows-sshd.ps1 -SshAgent`, by #184's `win-admin-route`) also sets
+    the OpenSSH Authentication Agent service, Disabled out of the box, to
+    Automatic and starts it. Then, as the user, the box key is added to that
+    agent with Windows' own `System32\OpenSSH\ssh-add.exe` -- once: a key
+    already listed is left alone, and a key with a passphrase is reported
+    with the command to run, never prompted for under `--yes`. The git step
+    sets `core.sshCommand` to Windows' `ssh.exe` where it is unset, so Git
+    for Windows, pwsh and VS Code share the one agent. `GitHub.cli` joins
+    `[baseline.winget]` (`provides = ["gh"]`): the sshd step authorizes the
+    keys of the account gh is signed in to.
+
 - **On Windows `setup-system -y` never waits on a UAC prompt, and an
     admin shell needs none (#184).** The sshd step and install-deps'
     Visual Studio `setup.exe modify` now elevate by one ladder,

@@ -18,20 +18,22 @@ ______________________________________________________________________
 
 ## Steps
 
-| Step     | What it does                                                                                                                                                                                                                                                    |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `deps`   | Installs a baseline toolchain — C compiler, `make`, `cmake`, `pkg-config`, `git`, `curl`, ssh — then the packages of any `bootstrap.toml` in the current directory, both via [`install-deps`](install-deps.md).                                                 |
-| `certs`  | **Opt-in, WSL only**. Installs Windows' trusted root certificates into the distro trust store beside its Mozilla bundle, one file per root, and removes any Windows no longer trusts. See below.                                                                |
-| `shell`  | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                                                                                                                           |
-| `ssh`    | Tightens permissions across `~/.ssh` — repairing a directory copied from Windows, FAT, a zip or git — then creates an ed25519 key named after this host if there is no key at all. Prints the public key.                                                       |
-| `sshd`   | **Opt-in, Windows only** (WSL or native MSYS2 / Git Bash). Runs Windows' own OpenSSH server as a boot-time service — key-only, keys from `github.com/<user>.keys`, `pwsh.exe` as the login shell — so the machine answers ssh even when WSL is down. See below. |
-| `git`    | Sets global git defaults that are not already set, and an unset `user.name` / `user.email` from the environment or a prompt.                                                                                                                                    |
-| `tools`  | Installs `uv` if missing, through [`install-uv`](libraries/pkg.md#install-uv): winget on Windows, which installs the native build on ARM64 (#171). Installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.               |
-| `pwsh`   | Installs PowerShell 7 and the PSScriptAnalyzer module, so `.ps1` files can be linted on this machine. Linux and macOS only — see below.                                                                                                                         |
-| `claude` | Installs Claude Code if the `claude` command is missing.                                                                                                                                                                                                        |
+| Step     | What it does                                                                                                                                                                                                                                                                                                                                                                                          |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deps`   | Installs a baseline toolchain — C compiler, `make`, `cmake`, `pkg-config`, `git`, `curl`, ssh — then the packages of any `bootstrap.toml` in the current directory, both via [`install-deps`](install-deps.md).                                                                                                                                                                                       |
+| `certs`  | **Opt-in, WSL only**. Installs Windows' trusted root certificates into the distro trust store beside its Mozilla bundle, one file per root, and removes any Windows no longer trusts. See below.                                                                                                                                                                                                      |
+| `shell`  | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                                                                                                                                                                                                                                                                 |
+| `ssh`    | Tightens permissions across `~/.ssh` — repairing a directory copied from Windows, FAT, a zip or git — then creates an ed25519 key named after this host if there is no key at all. Prints the public key.                                                                                                                                                                                             |
+| `sshd`   | **Windows only** (WSL or native MSYS2 / Git Bash): a default step on native Windows, opt-in from WSL. Runs Windows' own OpenSSH server as a boot-time service — key-only, keys from `github.com/<user>.keys`, `pwsh.exe` as the login shell — so the machine answers ssh even when WSL is down. On native Windows it also starts the ssh-agent service at boot and adds the box key to it. See below. |
+| `git`    | Sets global git defaults that are not already set, and an unset `user.name` / `user.email` from the environment or a prompt.                                                                                                                                                                                                                                                                          |
+| `tools`  | Installs `uv` if missing, through [`install-uv`](libraries/pkg.md#install-uv): winget on Windows, which installs the native build on ARM64 (#171). Installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.                                                                                                                                                     |
+| `pwsh`   | Installs PowerShell 7 and the PSScriptAnalyzer module, so `.ps1` files can be linted on this machine. Linux and macOS only — see below.                                                                                                                                                                                                                                                               |
+| `claude` | Installs Claude Code if the `claude` command is missing.                                                                                                                                                                                                                                                                                                                                              |
 
-On native Windows the `deps` baseline is CMake, Git, PowerShell 7 and the
-MSVC Build Tools with two of their parts, by winget: the C++ workload (the
+On native Windows the `deps` baseline is CMake, Git, PowerShell 7, the
+GitHub CLI (`gh`: the [sshd step](#the-sshd-step) authorizes the keys of the
+account it is signed in to) and the MSVC Build Tools with two of their parts,
+by winget: the C++ workload (the
 MSVC libraries and Windows SDK clang-cl links against) and the *C++ Clang
 Compiler for Windows* component (clang-cl itself, x64 and ARM64). A Build
 Tools install that lacks either has it added, and one that has both is left
@@ -49,7 +51,10 @@ They always run in that order, whatever order you list them in — packages
 land before the steps that need `git`, `curl` and `ssh-keygen`. Every step
 runs by default except `sshd`, which opens a listening port, and `certs`, which
 widens what the machine trusts; each runs only when named with `-s` or in
-`bootstrap.toml`.
+`bootstrap.toml`. On native Windows (MSYS2 / Git Bash) `sshd` is a default
+step too: reachability from boot is why a Windows box is being set up, and
+the port is key-only and scoped by `--sshd-allow`. Linux, macOS and WSL
+keep it opt-in.
 
 ```bash
 jbx setup-system -s shell,ssh      # only these
@@ -239,6 +244,13 @@ jbx setup-system -s ssh
 
 `--key-name NAME` overrides the filename.
 
+On native Windows that key also goes into **Windows' own ssh-agent
+service**, the one pwsh, Windows' `ssh.exe`, Git and VS Code all use — the
+bash `ssh-agent` the [shell step](#the-shell-step) starts is one none of
+them sees. The [sshd step](#the-sshd-step) does it, since its elevated run is
+what turns the service on; see
+[the ssh agent on Windows](#the-ssh-agent-on-native-windows).
+
 ### Repairing a `~/.ssh` that lost its permissions
 
 The step also tightens permissions on everything already in `~/.ssh`, before
@@ -320,17 +332,18 @@ ______________________________________________________________________
 Sets these only when the key has no value already, so nothing you have
 chosen is overwritten:
 
-| Key                    | Value     |
-| ---------------------- | --------- |
-| `init.defaultBranch`   | `main`    |
-| `pull.rebase`          | `true`    |
-| `rebase.autoStash`     | `true`    |
-| `push.default`         | `simple`  |
-| `push.autoSetupRemote` | `true`    |
-| `fetch.prune`          | `true`    |
-| `diff.colorMoved`      | `zebra`   |
-| `color.ui`             | `auto`    |
-| `core.editor`          | `$EDITOR` |
+| Key                    | Value                                                                             |
+| ---------------------- | --------------------------------------------------------------------------------- |
+| `init.defaultBranch`   | `main`                                                                            |
+| `pull.rebase`          | `true`                                                                            |
+| `rebase.autoStash`     | `true`                                                                            |
+| `push.default`         | `simple`                                                                          |
+| `push.autoSetupRemote` | `true`                                                                            |
+| `fetch.prune`          | `true`                                                                            |
+| `diff.colorMoved`      | `zebra`                                                                           |
+| `color.ui`             | `auto`                                                                            |
+| `core.editor`          | `$EDITOR`                                                                         |
+| `core.sshCommand`      | native Windows only: Windows' `ssh.exe` ([why](#the-ssh-agent-on-native-windows)) |
 
 Then `user.name` and `user.email`, again only when unset globally:
 
@@ -401,6 +414,9 @@ machine is unreachable at exactly the moments you most need to reach it.
 Windows' own `sshd` is a service: it starts at boot, before anyone logs in,
 whether or not WSL ever does. From there `wsl` is one command away.
 
+On native Windows a plain `jbx setup-system` includes it; from WSL it runs
+only when asked for:
+
 ```bash
 jbx setup-system -s sshd --github-user octocat
 jbx setup-system -s sshd --github-user octocat \
@@ -448,6 +464,7 @@ What it does, in order:
 | Shell    | `pwsh.exe` as the login shell, installed when missing at the pinned version — the same one the `pwsh` step installs on Linux — with winget, or the release MSI in the one context winget refuses (a first run elevated through UAC). The MSI matches the machine's architecture, which is read from the registry because an emulated x64 parent process reports x64.                                                                                                                                                                                     |
 | Firewall | Limits the port-22 rule to `--sshd-allow` (default: any address), and adds `jb-sshd-wsl`, a rule admitting this machine's own WSL by its virtual interface, which is what the admin ssh channel above connects through. Windows pins that rule to the adapter's GUID and WSL rebuilds the adapter with a new one on every boot, so a SYSTEM task, `\just-bashit\jb-sshd-wsl-rescope`, re-scopes it each time WSL's switch comes up (and at startup). The task runs a copy of the script in `%ProgramData%\just-bashit`, writable only by administrators. |
 | Service  | Starts at boot (`Automatic`), restarted so the new configuration is live.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Agent    | Native Windows only (`-SshAgent`): the OpenSSH Authentication Agent service (`ssh-agent`), which Windows ships `Disabled`, is set to `Automatic` and started. In the same elevated run, so still at most one prompt. Where the OpenSSH client capability is absent, it is a note and nothing changes.                                                                                                                                                                                                                                                    |
 
 **After a reboot**, check from WSL that `jb-sshd-wsl` follows the adapter
 WSL built this boot, and that ssh to the Windows sshd connects:
@@ -471,6 +488,31 @@ only `-File launch.ps1` — so no `iconv` or `base64` is needed on either.
 `--github-user` defaults to the account `gh` is signed in to. On Linux or
 macOS the step reports `skipped`; enable the distro's own `sshd` unit
 instead.
+
+### The ssh agent on native Windows
+
+After the elevated run, as **you** rather than as an administrator, the step
+adds the box key (`~/.ssh/<host>`, or `--key-name`) to the Windows ssh-agent
+service with Windows' own `C:\Windows\System32\OpenSSH\ssh-add.exe`. The
+service keeps keys across reboots, so this happens once per box; a later run
+finds the key listed and reports `agent: ok (... already in the Windows agent)`. It runs whatever became of the server half, so an agent started by
+an earlier run still gets the key. A key with a passphrase is added at a
+terminal, where `ssh-add` asks for it once; under `--yes`, or with no
+terminal, it is never prompted for — the summary reports
+`agent: skipped (passphrase key: run ssh-add '...')` with the command to run
+from PowerShell. With the service not running (the elevated run was skipped
+or declined) the summary says so and nothing is added.
+
+The [git step](#the-git-step) then sets `core.sshCommand` to Windows'
+`ssh.exe` where it is unset, so Git for Windows, pwsh and VS Code share that
+one agent. To check it from PowerShell:
+
+```powershell
+Get-Service ssh-agent | Select-Object Status, StartType; ssh-add -l; git config --global core.sshCommand
+```
+
+Expect `Running Automatic`, your key's fingerprint, and
+`C:/Windows/System32/OpenSSH/ssh.exe`.
 
 Windows' `PATH` may be absent from WSL (`appendWindowsPath=false`); the step
 then finds `powershell.exe` and `cmd.exe` under `Windows\System32` of
