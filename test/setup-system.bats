@@ -705,6 +705,171 @@ _path_without() {
 	assert_output --partial "(${HOME}/.local/bin is not on this shell's PATH)"
 }
 
+# ---------------------------------------------------------------------------
+# The installed report's rows are the baseline's (#180): one declaration,
+# read by the install and by the report. These read the table the way the
+# report does, so they follow whatever it says -- a package swapped in or
+# out changes the expected rows with it.
+# ---------------------------------------------------------------------------
+_baseline_toml() {
+	sed -n "/^read -r -d '' _BASELINE_TOML/,/^EOF/p" \
+		"${PROJECT_ROOT}/src/just_bashit/setup-system.sh" | sed '1d;$d;s/^\t//'
+}
+
+# _expected_rows SECTION -- `cmd NAME` / `vs ID` per package, by the rule the
+# report documents: vs_requires, else provides, else the package's own name
+# unless it has a table of its own.
+_expected_rows() {
+	# shellcheck disable=SC1091
+	source "${PROJECT_ROOT}/src/just_bashit/toml.sh"
+	local toml name v n
+	toml="$(_baseline_toml)"
+	while IFS= read -r name; do
+		n=0
+		while IFS= read -r v; do
+			[[ -n ${v} ]] && {
+				echo "vs ${v}"
+				n=1
+			}
+		done < <(toml_get_array baseline "$1.\"${name}\"" vs_requires <<<"${toml}")
+		while IFS= read -r v; do
+			[[ -n ${v} ]] && {
+				echo "cmd ${v}"
+				n=1
+			}
+		done < <(toml_get_array baseline "$1.\"${name}\"" provides <<<"${toml}")
+		if [[ ${n} -eq 0 && ${toml} != *"[baseline.$1.\"${name}\"]"* ]]; then
+			echo "cmd ${name}"
+		fi
+	done < <(toml_get_packages baseline "$1" <<<"${toml}")
+}
+
+# A package's own table must name a package of its section, and a package
+# that cannot be a command name (Kitware.CMake) must have one: otherwise the
+# report would probe for a command called "Kitware.CMake" and call it
+# missing forever.
+@test 'every baseline package has a report row it can probe for' {
+	# shellcheck disable=SC1091
+	source "${PROJECT_ROOT}/src/just_bashit/toml.sh"
+	local toml hdr sec name bad=""
+	toml="$(_baseline_toml)"
+	while IFS= read -r hdr; do
+		sec="${hdr#\[baseline.}"
+		name="${sec#*.\"}"
+		name="${name%\"\]}"
+		sec="${sec%%.*}"
+		toml_get_packages baseline "${sec}" <<<"${toml}" | grep -qxF -- "${name}" ||
+			bad="${bad} [${sec}] has a table for ${name}, which it does not install;"
+	done < <(grep -E '^\[baseline\.[a-z0-9]+\."[^"]+"\]$' <<<"${toml}")
+	for sec in apt pacman dnf zypper apk brew winget msys2; do
+		while IFS= read -r name; do
+			[[ ${name} =~ ^[a-z0-9][a-z0-9+_-]*$ ]] && continue
+			[[ ${toml} == *"[baseline.${sec}.\"${name}\"]"* ]] ||
+				bad="${bad} [${sec}] ${name} is no command name and has no table;"
+		done < <(toml_get_packages baseline "${sec}" <<<"${toml}")
+	done
+	assert_equal "${bad}" ""
+}
+
+# Stub every command the winget section reports, and a vswhere that knows
+# every Visual Studio id, so each row's answer is known.
+_winget_report_stubs() {
+	local stubs="${BATS_TEST_TMPDIR}/wrstubs" row
+	mkdir -p "${stubs}" "${BATS_TEST_TMPDIR}/vsi"
+	while IFS= read -r row; do
+		[[ ${row} == cmd\ * ]] || continue
+		printf '#!/bin/bash\necho "%s 9.9.9"\n' "${row#cmd }" >"${stubs}/${row#cmd }"
+		chmod +x "${stubs}/${row#cmd }"
+	done < <(_expected_rows winget)
+	printf '#!/bin/bash\necho "C:\\\\VS\\\\BuildTools"\n' >"${BATS_TEST_TMPDIR}/vsi/vswhere.exe"
+	chmod +x "${BATS_TEST_TMPDIR}/vsi/vswhere.exe"
+	export JB_VS_INSTALLER="${BATS_TEST_TMPDIR}/vsi"
+	# Git Bash: winget and no pacman, so the winget section alone (MSYS2,
+	# with pacman, reports its own section too). No real registry PATH.
+	printf '#!/bin/bash\nexit 0\n' >"${BATS_TEST_TMPDIR}/winget"
+	chmod +x "${BATS_TEST_TMPDIR}/winget"
+	export JB_WINGET="${BATS_TEST_TMPDIR}/winget"
+	REPORT_PATH="${stubs}:${PROJECT_ROOT}/src/just_bashit:$(_bin_without pacman)"
+	export JB_REGISTRY_PATH=""
+}
+
+@test 'the installed report on winget lists the winget baseline, not make/cc/pkg-config' {
+	_winget_report_stubs
+	JB_UNAME_S=MINGW64_NT-10.0-26100 JB_INSTALLED_REPORT=1 PATH="${REPORT_PATH}" \
+		run setup-system.sh -n -s tools
+	assert_success
+	local row
+	while IFS= read -r row; do
+		case "${row}" in
+		cmd\ *) assert_output --regexp "    ${row#cmd } +9\.9\.9 " ;;
+		vs\ *) assert_output --regexp "    ${row#vs } +installed +C:.VS.BuildTools" ;;
+		esac
+	done < <(_expected_rows winget)
+	# The Unix commands the apt section installs and winget's does not are
+	# not asked about.
+	while IFS= read -r row; do
+		_expected_rows winget | grep -qxF -- "${row}" && continue
+		[[ ${row} == cmd\ * ]] || continue
+		refute_output --regexp "^    ${row#cmd } "
+	done < <(_expected_rows apt)
+}
+
+@test 'the installed report reports a missing Visual Studio workload as missing' {
+	_winget_report_stubs
+	printf '#!/bin/bash\nexit 0\n' >"${BATS_TEST_TMPDIR}/vsi/vswhere.exe"
+	JB_UNAME_S=MINGW64_NT-10.0-26100 JB_INSTALLED_REPORT=1 PATH="${REPORT_PATH}" \
+		run setup-system.sh -n -s tools
+	assert_success
+	assert_output --regexp "    Microsoft\.VisualStudio\.[A-Za-z.]+ +missing"
+}
+
+# A winget install this run made lands on the registry's PATH, which no
+# running process rereads: found there, it is reported where it is, not as
+# missing, and the closing advice names the directory.
+#
+# claude stands in for the installed tool: it is a row on every platform,
+# and the host's own copy (if any) is in a directory PATH can drop without
+# dropping /usr/bin, as hiding cmake would.
+_registry_tool() {
+	REG_DIR="${BATS_TEST_TMPDIR}/Program Files/Claude/bin"
+	mkdir -p "${REG_DIR}"
+	printf '#!/bin/bash\necho "4.4.4 (Claude Code)"\n' >"${REG_DIR}/claude"
+	chmod +x "${REG_DIR}/claude"
+}
+
+@test 'a tool only on the registry PATH is reported, and asks a PowerShell caller for a new window' {
+	_registry_tool
+	JB_REGISTRY_PATH="${REG_DIR}" JB_CALLER=pwsh JB_INSTALLED_REPORT=1 \
+		PATH="$(_path_without claude)" run setup-system.sh -n -s shell
+	assert_success
+	assert_output --regexp "    claude +4\.4\.4 +${REG_DIR}/claude"
+	assert_output --partial "open a new PowerShell window"
+	assert_output --partial "(${REG_DIR} is on the Windows PATH, not this window's)"
+	# The shell step changed bash's rc files, which a PowerShell caller
+	# never has to reload: each jbx call starts a fresh login bash (#179).
+	refute_output --partial "exec bash -l"
+	refute_output --partial "bashrc.sh changed"
+}
+
+@test 'from PowerShell with no PATH change, no closing advice at all' {
+	run env JB_CALLER=pwsh setup-system.sh -s shell
+	assert_success
+	refute_output --partial "exec bash -l"
+	refute_output --partial "open a new"
+	refute_output --partial "now sources just-bashit"
+	assert [ ! -e "${XDG_STATE_HOME}/just-bashit/reload" ]
+}
+
+@test 'a bash caller is told about a registry-only directory, and the jbx function gets it' {
+	_registry_tool
+	JB_REGISTRY_PATH="${REG_DIR}" JB_CALLER_APPLIES=1 JB_INSTALLED_REPORT=1 \
+		PATH="$(_path_without claude)" run setup-system.sh -s shell
+	assert_success
+	assert_output --partial "(${REG_DIR} is on the Windows PATH, not this shell's)"
+	run cat "${XDG_STATE_HOME}/just-bashit/reload"
+	assert_line "path ${REG_DIR}"
+}
+
 # The `jbx` function's half of the handshake: setup-system writes the marker
 # only when the function asked (JB_CALLER_APPLIES=1), never on a dry run,
 # and names just-bashit's own files plus ~/.local/bin.

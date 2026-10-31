@@ -112,6 +112,7 @@ _e2e_env() {
 				[ "$1" = --version ] && { echo "stub v0"; exit 0; }
 				printf '[%s]' "$@"; printf ' n=%d\n' "$#"
 				printf 'leaked=%s\n' "$(env | grep -c '^JB_PS_\(ARG\|NAME\)')"
+				printf 'caller=%s\n' "${JB_CALLER:-unset}"
 				[ "$1" = stdin ] && { IFS= read -r -t 5 l; printf 'stdin=%s\n' "$l"; }
 				exit "${JBX_RC:-0}"
 			STUB
@@ -182,6 +183,19 @@ _iex() {
 	assert_line "leaked=0"
 	assert_line "0"
 	refute_line "leaked=2"
+}
+
+# The functions tell what they run that PowerShell called it, so
+# setup-system's closing advice fits a PowerShell window (#179) -- and, like
+# every other variable they set, JB_CALLER is gone once the call returns.
+@test 'get-jb.ps1: jbx runs with JB_CALLER=pwsh, which does not outlive the call' {
+	_posix_only
+	_e2e_env
+	E2E_CODE="$(_iex)"'jbx x; "after=$([bool](Test-Path Env:JB_CALLER))"'
+	run _e2e JB_BASH="${BASH_BIN}"
+	assert_success
+	assert_line "caller=pwsh"
+	assert_line "after=False"
 }
 
 @test 'get-jb.ps1: a re-run keeps one block, and a new session has jbx' {
