@@ -17,7 +17,15 @@ setup() {
 	fi
 }
 
-_ps() { pwsh -NoProfile -Command ". '${PS1_FILE}'; $1"; }
+# Windows' pwsh (the MSYS runner) ends lines CRLF; dropped so a multi-line
+# expected output compares the same on every runner. The exit status is
+# pwsh's, not the filter's.
+_ps() {
+	local out rc=0
+	out="$(pwsh -NoProfile -Command ". '${PS1_FILE}'; $1" 2>&1)" || rc=$?
+	printf '%s\n' "${out//$'\r'/}"
+	return "${rc}"
+}
 
 @test 'windows-sshd: dot-sourcing defines the functions and changes nothing' {
 	run _ps "Get-Command Get-KeyLine, Merge-ManagedBlock, Edit-SshdOption | Measure-Object | % Count"
