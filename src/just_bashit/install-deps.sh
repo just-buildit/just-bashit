@@ -60,6 +60,15 @@ read -r -d '' HELP <<-'EOF' || true
 	  package per invocation, skipping any id `winget list` already finds.
 	  Package names there are winget ids, e.g. "Python.Python.3.13".
 
+	  A winget package that provides Visual Studio workloads names them in
+	  a table keyed by its id, probed with vswhere instead of `winget list`:
+
+	    [dev.winget."Microsoft.VisualStudio.BuildTools"]
+	    vs_requires = ["Microsoft.VisualStudio.Workload.VCTools"]
+
+	  Absent, it is installed with --override "... --add <workload>"; present
+	  without the workloads, the VS Installer adds them (elevated).
+
 	  Privilege escalation is DERIVED, not assumed: sudo is used only when
 	  the manager needs root, the caller is not already root, and sudo is
 	  on PATH. A root CI container therefore needs no flag and no sudo
@@ -316,6 +325,269 @@ _winget_installed() {
 	"$1" list --id "$2" --exact --disable-interactivity >/dev/null 2>&1
 }
 
+# The flags every winget install carries, bare id or not: no prompt for an
+# agreement or a source, so a run never stops to ask.
+_WINGET_INSTALL_FLAGS=(
+	--exact --source winget --silent --accept-package-agreements
+	--accept-source-agreements --disable-interactivity
+)
+
+# ---------------------------------------------------------------------------
+# A winget package that provides Visual Studio workloads (#67).
+#
+# `Microsoft.VisualStudio.BuildTools` installs the Visual Studio Installer
+# SHELL; the C++ toolchain is a workload added to it. So the id probe answers
+# the wrong question: measured 2026-10-31 (winget v1.29.380), the id was
+# installed with no workload at all, `winget list` found it, and a bare entry
+# would have been skipped forever. Such a package names what it provides in
+# a table of its own, keyed by the id:
+#
+#   [baseline.winget]
+#   packages = ["Microsoft.VisualStudio.BuildTools"]
+#
+#   [baseline.winget."Microsoft.VisualStudio.BuildTools"]
+#   vs_requires = ["Microsoft.VisualStudio.Workload.VCTools"]
+#
+# ONE declaration, read both ways: the probe asks vswhere for an instance
+# with every id (`-requires`), and both installs `--add` every id, so what is
+# probed and what is installed cannot disagree. Three paths, decided by the
+# probe and never by an install's exit code (a re-install of a present id is
+# cancelled with -1978335135, measured):
+#
+#   probe passes        nothing runs
+#   id absent           winget install ... --override "<installer args>"
+#   id present, probe   the installed VS Installer's `setup.exe modify`,
+#   fails               elevated. `winget install --force --override` is not
+#                       an alternative: a newer bootstrapper refuses to
+#                       modify an older install whenever an update is
+#                       pending (installer exit 1, measured 2026-10-31).
+#
+# Exit 0 and 3010 are success, 3010 reported as "reboot required"; any other
+# code fails the run and is named. A shell sees only an exit code's low
+# byte (3010 arrives as 194), so the full code is read back through
+# PowerShell -- see _win_exit.
+# ---------------------------------------------------------------------------
+
+# _vs_requires GROUP ID -- the vs_requires ids declared for winget package
+# ID, one per line; nothing for a bare id. Each is refused unless it is a
+# plain dotted name, because it is placed on a Windows command line.
+_vs_requires() {
+	local _r
+	while IFS= read -r _r; do
+		if [[ ! ${_r} =~ ^[A-Za-z0-9._-]+$ ]]; then
+			echo "error: [$1.winget.\"$2\"] vs_requires: not a workload id: ${_r}" >&2
+			return 1
+		fi
+		printf '%s\n' "${_r}"
+	done < <(printf '%s\n' "${CONTENT}" |
+		toml_get_array "$1" "winget.\"$2\"" vs_requires)
+}
+
+# _powershell_bin -- Windows PowerShell, by either spelling (see winget-bin
+# for why both are tried).
+_powershell_bin() {
+	local _b
+	for _b in powershell powershell.exe; do
+		if command -v "${_b}" >/dev/null 2>&1; then
+			printf '%s\n' "${_b}"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# _win_path LOCAL / _local_path WINDOWS -- translate a path across the
+# boundary: wslpath under WSL, cygpath under MSYS2, Cygwin and Git Bash.
+_win_path() {
+	if command -v wslpath >/dev/null 2>&1; then
+		wslpath -w "$1"
+	else
+		cygpath -w "$1"
+	fi
+}
+_local_path() {
+	if command -v wslpath >/dev/null 2>&1; then
+		wslpath -u "$1"
+	else
+		cygpath -u "$1"
+	fi
+}
+
+# _vs_installer_dir -- the Visual Studio Installer directory, which holds
+# vswhere.exe and setup.exe, as a local path. It is
+# %ProgramFiles(x86)%\Microsoft Visual Studio\Installer on every install;
+# the variable is read through PowerShell because a shell cannot name it
+# (parentheses are not legal in a variable name). JB_VS_INSTALLER
+# overrides, set to a directory of stubs for a test.
+_vs_installer_dir() {
+	local _ps _raw
+	if [ -n "${JB_VS_INSTALLER+x}" ]; then
+		printf '%s\n' "${JB_VS_INSTALLER}"
+		return 0
+	fi
+	_ps="$(_powershell_bin)" || return 1
+	# shellcheck disable=SC2016  # PowerShell expands it, not this shell
+	_raw="$("${_ps}" -NoProfile -NonInteractive \
+		-Command '${env:ProgramFiles(x86)}' 2>/dev/null | tr -d '\r\n')" ||
+		_raw=""
+	[ -n "${_raw}" ] || return 1
+	_local_path "${_raw}\\Microsoft Visual Studio\\Installer"
+}
+
+# _vswhere DIR ARGS... -- the first installationPath vswhere prints for
+# ARGS over every product, or nothing. No vswhere is no instance.
+_vswhere() {
+	local _dir="$1" _l
+	shift
+	[ -f "${_dir}/vswhere.exe" ] || return 0
+	while IFS= read -r _l; do
+		_l="${_l%$'\r'}"
+		if [ -n "${_l}" ]; then
+			printf '%s\n' "${_l}"
+			return 0
+		fi
+	done < <("${_dir}/vswhere.exe" -products '*' "$@" \
+		-property installationPath 2>/dev/null || true)
+}
+
+# _ps_literal TEXT -- TEXT as a PowerShell single-quoted string. The quote
+# goes through a variable, not an escaped quote in the replacement, whose
+# meaning changed across bash releases.
+_ps_literal() {
+	local _q="'"
+	printf "'%s'" "${1//${_q}/${_q}${_q}}"
+}
+
+# ---------------------------------------------------------------------------
+# _win_exit [--runas] EXE ARG... -- run Windows program EXE and set _WIN_RC
+# to its FULL exit code, or to empty when none was reported (a declined UAC
+# prompt, no PowerShell). EXE's output passes through.
+#
+# Through PowerShell's Start-Process, the way setup-system's sshd step
+# elevates: with --runas, `-Verb RunAs` raises the UAC prompt, and
+# ErrorActionPreference Stop turns a declined prompt into a failure rather
+# than an exit 0. Without it, -NoNewWindow keeps EXE on this console. -Wait
+# here rather than sshd's WaitForExit, because that is how the VS Installer
+# was measured: it returned 3010 once its modify had finished (301 s,
+# 2026-10-31).
+#
+# The code comes back on PowerShell's stderr as one `jb-exit:N` line, which
+# is taken out; every other stderr line is relayed. Start-Process joins
+# -ArgumentList with spaces, so an argument holding one is double-quoted --
+# no Windows path or workload id can itself contain a double quote. EXE
+# starts in %SystemRoot%, so a WSL working directory (a UNC path) never
+# reaches it. MSYS path conversion is off: it would rewrite the command
+# before Windows saw it.
+#
+# JB_WIN_EXIT names a stand-in for PowerShell, for a test: it gets
+# [--runas] EXE ARG... and reports the code the same way.
+# ---------------------------------------------------------------------------
+_WIN_RC=""
+_win_exit() {
+	local _runas=0 _ps _exe _a _args="" _how="-NoNewWindow" _l
+	if [ "$1" = "--runas" ]; then
+		_runas=1
+		shift
+	fi
+	_WIN_RC=""
+	local -a _cmd
+	if [ -n "${JB_WIN_EXIT:-}" ]; then
+		_cmd=("${JB_WIN_EXIT}")
+		[ "${_runas}" -eq 1 ] && _cmd+=(--runas)
+		_cmd+=("$@")
+	else
+		if ! _ps="$(_powershell_bin)"; then
+			echo "error: powershell not found (looked for powershell," >&2
+			echo "       then powershell.exe)" >&2
+			return 0
+		fi
+		_exe="$1"
+		shift
+		[[ ${_exe} == */* ]] && _exe="$(_win_path "${_exe}")"
+		for _a in "$@"; do
+			[[ -z ${_a} || ${_a} == *' '* ]] && _a="\"${_a}\""
+			_args="${_args:+${_args} }${_a}"
+		done
+		[ -n "${_args}" ] && _args=" -ArgumentList $(_ps_literal "${_args}")"
+		[ "${_runas}" -eq 1 ] && _how="-Verb RunAs"
+		_cmd=("${_ps}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
+			-Command "\$ErrorActionPreference = 'Stop'; \$p = Start-Process -FilePath $(_ps_literal "${_exe}")${_args} -WorkingDirectory \$env:SystemRoot -Wait -PassThru ${_how}; [Console]::Error.WriteLine('jb-exit:' + \$p.ExitCode)")
+	fi
+	# fd 3 is this function's stdout: EXE's output goes there untouched,
+	# while stderr comes through the loop.
+	while IFS= read -r _l; do
+		_l="${_l%$'\r'}"
+		case "${_l}" in
+		jb-exit:*) _WIN_RC="${_l#jb-exit:}" ;;
+		*) printf '%s\n' "${_l}" >&2 ;;
+		esac
+	done 3>&1 < <(MSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1 \
+		"${_cmd[@]}" 2>&1 >&3 3>&- || true)
+}
+
+# _win_verdict WHAT -- report _WIN_RC for WHAT; return 1 unless success.
+# An if chain, not a case: a one-tab `0)` arm reads to the package-manager
+# gate in test/install-deps.bats as a _do_install arm.
+_win_verdict() {
+	if [ "${_WIN_RC}" = "0" ]; then
+		echo "install-deps: $1: done" >&2
+	elif [ "${_WIN_RC}" = "3010" ]; then
+		echo "install-deps: $1: done, reboot required (exit 3010)" >&2
+	elif [ -z "${_WIN_RC}" ]; then
+		echo "error: $1: no exit code reported (was the UAC prompt declined?)" >&2
+		return 1
+	else
+		echo "error: $1: failed, exit code ${_WIN_RC}" >&2
+		return 1
+	fi
+}
+
+# _winget_vs BIN ID REQUIRES... -- install winget package ID so that it
+# provides every REQUIRES id, by the three paths described above.
+_winget_vs() {
+	local _w="$1" _p="$2" _r _dir _shell _override
+	shift 2
+	local -a _add=()
+	for _r in "$@"; do _add+=(--add "${_r}"); done
+	_override="$(
+		IFS=' '
+		echo "--quiet --wait --norestart ${_add[*]} --includeRecommended"
+	)"
+	if [ "${DRY_RUN}" -eq 1 ]; then
+		# Not probed, as for a bare id: the same plan on any machine.
+		(
+			IFS=' '
+			echo "${_w} install --id ${_p} ${_WINGET_INSTALL_FLAGS[*]} --override \"${_override}\""
+			echo "  or, when ${_p} is present without $*, elevated:"
+			echo "  %ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\setup.exe modify --installPath <vswhere installationPath> ${_add[*]} --includeRecommended --quiet --norestart"
+		)
+		return 0
+	fi
+	if ! _dir="$(_vs_installer_dir)"; then
+		echo "error: ${_p}: cannot locate the Visual Studio Installer directory" >&2
+		return 1
+	fi
+	if [ -n "$(_vswhere "${_dir}" -requires "$@")" ]; then
+		echo "install-deps: ${_p} already installed (with $*)" >&2
+		return 0
+	fi
+	if _winget_installed "${_w}" "${_p}"; then
+		_shell="$(_vswhere "${_dir}")"
+		if [ -z "${_shell}" ]; then
+			echo "error: ${_p}: winget lists it, but vswhere finds no instance" >&2
+			return 1
+		fi
+		echo "install-deps: ${_p} is present without $*; modifying ${_shell}" >&2
+		_win_exit --runas "${_dir}/setup.exe" modify --installPath "${_shell}" \
+			"${_add[@]}" --includeRecommended --quiet --norestart
+		_win_verdict "${_p} (setup.exe modify)"
+	else
+		_win_exit "${_w}" install --id "${_p}" "${_WINGET_INSTALL_FLAGS[@]}" \
+			--override "${_override}"
+		_win_verdict "${_p} (winget install)"
+	fi
+}
+
 # ---------------------------------------------------------------------------
 # _run: print (dry run) or execute one install command, prefix included.
 # ---------------------------------------------------------------------------
@@ -412,7 +684,18 @@ _do_install() {
 		# unlike every other manager here, each of which takes a list. A
 		# second id on the line is read as an argument to the first and the
 		# install silently covers less than the manifest asked for.
+		local _reqs _r
+		local -a _req
 		for _p in "$@"; do
+			# A package that provides VS workloads is probed for them, not
+			# by its id (see _winget_vs). _group is the main loop's.
+			_reqs="$(_vs_requires "${_group}" "${_p}")" || exit 1
+			if [ -n "${_reqs}" ]; then
+				_req=()
+				while IFS= read -r _r; do _req+=("${_r}"); done <<<"${_reqs}"
+				_winget_vs "${_w}" "${_p}" "${_req[@]}" || exit 1
+				continue
+			fi
 			# Not probed during a dry run: -n has to print the same plan on
 			# a machine with no winget at all, which is where a manifest is
 			# usually checked.
@@ -420,9 +703,7 @@ _do_install() {
 				echo "install-deps: ${_p} already installed" >&2
 				continue
 			fi
-			_run "${_w}" install --id "${_p}" --exact --source winget \
-				--silent --accept-package-agreements \
-				--accept-source-agreements --disable-interactivity
+			_run "${_w}" install --id "${_p}" "${_WINGET_INSTALL_FLAGS[@]}"
 		done
 		;;
 	msys2)
