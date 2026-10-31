@@ -279,7 +279,13 @@ _asset() {
 	fi
 	_log "fetching ${_JBS_BASE}/${name}"
 	_curl_retry_opts_init
-	if ! curl -sSL --fail "${_CURL_RETRY_OPTS[@]}" --connect-timeout 30 \
+	# With MSYS path conversion on, whatever the caller turned off: the sshd
+	# step sets MSYS2_ARG_CONV_EXCL='*' for its Windows programs, and Git for
+	# Windows' curl is one too -- handed `-o /tmp/...` unconverted, it could
+	# not write it (curl: (23)) and the step failed on a jbx run with
+	# "windows-sshd.ps1 unavailable" (measured 2026-10-31, #190).
+	if ! env -u MSYS2_ARG_CONV_EXCL -u MSYS_NO_PATHCONV \
+		curl -sSL --fail "${_CURL_RETRY_OPTS[@]}" --connect-timeout 30 \
 		-o "${dest}" "${_JBS_BASE}/${name}"; then
 		rm -f "${dest}"
 		echo "error: cannot obtain ${name} (no sibling copy, fetch failed)" >&2
