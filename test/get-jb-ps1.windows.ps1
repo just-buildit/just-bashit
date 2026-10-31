@@ -78,12 +78,15 @@ try {
     $first = jbx show 'a b' '*' "it's" '"q"' '' 'C:\x y'
     $rc = $LASTEXITCODE
     $second = jbx x
+    # An unquoted a,b is a PowerShell array: it must reach bash as a,b (#196).
+    $third = jbx -s sshd,git -x a,b,c
 } finally {
     if ($null -eq $savedHome) { Remove-Item Env:HOME } else { $env:HOME = $savedHome }
 }
 Assert-That ($rc -eq 5) "the stub's exit status reaches `$LASTEXITCODE (got $rc)"
 Assert-That ($first[0] -eq '[show][a b][*][it''s]["q"][][C:\x y] n=7') "every argument arrives as typed (got $($first[0]))"
 Assert-That ($second[1] -eq 'leaked=0') "no JB_PS_ variable outlives its call (got $($second[1]))"
+Assert-That ($third[0] -eq '[-s][sshd,git][-x][a,b,c] n=4') "an unquoted a,b arrives as one argument a,b (got $($third[0]))"
 
 Remove-Item -Recurse -Force -LiteralPath $work
 Write-Information "=== get-jb.ps1 passed on $($PSVersionTable.PSEdition)"

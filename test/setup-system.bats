@@ -145,6 +145,34 @@ _write_deps_toml() {
 	assert_output --partial "unknown step 'nope'"
 }
 
+# A step list holding a space is what PowerShell makes of an unquoted
+# `-s sshd,git` (#196). Matched against a space-joined list, 'sshd git'
+# passed validation (the two steps are adjacent there), then matched
+# nothing in the run loop and ended in "no steps selected". Each pair below
+# is adjacent in _STEPS_ALL, or the old check would refuse it as well.
+@test 'a step holding a space is rejected, by name (#196)' {
+	run setup-system.sh -n -s 'sshd git'
+	assert_failure
+	assert_output --partial "unknown step 'sshd git'"
+	refute_output --partial "no steps selected"
+}
+
+@test 'a skip holding a space is rejected, by name (#196)' {
+	run setup-system.sh -n -s shell -x 'git tools'
+	assert_failure
+	assert_output --partial "unknown step 'git tools'"
+}
+
+@test 'a bootstrap.toml step holding a space is rejected, by name (#196)' {
+	cat >bootstrap.toml <<-'EOF'
+		[tools.setup-system]
+		steps = ["tools pwsh"]
+	EOF
+	run setup-system.sh -n
+	assert_failure
+	assert_output --partial "unknown step 'tools pwsh'"
+}
+
 # ---------------------------------------------------------------------------
 # Templates
 # ---------------------------------------------------------------------------
