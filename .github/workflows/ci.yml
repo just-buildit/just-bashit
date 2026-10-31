@@ -152,7 +152,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.src == 'true' && needs.changes.outputs.code != 'false'
     runs-on: windows-latest
-    timeout-minutes: 30
+    # 45, not 30: the suite took 26-30 min and #188 pushed it over (cancelled
+    # at test 653 of ~710, none failing). Headroom only -- the speed-up is #187.
+    timeout-minutes: 45
     defaults:
       run:
         shell: msys2 {0}
