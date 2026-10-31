@@ -1018,7 +1018,9 @@ _tool_path() {
 # trying (pwsh without ICU) prints "does not run".
 _tool_version() {
 	local name="$1" path="$2" out
-	local -a to=()
+	# `env` when there is no timeout (stock macOS has none): bash 3.2 under
+	# set -u refuses an empty "${to[@]}", and every row read "does not run".
+	local -a to=(env)
 	_have timeout && to=(timeout 20)
 	case "${name}" in
 	ssh) out="$("${to[@]}" "${path}" -V 2>&1)" || out="" ;;
