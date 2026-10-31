@@ -4,6 +4,20 @@
 
 ### Added
 
+- **On Windows `setup-system -y` never waits on a UAC prompt, and an
+    admin shell needs none (#184).** The sshd step and install-deps'
+    Visual Studio `setup.exe modify` now elevate by one ladder,
+    `win-admin-route` in `windows.sh`: directly when this shell is already
+    elevated (`win-elevated`, the same High Mandatory Level check the admin
+    ssh channel makes, now one `WIN_ELEVATED_PS` expression), over the admin
+    ssh channel when there is one, and otherwise through one UAC prompt --
+    except under `--yes`, which skips the step, `skipped (needs admin --   re-run from an admin PowerShell)`. install-deps takes `-y/--yes` too, and
+    setup-system passes it on. The dry run says which it would be. The run
+    itself is never relaunched elevated, which would leave Administrators
+    owning files in the user's profile. The elevation check names
+    `whoami.exe` by full path: from Git Bash, PowerShell found Git's own
+    `whoami`, which refuses `/groups`.
+
 - **`get-jb.ps1`: jbx on native Windows from PowerShell, with no bash
     window (#172).** `irm https://just-buildit.github.io/get-jb.ps1 | iex`
     in Windows PowerShell 5.1 or pwsh 7 finds Git for Windows' `bash.exe`

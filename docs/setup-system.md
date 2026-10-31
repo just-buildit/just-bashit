@@ -36,7 +36,10 @@ MSVC libraries and Windows SDK clang-cl links against) and the *C++ Clang
 Compiler for Windows* component (clang-cl itself, x64 and ARM64). A Build
 Tools install that lacks either has it added, and one that has both is left
 alone
-([how](install-deps.md#a-package-that-provides-visual-studio-workloads-and-components)).
+([how](install-deps.md#a-package-that-provides-visual-studio-workloads-and-components);
+adding to an installed Build Tools needs admin, and under `--yes` it runs
+only from an admin shell or over the admin ssh channel, as the
+[sshd step](#the-sshd-step) does).
 clang-cl comes from that component, not the `LLVM.LLVM` package, because
 the component's hook puts it on PATH in a **Developer PowerShell for VS**
 (or Developer Command Prompt), the shell just-makeit builds Windows in;
@@ -406,8 +409,14 @@ jbx setup-system -s sshd --github-user octocat \
 
 The work is done by `windows-sshd.ps1`, which must run elevated. **Only a
 box's first run needs anyone at the desktop.** The step copies the script to
-the Windows `%TEMP%` and then:
+the Windows `%TEMP%` and then takes the first of these that applies (one
+ladder, `win-admin-route` in [`windows.sh`](libraries/windows.md), which the
+`deps` step's Visual Studio modify takes too):
 
+- **Already elevated** — run from an admin PowerShell, or a Git Bash started
+    from one: it runs the script directly, with no UAC prompt. Only this step
+    runs elevated because you are; the rest of the run writes your files as
+    usual.
 - **With an admin ssh channel — every run after the first:** it runs the
     script over ssh to this machine's own sshd, from WSL. An admin logged in by
     key gets an elevated session with no UAC prompt, so this works from
@@ -415,11 +424,17 @@ the Windows `%TEMP%` and then:
     output streams back live. The channel is `win-admin-channel` in
     [`windows.sh`](libraries/windows.md), which proves the far end is this
     machine and elevated before it is trusted.
-- **Without one — the first run:** it raises **one UAC prompt on the Windows
+- **With `--yes`, and neither:** it never raises a prompt. The step is
+    reported `skipped (needs admin -- re-run from an admin PowerShell)`, so an
+    unattended run cannot sit on a hidden UAC prompt.
+- **Otherwise — the first run:** it raises **one UAC prompt on the Windows
     desktop**, waits, and relays the script's log. Declining the prompt is
     reported as a failure, not a success.
 
-The dry run says which of the two it would use. The script can also be run on
+The dry run says which of these it would use. Relaunching the whole run
+elevated is deliberately not one of them: files it created in your profile
+would be owned by Administrators, which git's `safe.directory` check and the
+`~/.ssh` permissions both refuse. The script can also be run on
 its own from an elevated PowerShell — `Get-Help .\windows-sshd.ps1 -Full`
 documents it. Every part is idempotent: re-running is how new keys arrive.
 
@@ -465,20 +480,20 @@ ______________________________________________________________________
 
 ## Options
 
-| Flag       | Long form                   | Description                                        |
-| ---------- | --------------------------- | -------------------------------------------------- |
-| `-h`       | `--help`                    | Show help and exit                                 |
-| `-n`       | `--dry-run`                 | Print the plan; change nothing                     |
-| `-v`       | `--verbose`                 | Print extra detail                                 |
-| `-y`       | `--yes`                     | Never prompt (see the ssh warning above)           |
-| `-s STEPS` | `--steps STEPS`             | Comma-separated steps to run                       |
-| `-x STEPS` | `--skip STEPS`              | Comma-separated steps to leave out                 |
-|            | `--prefix DIR`              | Config directory (default `~/.config/just-bashit`) |
-|            | `--key-name NAME`           | ssh key filename (default: this hostname)          |
-|            | `--github-user NAME`        | sshd: authorize `github.com/NAME.keys`             |
-|            | `--sshd-allow ADDRS`        | sshd: addresses the firewall admits to port 22     |
-|            | `--template [PATH]`         | Write the bashrc template to PATH, or stdout       |
-|            | `--template-profile [PATH]` | Write the profile template to PATH, or stdout      |
+| Flag       | Long form                   | Description                                                                                                                                                                                                                                                        |
+| ---------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `-h`       | `--help`                    | Show help and exit                                                                                                                                                                                                                                                 |
+| `-n`       | `--dry-run`                 | Print the plan; change nothing                                                                                                                                                                                                                                     |
+| `-v`       | `--verbose`                 | Print extra detail                                                                                                                                                                                                                                                 |
+| `-y`       | `--yes`                     | Never prompt: the ssh key gets an empty passphrase (see the ssh warning above), and on Windows no UAC prompt is raised -- a step that needs admin runs directly in an admin shell or over the admin ssh channel, and is skipped otherwise ([sshd](#the-sshd-step)) |
+| `-s STEPS` | `--steps STEPS`             | Comma-separated steps to run                                                                                                                                                                                                                                       |
+| `-x STEPS` | `--skip STEPS`              | Comma-separated steps to leave out                                                                                                                                                                                                                                 |
+|            | `--prefix DIR`              | Config directory (default `~/.config/just-bashit`)                                                                                                                                                                                                                 |
+|            | `--key-name NAME`           | ssh key filename (default: this hostname)                                                                                                                                                                                                                          |
+|            | `--github-user NAME`        | sshd: authorize `github.com/NAME.keys`                                                                                                                                                                                                                             |
+|            | `--sshd-allow ADDRS`        | sshd: addresses the firewall admits to port 22                                                                                                                                                                                                                     |
+|            | `--template [PATH]`         | Write the bashrc template to PATH, or stdout                                                                                                                                                                                                                       |
+|            | `--template-profile [PATH]` | Write the profile template to PATH, or stdout                                                                                                                                                                                                                      |
 
 ______________________________________________________________________
 

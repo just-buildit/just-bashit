@@ -84,7 +84,10 @@ read -r -d '' HELP <<-'EOF' || true
 	  -n / --dry-run             Print what would happen; change nothing.
 	  -v / --verbose             Print extra detail.
 	  -y / --yes                 Never prompt. Generates the ssh key with an
-	                             EMPTY passphrase — see the docs first.
+	                             EMPTY passphrase — see the docs first. On
+	                             Windows, never raises a UAC prompt: a step
+	                             that needs admin runs in an admin shell or
+	                             over the admin ssh channel, else is skipped.
 	  -s / --steps STEPS         Comma-separated steps to run (overrides the
 	                             default set), e.g. -s shell,ssh
 	  -x / --skip STEPS          Comma-separated steps to leave out.
@@ -465,6 +468,9 @@ _install_manifest() {
 	local args=("$@")
 	[[ ${DRY_RUN} -eq 1 ]] && args+=("--dry-run")
 	[[ ${VERBOSE} -eq 1 ]] && args+=("--verbose")
+	# --yes reaches install-deps: its Visual Studio modify then never
+	# raises a UAC prompt either (#184).
+	[[ ${ASSUME_YES} -eq 1 ]] && args+=("--yes")
 	_info "installing packages from ${label}"
 	if bash "${installer}" "${args[@]+"${args[@]}"}" "${file}"; then
 		return 0
@@ -1090,9 +1096,13 @@ step_ssh() {
 #
 # The work is windows-sshd.ps1, which has to run elevated. This step copies
 # it to the Windows temp directory (an elevated process cannot be relied on
-# to read \\wsl.localhost paths), raises the UAC prompt with Start-Process
-# -Verb RunAs, waits, and relays the script's log -- the elevated window is
-# hidden, so without the log a failure would be invisible.
+# to read \\wsl.localhost paths) and runs it by windows.sh's
+# win-admin-route (#184): directly when this shell is already elevated,
+# over the admin ssh channel when there is one, else through a UAC prompt
+# (Start-Process -Verb RunAs) -- except under --yes, which never prompts and
+# skips the step instead. It waits, and relays the script's log -- the
+# elevated window is hidden, so without the log a failure would be
+# invisible.
 #
 # It runs from WSL or from native Windows (MSYS2 / Git Bash); the two differ
 # only in how a Windows path becomes a local one (wslpath, cygpath).
@@ -1216,21 +1226,33 @@ step_sshd() {
 		ps_args="${ps_args} -RemoteAddress ${sq}${SSHD_ALLOW//,/${sq},${sq}}${sq}"
 	fi
 
-	# An elevated ssh session to this machine's own sshd, when one exists
-	# (every run after a box's first): no UAC prompt, so nobody has to be at
-	# the desktop, and the output streams back live (windows.sh says why).
-	local chan=""
-	chan="$(win-admin-channel)" || chan=""
+	# How it elevates, first match wins: this shell already is; an elevated
+	# ssh session to this machine's own sshd (every run after a box's first,
+	# output streamed back live -- windows.sh says why); under --yes, not at
+	# all (skipped: an unattended run must not sit on a hidden prompt); else
+	# one UAC prompt.
+	local how chan=""
+	IFS=' ' read -r how chan <<<"$(win-admin-route "${ASSUME_YES}")"
 
 	if [[ ${DRY_RUN} -eq 1 ]]; then
-		_info "would copy windows-sshd.ps1 to ${wdir}"
-		if [[ -n ${chan} ]]; then
-			_info "would run it over the admin ssh channel (${chan}), no UAC prompt:"
-		else
-			_info "would raise a UAC prompt and run, elevated:"
-		fi
+		case "${how}" in
+		elevated) _info "would copy windows-sshd.ps1 to ${wdir} and run it here, already elevated, no prompt:" ;;
+		ssh) _info "would copy windows-sshd.ps1 to ${wdir} and run it over the admin ssh channel (${chan}), no UAC prompt:" ;;
+		skip)
+			# shellcheck disable=SC2154  # assigned in windows.sh, sourced above
+			_info "would skip it under --yes: ${WIN_NEEDS_ADMIN}"
+			_result "sshd:    skipped (${WIN_NEEDS_ADMIN}) (dry run)"
+			return 0
+			;;
+		*) _info "would copy windows-sshd.ps1 to ${wdir}, raise a UAC prompt and run, elevated:" ;;
+		esac
 		_info "  windows-sshd.ps1 ${ps_args}"
 		_result "sshd:    ok (dry run)"
+		return 0
+	fi
+	if [[ ${how} == skip ]]; then
+		_warn "--yes never raises a UAC prompt, and this shell is not elevated"
+		_result "sshd:    skipped (${WIN_NEEDS_ADMIN})"
 		return 0
 	fi
 
@@ -1238,7 +1260,7 @@ step_sshd() {
 	cp "${ps1}" "${dir}/windows-sshd.ps1"
 	rm -f "${dir}/log.txt"
 
-	if [[ -n ${chan} ]]; then
+	if [[ ${how} == ssh ]]; then
 		_info "running over the admin ssh channel (${chan}) -- no UAC prompt"
 		# The script is named by the far end's own $env:TEMP -- the same
 		# user, so the same directory -- rather than a Windows path spliced
@@ -1284,11 +1306,19 @@ step_sshd() {
 		exit $p.ExitCode
 	EOF
 
-	_info "approve the UAC prompt on the Windows desktop to continue"
+	# Already elevated: run.ps1 itself, which this process's token runs
+	# elevated; launch.ps1 is only the UAC hop.
+	local entry=launch.ps1
+	if [[ ${how} == elevated ]]; then
+		entry=run.ps1
+		_info "already elevated -- running it here, no UAC prompt"
+	else
+		_info "approve the UAC prompt on the Windows desktop to continue"
+	fi
 	local rc=0
 	(
 		cd /mnt/c 2>/dev/null || true
-		"${ps_exe}" -NoProfile -ExecutionPolicy Bypass -File "${wdir}\\launch.ps1"
+		"${ps_exe}" -NoProfile -ExecutionPolicy Bypass -File "${wdir}\\${entry}"
 	) || rc=$?
 
 	if [[ -r "${dir}/log.txt" ]]; then
@@ -1298,6 +1328,9 @@ step_sshd() {
 	fi
 	if [[ ${rc} -eq 0 ]]; then
 		_result "sshd:    ok (keys from github.com/${user}.keys)"
+	elif [[ ! -r "${dir}/log.txt" && ${how} == elevated ]]; then
+		_warn "run.ps1 did not start (exit ${rc})"
+		_result "sshd:    failed (see above)"
 	elif [[ ! -r "${dir}/log.txt" ]]; then
 		_warn "the elevated run did not start — was the UAC prompt declined?"
 		_result "sshd:    failed (not elevated)"
