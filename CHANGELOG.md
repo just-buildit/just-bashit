@@ -59,6 +59,8 @@
     Machine and User PATH, so a tool installed this run is reported where it
     is instead of as missing, and the closing advice names the directory.
     A test fails on a baseline package the report could not probe for.
+    On macOS with no `timeout` (the stock install) every report row read
+    "does not run": bash 3.2 refused the empty command prefix; fixed.
 
 - **ARM64 Windows gets the native uv, and the native PowerShell MSI, even
     from an emulated x64 shell (#171).** From x64 Git Bash every signal says
