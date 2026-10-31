@@ -18,6 +18,9 @@
     up new keys and repair drift, not a mistake:
 
       1. The OpenSSH.Server Windows capability is installed if it is not.
+         When it is not and Windows is waiting on a reboot to finish
+         servicing, the run stops before changing anything: the install
+         would fail, so reboot first.
       2. The authorized keys are mirrored from GitHub (-GitHubUser) or a
          file (-KeysFile) into the file sshd actually reads for this user --
          administrators_authorized_keys when the user is a local admin,
@@ -435,6 +438,73 @@ function Register-WslRescopeTask {
         'whenever WSL rebuilds its adapter')
 }
 
+# ---------------------------------------------------------------------------
+# The OpenSSH server capability, and the pending reboot that blocks it.
+# ---------------------------------------------------------------------------
+
+# The servicing stack's own "waiting on a reboot" keys. Add-WindowsCapability
+# is a servicing (CBS) operation, and with either present it fails with a raw
+# 0x800f0950 (measured on zen-x2elite-x, 2026-10-30: RebootPending set by a
+# VS Build Tools modify that exited 3010). Deliberately not counted:
+#   - WindowsUpdate\Auto Update\RebootRequired, Windows Update's own flag.
+#     When what it waits on is servicing, CBS sets RebootPending too and
+#     this list catches it; when it is not, it does not block a capability
+#     install, and refusing would block for nothing.
+#   - Session Manager\PendingFileRenameOperations, which installers fill
+#     with delete-on-reboot temp files and which is rarely empty (106
+#     entries on that box, Edge and Copilot updater leftovers); it blocks no
+#     servicing operation.
+$ServicingRebootKeys = @(
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootInProgress'
+)
+
+function Get-ServicingRebootPending {
+    <#
+    .SYNOPSIS
+        The servicing keys present that say Windows is waiting on a reboot;
+        empty when there is none. See $ServicingRebootKeys for which count.
+    #>
+    @($ServicingRebootKeys | Where-Object { Test-Path -LiteralPath $_ })
+}
+
+function Install-SshdCapability {
+    <#
+    .SYNOPSIS
+        Install the OpenSSH.Server capability when it is missing; refuse,
+        before changing anything, when a pending servicing reboot would make
+        the install fail.
+    .DESCRIPTION
+        InstallPending counts as installed: sshd runs, and Windows finishes
+        the servicing at the next reboot. Treated as missing, every re-run
+        -- routine now that re-runs come over ssh -- repeated the slow
+        Add-WindowsCapability for nothing (measured on zen-ai445,
+        2026-09-28).
+
+        The pending-reboot check runs only when the capability needs
+        installing: an installed sshd is not blocked by a reboot that has
+        nothing to do with it. The refusal starts "reboot pending:", which
+        setup-system reads to put the reason in its summary.
+    #>
+    $cap = Get-WindowsCapability -Online -Name 'OpenSSH.Server*' | Select-Object -First 1
+    if ($cap.State -eq 'InstallPending') {
+        Write-Information "  ok    $($cap.Name) installed (Windows finishes it at the next reboot)"
+        return
+    }
+    if ($cap.State -eq 'Installed') {
+        Write-Information "  ok    $($cap.Name) installed"
+        return
+    }
+    $pending = @(Get-ServicingRebootPending)
+    if ($pending.Count -gt 0) {
+        throw ("reboot pending: Windows is waiting on a reboot to finish servicing " +
+            "($(($pending | ForEach-Object { ($_ -split '\\')[-1] }) -join ', ')), and $($cap.Name) cannot be " +
+            'installed until it does. Reboot Windows, then re-run setup-system -s sshd.')
+    }
+    Write-Information "  install $($cap.Name) (this can take a few minutes)"
+    Add-WindowsCapability -Online -Name $cap.Name | Out-Null
+}
+
 # The test suite dot-sources this file for the functions above and must not
 # fall through into the part that changes the machine.
 if ($MyInvocation.InvocationName -eq '.') { return }
@@ -509,21 +579,7 @@ if ($keys.Count -eq 0) {
 Write-Information "  keys  $($keys.Count) from $source"
 
 # -- 2. the server itself ---------------------------------------------------
-$cap = Get-WindowsCapability -Online -Name 'OpenSSH.Server*' | Select-Object -First 1
-# InstallPending is installed: sshd runs, and Windows finishes the servicing
-# at the next reboot. Treated as missing, every re-run -- routine now that
-# re-runs come over ssh -- repeated the slow Add-WindowsCapability for
-# nothing (measured on zen-ai445, 2026-09-28).
-if ($cap.State -eq 'InstallPending') {
-    Write-Information "  ok    $($cap.Name) installed (Windows finishes it at the next reboot)"
-}
-elseif ($cap.State -ne 'Installed') {
-    Write-Information "  install $($cap.Name) (this can take a few minutes)"
-    Add-WindowsCapability -Online -Name $cap.Name | Out-Null
-}
-else {
-    Write-Information "  ok    $($cap.Name) installed"
-}
+Install-SshdCapability
 
 $sshDir = Join-Path $env:ProgramData 'ssh'
 $config = Join-Path $sshDir 'sshd_config'
