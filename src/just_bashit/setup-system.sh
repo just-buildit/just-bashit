@@ -431,17 +431,22 @@ read -r -d '' _BASELINE_TOML <<-'EOF' || true
 	# Windows with, plus CMake, Git (Git Bash, the bash host) and PowerShell 7
 	# (pwsh: the .ps1 gates, and the shell a Windows user works in). clang-cl
 	# links against the MSVC libraries and the Windows SDK, which are the
-	# Build Tools' C++ workload: the id alone installs only the installer
-	# shell, so its table names the workload, and install-deps probes for it
-	# with vswhere and adds it to a shell that lacks it (#67). Windows 10+
-	# ships tar.exe and curl.exe itself. Installed from Git Bash directly,
-	# and from MSYS2 too: step_deps runs this section there as well, since
-	# msys2's own section no longer carries a compiler.
+	# Build Tools' C++ workload, and clang-cl itself is the Build Tools'
+	# "C++ Clang Compiler for Windows" component: the id alone installs only
+	# the installer shell, so its table names both, and install-deps probes
+	# for them with vswhere and adds them to a shell that lacks them (#67).
+	# The component ships x64 and ARM64 clang-cl plus a Developer shell hook
+	# (vsdevcmd\ext\clang_cl.bat) that puts the host's on PATH; LLVM.LLVM
+	# put it on no PATH at all (#181). Its MSBuild toolset companion
+	# (VC.Llvm.ClangToolset) is for .vcxproj builds, which nothing here uses.
+	# Windows 10+ ships tar.exe and curl.exe itself. Installed from Git Bash
+	# directly, and from MSYS2 too: step_deps runs this section there as
+	# well, since msys2's own section no longer carries a compiler.
 	[baseline.winget]
-	packages = ["Kitware.CMake", "Git.Git", "LLVM.LLVM", "Microsoft.PowerShell", "Microsoft.VisualStudio.BuildTools"]
+	packages = ["Kitware.CMake", "Git.Git", "Microsoft.PowerShell", "Microsoft.VisualStudio.BuildTools"]
 
 	[baseline.winget."Microsoft.VisualStudio.BuildTools"]
-	vs_requires = ["Microsoft.VisualStudio.Workload.VCTools"]
+	vs_requires = ["Microsoft.VisualStudio.Workload.VCTools", "Microsoft.VisualStudio.Component.VC.Llvm.Clang"]
 
 	# MSYS2 as the BASH HOST only. Its MinGW gcc toolchain is gone
 	# (2026-10-03): just-makeit and doppler build native Windows with

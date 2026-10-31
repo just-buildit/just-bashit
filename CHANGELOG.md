@@ -44,6 +44,19 @@
 
 ### Fixed
 
+- **clang-cl on native Windows is the Build Tools' clang component, so a
+    Developer PowerShell finds it (#181).** `LLVM.LLVM` installed
+    `C:\Program Files\LLVM\bin\clang-cl.exe` and added that directory to
+    no PATH, Machine or User, so nothing could find it. The winget baseline
+    drops it and asks `Microsoft.VisualStudio.BuildTools` for
+    `Microsoft.VisualStudio.Component.VC.Llvm.Clang` beside the C++
+    workload, through the existing `vs_requires` probe (#67): a Build Tools
+    install with the workload but not the component is modified, elevated,
+    to add it. The component ships x64 and ARM64 clang-cl and a
+    `vsdevcmd\ext\clang_cl.bat` hook that puts the host's on PATH in a
+    Developer PowerShell or Command Prompt. `vs_requires` takes component
+    ids as well as workload ids; its refusal now says so.
+
 - **ARM64 Windows gets the native uv, and the native PowerShell MSI, even
     from an emulated x64 shell (#171).** From x64 Git Bash every signal says
     x64: `uname -m`, `PROCESSOR_ARCHITECTURE`, even `OSArchitecture` in a
