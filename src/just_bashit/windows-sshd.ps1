@@ -33,6 +33,8 @@
       5. The firewall rule for port 22 is limited to -RemoteAddress, and a
          second rule admits this machine's own WSL (its virtual interface),
          so later runs can come over an admin ssh session with no prompt.
+         WSL rebuilds that interface on every boot, so a SYSTEM scheduled
+         task re-scopes the second rule each time WSL's switch comes up.
       6. The sshd service is set to start automatically, and restarted so
          the new configuration is live.
 
@@ -74,6 +76,18 @@
     The Windows account the keys are for. Default: the current user, which
     under UAC elevation is the same account that asked.
 
+.PARAMETER RescopeWslRule
+    Re-scope the jb-sshd-wsl firewall rule to the WSL adapter that exists
+    now, and do nothing else. This is what the scheduled task runs, from
+    the copy of this script under %ProgramData%\just-bashit; it waits up to
+    a minute for the adapter, because the task fires as WSL's virtual
+    switch initialises, a moment before the adapter is named.
+
+.PARAMETER CheckWslRule
+    Report, without elevation, whether jb-sshd-wsl admits the WSL adapter
+    that exists now, read from the firewall's persistent store. Exit 0 when
+    it does, 1 when it is stale, missing, or there is no WSL adapter.
+
 .EXAMPLE
     .\windows-sshd.ps1 -GitHubUser octocat
 
@@ -98,7 +112,9 @@ param(
     [string]$KeysFile,
     [string[]]$RemoteAddress = @('Any'),
     [string]$PwshVersion,
-    [string]$User = $env:USERNAME
+    [string]$User = $env:USERNAME,
+    [switch]$RescopeWslRule,
+    [switch]$CheckWslRule
 )
 
 Set-StrictMode -Version Latest
@@ -258,6 +274,167 @@ function Install-WithWinget {
     return $true
 }
 
+# ---------------------------------------------------------------------------
+# The WSL firewall rule. These touch the system only through cmdlets, so the
+# test suite drives them on Linux with each cmdlet replaced by a stub.
+# ---------------------------------------------------------------------------
+
+# The rule that admits this machine's own WSL to port 22, and the task that
+# keeps it pointed at WSL's adapter.
+$WslRuleName = 'jb-sshd-wsl'
+$RescopeTaskName = 'jb-sshd-wsl-rescope'
+$RescopeTaskPath = '\just-bashit\'
+
+# The host side of WSL's NAT switch. Only WSL's VM is attached to that
+# switch, so traffic arriving on this adapter is this machine's WSL and
+# nothing else -- tighter than WSL's subnet as a -RemoteAddress, which would
+# also admit a LAN that happens to use the same 172.16.0.0/12 range.
+$WslAdapterPattern = 'vEthernet (WSL*'
+
+# Hyper-V's vmswitch logs event 9, "Switch ... successfully initialized", to
+# the System log each time WSL creates its switch: on the first WSL start
+# after a boot, not at the boot itself (zen-x2elite-x, 2026-10-20: boot
+# 19:24, WSL's switch 20:41). The adapter, with its new GUID, follows within
+# a second. Not narrowed to WSL's switch by name: the name differs across
+# WSL releases ("WSL", "WSL (Hyper-V firewall)"), event XPath has no prefix
+# match, and the event is rare (three in 17 days on that box) while a
+# re-scope that finds the rule current changes nothing.
+$WslSwitchEventQuery = '<QueryList><Query Id="0" Path="System">' +
+'<Select Path="System">*[System[Provider[@Name=''Microsoft-Windows-Hyper-V-VmSwitch''] and EventID=9]]</Select>' +
+'</Query></QueryList>'
+
+function Select-WslInterface {
+    <#
+    .SYNOPSIS
+        The adapters, among those given, that carry this machine's WSL
+        traffic to Windows: the host side of WSL's virtual switch.
+    .DESCRIPTION
+        `vSwitch (WSL ...)` is the switch itself, not an interface traffic
+        arrives on, and every other adapter faces the LAN or a VPN; none of
+        them is selected.
+    .EXAMPLE
+        Select-WslInterface (Get-NetAdapter -IncludeHidden)
+    #>
+    param([AllowEmptyCollection()][object[]]$Adapter)
+    @($Adapter | Where-Object { $_.Name -like $WslAdapterPattern })
+}
+
+function Sync-WslSshdRule {
+    <#
+    .SYNOPSIS
+        Point the jb-sshd-wsl rule at the WSL adapter that exists now,
+        creating the rule when it is absent. Returns $true when there was
+        an adapter to point it at.
+    .DESCRIPTION
+        The ONE place the rule's scope is decided: the setup run calls it,
+        and so does the scheduled task, through -RescopeWslRule.
+
+        The scope is an interface alias, which Windows resolves to the
+        adapter's InterfaceGuid when the rule is written -- the persisted
+        rule says `IF={guid}`. WSL recreates the adapter with a new GUID on
+        every boot, so a rule written once admits nothing after the next
+        one (#80). Re-writing it after WSL builds its adapter is what keeps
+        it current; HNS does the same to its own `IF=`-scoped rules for
+        WSL's DNS.
+
+        Only jb-sshd-wsl is touched. The -RemoteAddress rule for port 22
+        (OpenSSH-Server-In-TCP) is never read or written here.
+    #>
+    $wslIf = @(Select-WslInterface @(Get-NetAdapter -IncludeHidden -ErrorAction SilentlyContinue) |
+            ForEach-Object { $_.Name })
+    if ($wslIf.Count -eq 0) { return $false }
+    if (Get-NetFirewallRule -Name $WslRuleName -ErrorAction SilentlyContinue) {
+        Set-NetFirewallRule -Name $WslRuleName -Enabled True -Profile Any -InterfaceAlias $wslIf
+    }
+    else {
+        New-NetFirewallRule -Name $WslRuleName -DisplayName 'OpenSSH Server (sshd) from WSL' `
+            -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow `
+            -Profile Any -InterfaceAlias $wslIf | Out-Null
+    }
+    Write-Information "  ok    firewall: port 22 from this machine's WSL ($($wslIf -join ', '))"
+    return $true
+}
+
+function Test-WslRuleScope {
+    <#
+    .SYNOPSIS
+        Whether a persisted jb-sshd-wsl rule admits exactly the WSL
+        adapter(s) given. Text in, verdict out.
+    .DESCRIPTION
+        Rule is the rule's value in the firewall's persistent store
+        (HKLM\SYSTEM\...\FirewallPolicy\FirewallRules), which is readable
+        without elevation where Get-NetFirewallInterfaceFilter is not. Its
+        `IF={guid}` fields are compared with the live adapters'
+        InterfaceGuid. Returns an object with Current, Have and Want.
+    .EXAMPLE
+        Test-WslRuleScope 'v2.33|IF={AB}|' @([pscustomobject]@{Name='vEthernet (WSL)'; InterfaceGuid='{AB}'})
+    #>
+    param(
+        [AllowEmptyString()][string]$Rule,
+        [AllowEmptyCollection()][object[]]$Adapter
+    )
+    $want = @(Select-WslInterface $Adapter |
+            ForEach-Object { ([string]$_.InterfaceGuid).Trim('{}').ToUpperInvariant() } |
+            Sort-Object)
+    $have = @([regex]::Matches([string]$Rule, '\|IF=\{?([0-9A-Fa-f-]+)\}?') |
+            ForEach-Object { $_.Groups[1].Value.ToUpperInvariant() } | Sort-Object)
+    [pscustomobject]@{
+        Current = ($want.Count -gt 0 -and ($want -join ',') -eq ($have -join ','))
+        Have    = $have
+        Want    = $want
+    }
+}
+
+function Register-WslRescopeTask {
+    <#
+    .SYNOPSIS
+        Register (or replace) the SYSTEM task that re-runs Sync-WslSshdRule
+        whenever WSL builds its switch, and at startup.
+    .DESCRIPTION
+        The task runs a copy of this script, not the one setup-system left
+        in the user's %TEMP%: a SYSTEM task must never run a file the user
+        can rewrite. The copy lives in %ProgramData%\just-bashit, whose ACL
+        is reset to Administrators and SYSTEM in full, Users read-only (the
+        unelevated -CheckWslRule reads it).
+
+        Register-ScheduledTask -Force replaces a task of the same name and
+        path, so a re-run updates the one task rather than adding another.
+
+        Triggers: event 9 from Hyper-V's vmswitch (see
+        $WslSwitchEventQuery), and startup, for a switch built before the
+        event subscription is live. Either way the run waits up to a minute
+        for the adapter and then exits.
+    #>
+    param([string]$Source)
+    $dir = Join-Path $env:ProgramData 'just-bashit'
+    $target = Join-Path $dir 'windows-sshd.ps1'
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    & icacls.exe $dir /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' `
+        '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "icacls failed on $dir" }
+    if ($Source -ne $target) { Copy-Item -LiteralPath $Source -Destination $target -Force }
+    # A file that existed before the directory's ACL was reset keeps its own;
+    # /reset makes it take the directory's.
+    & icacls.exe $target /reset | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "icacls failed on $target" }
+
+    $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $action = New-ScheduledTaskAction -Execute $ps -Argument (
+        "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$target`" -RescopeWslRule")
+    $onSwitch = New-CimInstance -ClientOnly -CimClass (
+        Get-CimClass -ClassName MSFT_TaskEventTrigger -Namespace 'Root/Microsoft/Windows/TaskScheduler')
+    $onSwitch.Subscription = $WslSwitchEventQuery
+    $onSwitch.Enabled = $true
+    $triggers = @((New-ScheduledTaskTrigger -AtStartup), $onSwitch)
+    $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -MultipleInstances Queue
+    Register-ScheduledTask -TaskName $RescopeTaskName -TaskPath $RescopeTaskPath -Action $action `
+        -Trigger $triggers -Principal $principal -Settings $settings -Force | Out-Null
+    Write-Information ("  ok    task $RescopeTaskPath$RescopeTaskName re-scopes $WslRuleName " +
+        'whenever WSL rebuilds its adapter')
+}
+
 # The test suite dot-sources this file for the functions above and must not
 # fall through into the part that changes the machine.
 if ($MyInvocation.InvocationName -eq '.') { return }
@@ -275,10 +452,38 @@ function Write-Utf8NoBom {
     [IO.File]::WriteAllText($Path, (($Lines -join "`n") + "`n"), $enc)
 }
 
+# -CheckWslRule needs no elevation: the firewall's persistent store is
+# readable by any user, where Get-NetFirewallInterfaceFilter is not.
+if ($CheckWslRule) {
+    $store = 'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules'
+    # GetValue answers $null for an absent value, where a property read
+    # throws under strict mode.
+    $rule = (Get-Item -LiteralPath $store).GetValue($WslRuleName)
+    $verdict = Test-WslRuleScope -Rule $rule -Adapter @(Get-NetAdapter -IncludeHidden -ErrorAction SilentlyContinue)
+    $want = ($verdict.Want | ForEach-Object { "{$_}" }) -join ', '
+    $have = ($verdict.Have | ForEach-Object { "{$_}" }) -join ', '
+    if ($verdict.Current) { Write-Information "$WslRuleName scope: current ($have)"; exit 0 }
+    if (-not $rule) { Write-Information "$WslRuleName scope: MISSING (no such rule)" }
+    elseif ($verdict.Want.Count -eq 0) { Write-Information "$WslRuleName scope: no WSL adapter (is WSL running?)" }
+    else { Write-Information "$WslRuleName scope: STALE (rule admits $have; WSL adapter is $want)" }
+    exit 1
+}
+
 $principal = New-Object Security.Principal.WindowsPrincipal(
     [Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw 'must run elevated (Run as administrator); setup-system -s sshd does this for you'
+}
+# The scheduled task's run: the rule and nothing else. The task fires as
+# WSL's switch initialises; the adapter follows within a second or so, so
+# wait for it rather than miss it.
+if ($RescopeWslRule) {
+    for ($i = 0; $i -lt 30; $i++) {
+        if (Sync-WslSshdRule) { exit 0 }
+        Start-Sleep -Seconds 2
+    }
+    Write-Information "  note  no WSL adapter yet; $WslRuleName is re-scoped when WSL starts"
+    exit 0
 }
 if (-not $GitHubUser -and -not $KeysFile) {
     throw 'no key source: pass -GitHubUser or -KeysFile'
@@ -460,23 +665,14 @@ Write-Information "  ok    firewall: port 22 from $($RemoteAddress -join ', ')"
 # And from this machine's own WSL, whatever -RemoteAddress says. setup-system
 # runs this script -- and a box's later provisioning -- over an admin ssh
 # session from WSL, which needs no UAC prompt; the rule above, limited to a
-# tailnet, drops WSL's traffic (it comes from the WSL virtual switch). Scoped
-# by interface, not address: WSL's subnet is new on every boot. Present only
-# once WSL has started on a box that has it.
-$wslRule = 'jb-sshd-wsl'
-$wslIf = @(Get-NetAdapter -IncludeHidden -Name 'vEthernet (WSL*' -ErrorAction SilentlyContinue |
-        ForEach-Object { $_.Name })
-if ($wslIf.Count -gt 0) {
-    if (Get-NetFirewallRule -Name $wslRule -ErrorAction SilentlyContinue) {
-        Set-NetFirewallRule -Name $wslRule -Enabled True -Profile Any -InterfaceAlias $wslIf
-    }
-    else {
-        New-NetFirewallRule -Name $wslRule -DisplayName 'OpenSSH Server (sshd) from WSL' `
-            -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow `
-            -Profile Any -InterfaceAlias $wslIf | Out-Null
-    }
-    Write-Information "  ok    firewall: port 22 from this machine's WSL ($($wslIf -join ', '))"
+# tailnet, drops WSL's traffic (it comes from the WSL virtual switch). WSL
+# rebuilds its adapter with a new GUID on every boot, which strands a rule
+# scoped to it (#80), so the task re-scopes it each time; registered even
+# when WSL has not started yet, so the rule appears the first time it does.
+if (-not (Sync-WslSshdRule)) {
+    Write-Information "  note  no WSL adapter yet; the task adds $WslRuleName when WSL starts"
 }
+Register-WslRescopeTask -Source $PSCommandPath
 
 # -- 7. the service ------------------------------------------------------------
 Set-Service -Name sshd -StartupType Automatic

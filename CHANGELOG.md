@@ -18,6 +18,20 @@
 
 ### Fixed
 
+- **`setup-system -s sshd`'s WSL firewall rule survives a reboot (#80).**
+    `jb-sshd-wsl` was scoped with `-InterfaceAlias 'vEthernet (WSL*'`, which
+    Windows stores as the adapter's GUID, and WSL rebuilds that adapter with
+    a new GUID on every boot: after the first reboot the rule admitted
+    nothing and `win-admin-channel` timed out. `windows-sshd.ps1` now
+    registers a SYSTEM scheduled task, `\just-bashit\jb-sshd-wsl-rescope`,
+    that re-scopes the rule to the live adapter when Hyper-V's vmswitch logs
+    event 9 (WSL's switch initialised) and at startup. It runs a copy of the
+    script kept in `%ProgramData%\just-bashit`, writable only by
+    administrators, through the same function the setup run uses; a re-run
+    replaces the task rather than adding one. `windows-sshd.ps1   -CheckWslRule` reports, unelevated, whether the rule matches the live
+    adapter; docs/setup-system.md has a one-line check to run after a
+    reboot.
+
 - **A failed `aliases.toml` fetch is refused, not read as "not listed"
     (#164).** jbx resolved a bare name by fetching the namespace's
     `aliases.toml`, and on any failure fell through to probing `NAME.sh` at
