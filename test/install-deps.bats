@@ -1051,7 +1051,9 @@ _VS_WL="Microsoft.VisualStudio.Workload.VCTools"
 
 # _vs_stubs [SHELL] [WORKLOAD] -- the fake installer directory. vswhere
 # prints SHELL as the installation path when asked with no -requires, and
-# only when WORKLOAD is set when asked with one. Prints the directory.
+# when asked with one only if WORKLOAD is set or an install has since
+# provided the workload (the `provided` file the stand-in below writes).
+# Prints the directory.
 _vs_stubs() {
 	local d="${BATS_TEST_TMPDIR}/vs-installer"
 	mkdir -p "${d}"
@@ -1059,7 +1061,8 @@ _vs_stubs() {
 		#!/usr/bin/env bash
 		printf 'vswhere %s\n' "\$*" >>"${VS_LOG}"
 		case "\$*" in
-		*-requires*) [ -n "${2:-}" ] && printf '%s\r\n' '${1:-}' ;;
+		*-requires*) { [ -n "${2:-}" ] || [ -e "${d}/provided" ]; } &&
+			printf '%s\r\n' '${1:-C:\BuildTools}' ;;
 		*) [ -n "${1:-}" ] && printf '%s\r\n' '${1:-}' ;;
 		esac
 		exit 0
@@ -1072,15 +1075,20 @@ _vs_stubs() {
 	printf '%s\n' "${d}"
 }
 
-# _win_exit_stub RC -- the stand-in for PowerShell: logs its arguments, runs
-# the command, and reports RC as the command's exit code.
+# _win_exit_stub RC [PROVIDES] -- the stand-in for PowerShell: logs its
+# arguments, runs the command, and reports RC as the command's exit code.
+# The install provides the workload unless PROVIDES is "no": an installer
+# that exits 0 and installs nothing is one of the cases under test.
 _win_exit_stub() {
 	local path="${BATS_TEST_TMPDIR}/win-exit-stub"
+	local provided="${BATS_TEST_TMPDIR}/vs-installer/provided"
+	[ "${2:-yes}" = "no" ] && provided=/dev/null
 	cat >"${path}" <<-EOF
 		#!/usr/bin/env bash
 		printf 'win-exit %s\n' "\$*" >>"${VS_LOG}"
 		[ "\$1" = "--runas" ] && shift
 		"\$@"
+		: >"${provided}"
 		echo "jb-exit:$1" >&2
 	EOF
 	chmod +x "${path}"
@@ -1164,16 +1172,53 @@ _vs_toml() {
 	assert_output --partial "(setup.exe modify): done, reboot required (exit 3010)"
 }
 
-@test 'vs_requires: any other exit code fails the run, naming it' {
+@test 'vs_requires: any other code without the workload fails, naming it' {
 	local stub vs win f
 	stub="$(_winget_stub 20)"
 	vs="$(_vs_stubs)"
-	win="$(_win_exit_stub -1978335226)"
+	win="$(_win_exit_stub -1978335226 no)"
 	f="$(_vs_toml)"
 	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
 		install-deps.sh -s winget "${f}"
 	assert_failure
 	assert_output --partial "(winget install): failed, exit code -1978335226"
+}
+
+@test 'vs_requires: winget reboot HRESULT with the workload present is success' {
+	local stub vs win f
+	stub="$(_winget_stub 20)"
+	vs="$(_vs_stubs)"
+	# 0x8A150109, APPINSTALLER_CLI_ERROR_INSTALL_REBOOT_REQUIRED_TO_FINISH
+	win="$(_win_exit_stub -1978334967)"
+	f="$(_vs_toml)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		install-deps.sh -s winget "${f}"
+	assert_success
+	assert_output --partial "(winget install): done, reboot required (exit -1978334967)"
+}
+
+@test 'vs_requires: an unknown code with the workload present warns, naming it' {
+	local stub vs win f
+	stub="$(_winget_stub 20)"
+	vs="$(_vs_stubs)"
+	win="$(_win_exit_stub 42)"
+	f="$(_vs_toml)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		install-deps.sh -s winget "${f}"
+	assert_success
+	assert_output --partial "warning: Microsoft.VisualStudio.BuildTools (winget install): exit code 42"
+}
+
+@test 'vs_requires: exit 0 without the workload is refused' {
+	local stub vs win f
+	stub="$(_winget_stub 0)"
+	vs="$(_vs_stubs 'C:\BuildTools')"
+	win="$(_win_exit_stub 0 no)"
+	f="$(_vs_toml)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		install-deps.sh -s winget "${f}"
+	assert_failure
+	assert_output --partial "(setup.exe modify): failed, exit code 0; vswhere finds no instance with ${_VS_WL}"
 }
 
 @test 'vs_requires: no exit code at all (a declined UAC prompt) fails' {

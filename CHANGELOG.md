@@ -25,8 +25,10 @@
     `vswhere -requires`, and is what both installs `--add`: a fresh install
     gets `winget install --override`, a shell without the workload gets the
     VS Installer's `setup.exe modify`, elevated, and a run that finds the
-    workload does nothing. Exit 3010 is success, reported as "reboot
-    required"; any other code fails the step and is named in full.
+    workload does nothing. After an install the probe runs again and decides
+    the outcome: an install that exits 0 without the workload fails, and one
+    that provides it succeeds whatever its code. 3010 or a winget reboot
+    HRESULT is reported as "reboot required", and any other code is named.
 
 ### Fixed
 
