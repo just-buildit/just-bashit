@@ -786,10 +786,17 @@ _winget_report_stubs() {
 	export JB_VS_INSTALLER="${BATS_TEST_TMPDIR}/vsi"
 	# Git Bash: winget and no pacman, so the winget section alone (MSYS2,
 	# with pacman, reports its own section too). No real registry PATH.
+	# The pacman-free bin is built once per file: on MSYS2 one build costs
+	# ~30 s, and two of them pushed CI's 30-minute Windows leg over.
+	if [[ ! -d "${BATS_FILE_TMPDIR}/bin-without" ]]; then
+		# `|| true` as in the `$(_bin_without ...)` callers: a dangling
+		# symlink in the host's /usr/bin fails one ln and nothing else.
+		BATS_TEST_TMPDIR="${BATS_FILE_TMPDIR}" _bin_without pacman >/dev/null || true
+	fi
 	printf '#!/bin/bash\nexit 0\n' >"${BATS_TEST_TMPDIR}/winget"
 	chmod +x "${BATS_TEST_TMPDIR}/winget"
 	export JB_WINGET="${BATS_TEST_TMPDIR}/winget"
-	REPORT_PATH="${stubs}:${PROJECT_ROOT}/src/just_bashit:$(_bin_without pacman)"
+	REPORT_PATH="${stubs}:${PROJECT_ROOT}/src/just_bashit:${BATS_FILE_TMPDIR}/bin-without"
 	export JB_REGISTRY_PATH=""
 }
 
