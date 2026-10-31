@@ -503,9 +503,18 @@ terminal, it is never prompted for — the summary reports
 from PowerShell. With the service not running (the elevated run was skipped
 or declined) the summary says so and nothing is added.
 
-The [git step](#the-git-step) then sets `core.sshCommand` to Windows'
-`ssh.exe` where it is unset, so Git for Windows, pwsh and VS Code share that
-one agent. To check it from PowerShell:
+The [git step](#the-git-step) then points git at the client that talks to
+that agent: `core.sshCommand` = `C:/Windows/System32/OpenSSH/ssh.exe`
+(forward slashes, since git hands the value to a shell), so Git for Windows,
+pwsh and VS Code share the one agent rather than Git's bundled MSYS ssh,
+which reaches none. Only the **global** value is read: the Git for Windows
+installer can set `core.sshCommand` in the system gitconfig
+(`C:\Program Files\Git\etc\gitconfig`), and that does not stop it. A global
+value you already set is kept, and the summary says so
+(`git: ok (...; core.sshCommand kept: <value>)`); with no `ssh.exe` at that
+path nothing is set and the summary says
+`core.sshCommand not set: no C:/Windows/System32/OpenSSH/ssh.exe`. To check
+it from PowerShell:
 
 ```powershell
 Get-Service ssh-agent | Select-Object Status, StartType; ssh-add -l; git config --global core.sshCommand

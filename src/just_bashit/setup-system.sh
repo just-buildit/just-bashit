@@ -1724,15 +1724,6 @@ step_git() {
 		"color.ui|auto"
 		"core.editor|${EDITOR:-vi}"
 	)
-	# Native Windows: Windows' own ssh.exe, so Git for Windows uses the
-	# Windows ssh-agent service that pwsh and VS Code use -- the one the box
-	# key goes into (#190) -- rather than its bundled MSYS ssh, which reaches
-	# no agent at all there. Forward slashes: git hands the value to a shell.
-	local win_ssh
-	if _on_native_windows && win_ssh="$(_win_openssh ssh.exe)"; then
-		pairs+=("core.sshCommand|$(cygpath -m "${win_ssh}")")
-	fi
-
 	local pair key value current set_count=0
 	for pair in "${pairs[@]}"; do
 		key="${pair%%|*}"
@@ -1752,7 +1743,43 @@ step_git() {
 		who_count=$((who_count + 1))
 	_git_identity user.email "${GIT_AUTHOR_EMAIL:-}" "your email" &&
 		who_count=$((who_count + 1))
-	_result "git:     ok (${set_count} default(s) set, ${who_count} identity value(s) set)"
+	_GIT_SSH_NOTE=""
+	_on_native_windows && _git_ssh_command
+	_result "git:     ok (${set_count} default(s) set, ${who_count} identity value(s) set${_GIT_SSH_NOTE:+; ${_GIT_SSH_NOTE}})"
+}
+
+# The value _git_ssh_command sets: Windows' own OpenSSH client, spelled with
+# forward slashes because git hands core.sshCommand to a shell, which would
+# eat backslashes.
+_GIT_WIN_SSH="C:/Windows/System32/OpenSSH/ssh.exe"
+
+# _git_ssh_command -- native Windows: point git at Windows' own ssh.exe, the
+# client that talks to the Windows ssh-agent service the sshd step puts the
+# box key in (#190), so Git for Windows, pwsh and VS Code share one agent.
+# Git for Windows' bundled MSYS ssh reaches no agent there at all.
+#
+# Only where the GLOBAL value is unset: --global is read, never the effective
+# value, because the Git for Windows installer may set core.sshCommand (or
+# ssh.variant) in the SYSTEM gitconfig (C:\Program Files\Git\etc\gitconfig),
+# and that must not stop the user's own setting. A global value that is
+# already there is kept and reported. ssh.exe is checked to exist first.
+# The outcome goes in _GIT_SSH_NOTE, for the git step's summary line.
+_git_ssh_command() {
+	local current
+	current="$(git config --global --get core.sshCommand 2>/dev/null || true)"
+	if [[ -n ${current} ]]; then
+		_GIT_SSH_NOTE="core.sshCommand kept: ${current}"
+		_info "${_GIT_SSH_NOTE}"
+		return 0
+	fi
+	if ! _win_openssh ssh.exe >/dev/null; then
+		_warn "Windows' OpenSSH client (${_GIT_WIN_SSH}) not found -- core.sshCommand left unset"
+		_GIT_SSH_NOTE="core.sshCommand not set: no ${_GIT_WIN_SSH}"
+		return 0
+	fi
+	_info "git config --global core.sshCommand ${_GIT_WIN_SSH}"
+	_run git config --global core.sshCommand "${_GIT_WIN_SSH}"
+	_GIT_SSH_NOTE="core.sshCommand set: ${_GIT_WIN_SSH}"
 }
 
 # _git_identity KEY FROM_ENV LABEL — set a global identity value that is

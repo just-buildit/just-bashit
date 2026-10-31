@@ -2047,21 +2047,62 @@ _default_steps() {
 	assert [ ! -e "${CALLS}.add" ]
 }
 
+# core.sshCommand (#190): Windows' own ssh.exe, the client that talks to the
+# Windows ssh-agent service. Decided on the GLOBAL value only: a system
+# gitconfig (Git for Windows' installer can set one) must not block it.
+_win_ssh="C:/Windows/System32/OpenSSH/ssh.exe"
+
 @test 'git step on native Windows points core.sshCommand at Windows ssh.exe' {
 	command -v git >/dev/null 2>&1 || skip "git not installed"
 	_native_stubs
 	run setup-system.sh -s git </dev/null
 	assert_success
-	assert_equal "$(git config --global --get core.sshCommand)" "M:${OPENSSH}/ssh.exe"
+	assert_equal "$(git config --global --get core.sshCommand)" "${_win_ssh}"
+	assert_output --partial "git:     ok ("
+	assert_output --partial "; core.sshCommand set: ${_win_ssh})"
 }
 
-@test 'git step leaves an existing core.sshCommand alone' {
+@test 'git step: a core.sshCommand in the system gitconfig does not block the global one' {
+	command -v git >/dev/null 2>&1 || skip "git not installed"
+	_native_stubs
+	printf '[core]\n\tsshCommand = ssh-from-the-installer\n' >"${BATS_TEST_TMPDIR}/system-gitconfig"
+	export GIT_CONFIG_SYSTEM="${BATS_TEST_TMPDIR}/system-gitconfig"
+	run setup-system.sh -s git </dev/null
+	assert_success
+	assert_equal "$(git config --global --get core.sshCommand)" "${_win_ssh}"
+	assert_output --partial "core.sshCommand set: ${_win_ssh}"
+}
+
+@test 'git step keeps and reports a global core.sshCommand of its own' {
 	command -v git >/dev/null 2>&1 || skip "git not installed"
 	_native_stubs
 	git config --global core.sshCommand "ssh -i mine"
 	run setup-system.sh -s git </dev/null
 	assert_success
 	assert_equal "$(git config --global --get core.sshCommand)" "ssh -i mine"
+	assert_output --partial "core.sshCommand kept: ssh -i mine"
+	assert_output --partial "; core.sshCommand kept: ssh -i mine)"
+}
+
+@test 'git step with no Windows ssh.exe sets nothing and says so' {
+	command -v git >/dev/null 2>&1 || skip "git not installed"
+	_native_stubs
+	rm -f "${OPENSSH}/ssh.exe"
+	run setup-system.sh -s git </dev/null
+	assert_success
+	run git config --global --get core.sshCommand
+	assert_failure
+	run setup-system.sh -s git </dev/null
+	assert_output --partial "; core.sshCommand not set: no ${_win_ssh})"
+}
+
+@test 'git step dry run names the core.sshCommand it would set, and sets none' {
+	command -v git >/dev/null 2>&1 || skip "git not installed"
+	_native_stubs
+	run setup-system.sh -n -s git </dev/null
+	assert_success
+	assert_output --partial "would run: git config --global core.sshCommand ${_win_ssh}"
+	assert [ ! -e "${HOME}/.gitconfig" ]
 }
 
 @test 'git step off native Windows sets no core.sshCommand' {
