@@ -761,9 +761,25 @@ _baseline_section() {
 	run _baseline_section winget
 	assert_output --partial '"LLVM.LLVM"'
 	assert_output --partial '"Microsoft.PowerShell"'
+	assert_output --partial '"Microsoft.VisualStudio.BuildTools"'
 	run _baseline_section msys2
 	assert_success
 	refute_output --partial "mingw-w64"
+}
+
+# The Build Tools id alone is the installer shell: the C++ workload clang-cl
+# links against is what its table declares, read the way install-deps reads
+# it (#67).
+@test 'the winget baseline declares the Build Tools C++ workload' {
+	# shellcheck disable=SC1091
+	source "${PROJECT_ROOT}/src/just_bashit/toml.sh"
+	local baseline
+	baseline=$(sed -n "/^read -r -d '' _BASELINE_TOML/,/^EOF/p" \
+		"${PROJECT_ROOT}/src/just_bashit/setup-system.sh" | sed 's/^\t//')
+	run toml_get_array baseline 'winget."Microsoft.VisualStudio.BuildTools"' \
+		vs_requires <<<"${baseline}"
+	assert_success
+	assert_output "Microsoft.VisualStudio.Workload.VCTools"
 }
 
 # MSYS2's section has no compiler now, so an MSYS2 host (Windows uname,

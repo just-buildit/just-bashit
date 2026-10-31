@@ -16,6 +16,18 @@
     previous roots back. On WSL the bash profile also points an unset
     `SSL_CERT_FILE` at the system bundle.
 
+- **`setup-system`'s native Windows baseline installs the MSVC Build
+    Tools' C++ workload (#67).** clang-cl links against the MSVC libraries
+    and the Windows SDK, which `Microsoft.VisualStudio.BuildTools` provides
+    only as a workload: the bare id installs the installer shell alone. A
+    winget package may now name what it provides in a table keyed by its id,
+    `vs_requires = [...]`. That list replaces the `winget list` probe with
+    `vswhere -requires`, and is what both installs `--add`: a fresh install
+    gets `winget install --override`, a shell without the workload gets the
+    VS Installer's `setup.exe modify`, elevated, and a run that finds the
+    workload does nothing. Exit 3010 is success, reported as "reboot
+    required"; any other code fails the step and is named in full.
+
 ### Fixed
 
 - **A failed `aliases.toml` fetch is refused, not read as "not listed"

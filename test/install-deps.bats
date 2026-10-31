@@ -7,6 +7,9 @@ setup() {
 	# stub factory: that runs inside a command substitution, so anything it
 	# assigns dies with the subshell and the test body reads an empty path.
 	WINGET_LOG="${BATS_TEST_TMPDIR}/winget.log"
+	# The same, for the Visual Studio Installer stubs (vswhere, setup.exe)
+	# and the stand-in for PowerShell that runs them.
+	VS_LOG="${BATS_TEST_TMPDIR}/vs.log"
 
 	GROUPED_FILE="${BATS_TEST_TMPDIR}/grouped.toml"
 	INLINE_FILE="${BATS_TEST_TMPDIR}/inline.toml"
@@ -1030,6 +1033,204 @@ _winget_toml() {
 	assert_failure
 	assert_output --partial "winget not found"
 	assert_output --partial "winget.exe"
+}
+
+# ---------------------------------------------------------------------------
+# A winget package that provides Visual Studio workloads (#67)
+#
+# The Build Tools id installs only the installer shell, so a package with a
+# vs_requires table is probed with vswhere, installed with --override when
+# absent, and modified with the VS Installer when present without the
+# workload. Three stubs: vswhere and setup.exe in a fake installer directory
+# (JB_VS_INSTALLER), and a stand-in for PowerShell (JB_WIN_EXIT) that runs
+# its command and reports `jb-exit:<code>` the way the real one does -- a
+# code a stub cannot exit with, since a shell sees only the low byte.
+# ---------------------------------------------------------------------------
+
+_VS_WL="Microsoft.VisualStudio.Workload.VCTools"
+
+# _vs_stubs [SHELL] [WORKLOAD] -- the fake installer directory. vswhere
+# prints SHELL as the installation path when asked with no -requires, and
+# only when WORKLOAD is set when asked with one. Prints the directory.
+_vs_stubs() {
+	local d="${BATS_TEST_TMPDIR}/vs-installer"
+	mkdir -p "${d}"
+	cat >"${d}/vswhere.exe" <<-EOF
+		#!/usr/bin/env bash
+		printf 'vswhere %s\n' "\$*" >>"${VS_LOG}"
+		case "\$*" in
+		*-requires*) [ -n "${2:-}" ] && printf '%s\r\n' '${1:-}' ;;
+		*) [ -n "${1:-}" ] && printf '%s\r\n' '${1:-}' ;;
+		esac
+		exit 0
+	EOF
+	cat >"${d}/setup.exe" <<-EOF
+		#!/usr/bin/env bash
+		printf 'setup.exe %s\n' "\$*" >>"${VS_LOG}"
+	EOF
+	chmod +x "${d}"/*.exe
+	printf '%s\n' "${d}"
+}
+
+# _win_exit_stub RC -- the stand-in for PowerShell: logs its arguments, runs
+# the command, and reports RC as the command's exit code.
+_win_exit_stub() {
+	local path="${BATS_TEST_TMPDIR}/win-exit-stub"
+	cat >"${path}" <<-EOF
+		#!/usr/bin/env bash
+		printf 'win-exit %s\n' "\$*" >>"${VS_LOG}"
+		[ "\$1" = "--runas" ] && shift
+		"\$@"
+		echo "jb-exit:$1" >&2
+	EOF
+	chmod +x "${path}"
+	printf '%s\n' "${path}"
+}
+
+# A manifest with one bare id and the Build Tools with its workload table.
+_vs_toml() {
+	local f="${BATS_TEST_TMPDIR}/vs.toml"
+	cat >"${f}" <<-EOF
+		[runtime.winget]
+		packages = ["Kitware.CMake", "Microsoft.VisualStudio.BuildTools"]
+
+		[runtime.winget."Microsoft.VisualStudio.BuildTools"]
+		vs_requires = ["${_VS_WL}"]
+	EOF
+	printf '%s\n' "${f}"
+}
+
+@test 'vs_requires: a fresh install gets the workload through --override' {
+	local stub vs win f
+	stub="$(_winget_stub 20)"
+	vs="$(_vs_stubs)"
+	win="$(_win_exit_stub 0)"
+	f="$(_vs_toml)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		install-deps.sh -s winget "${f}"
+	assert_success
+	assert_output --partial "Microsoft.VisualStudio.BuildTools (winget install): done"
+	run grep "^win-exit ${stub} install --id Microsoft.VisualStudio.BuildTools " "${VS_LOG}"
+	assert_success
+	assert_output --partial "--accept-package-agreements"
+	assert_output --partial "--override --quiet --wait --norestart --add ${_VS_WL} --includeRecommended"
+	run grep -c '^setup.exe' "${VS_LOG}"
+	assert_output 0
+}
+
+@test 'vs_requires: a shell without the workload is modified, elevated' {
+	local stub vs win f
+	stub="$(_winget_stub 0)"
+	vs="$(_vs_stubs 'C:\BuildTools 18')"
+	win="$(_win_exit_stub 0)"
+	f="$(_vs_toml)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		install-deps.sh -s winget "${f}"
+	assert_success
+	run cat "${VS_LOG}"
+	assert_line "win-exit --runas ${vs}/setup.exe modify --installPath C:\\BuildTools 18 --add ${_VS_WL} --includeRecommended --quiet --norestart"
+	assert_line "setup.exe modify --installPath C:\\BuildTools 18 --add ${_VS_WL} --includeRecommended --quiet --norestart"
+	# winget cancels a re-install of a present id, so it is never asked.
+	run grep -c '^install --id Microsoft.VisualStudio.BuildTools' "${WINGET_LOG}"
+	assert_output 0
+}
+
+@test 'vs_requires: a present workload runs nothing' {
+	local stub vs win f
+	stub="$(_winget_stub 0)"
+	vs="$(_vs_stubs 'C:\BuildTools' yes)"
+	win="$(_win_exit_stub 0)"
+	f="$(_vs_toml)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		install-deps.sh -s winget "${f}"
+	assert_success
+	assert_output --partial "Microsoft.VisualStudio.BuildTools already installed (with ${_VS_WL})"
+	run cat "${VS_LOG}"
+	assert_output "vswhere -products * -requires ${_VS_WL} -property installationPath"
+	# Decided by the probe: winget is not even asked whether the id is there.
+	run grep -c 'Microsoft.VisualStudio.BuildTools' "${WINGET_LOG}"
+	assert_output 0
+}
+
+@test 'vs_requires: exit 3010 is success, reported as reboot required' {
+	local stub vs win f
+	stub="$(_winget_stub 0)"
+	vs="$(_vs_stubs 'C:\BuildTools')"
+	win="$(_win_exit_stub 3010)"
+	f="$(_vs_toml)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		install-deps.sh -s winget "${f}"
+	assert_success
+	assert_output --partial "(setup.exe modify): done, reboot required (exit 3010)"
+}
+
+@test 'vs_requires: any other exit code fails the run, naming it' {
+	local stub vs win f
+	stub="$(_winget_stub 20)"
+	vs="$(_vs_stubs)"
+	win="$(_win_exit_stub -1978335226)"
+	f="$(_vs_toml)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		install-deps.sh -s winget "${f}"
+	assert_failure
+	assert_output --partial "(winget install): failed, exit code -1978335226"
+}
+
+@test 'vs_requires: no exit code at all (a declined UAC prompt) fails' {
+	local stub vs f win="${BATS_TEST_TMPDIR}/declined"
+	stub="$(_winget_stub 0)"
+	vs="$(_vs_stubs 'C:\BuildTools')"
+	printf '#!/usr/bin/env bash\necho "The operation was canceled by the user." >&2\nexit 1\n' >"${win}"
+	chmod +x "${win}"
+	f="$(_vs_toml)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		install-deps.sh -s winget "${f}"
+	assert_failure
+	# PowerShell's own message is relayed, then the failure is named.
+	assert_output --partial "canceled by the user"
+	assert_output --partial "no exit code reported"
+}
+
+@test 'vs_requires: a dry run prints both installs and probes nothing' {
+	local stub vs win f
+	stub="$(_winget_stub 0)"
+	vs="$(_vs_stubs 'C:\BuildTools' yes)"
+	win="$(_win_exit_stub 0)"
+	f="$(_vs_toml)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		install-deps.sh -n -s winget "${f}"
+	assert_success
+	assert_output --partial "install --id Microsoft.VisualStudio.BuildTools --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity --override \"--quiet --wait --norestart --add ${_VS_WL} --includeRecommended\""
+	assert_output --partial "setup.exe modify --installPath <vswhere installationPath> --add ${_VS_WL} --includeRecommended --quiet --norestart"
+	assert [ ! -e "${WINGET_LOG}" ]
+	assert [ ! -e "${VS_LOG}" ]
+}
+
+@test 'vs_requires: a bare id beside it is installed exactly as before' {
+	local stub vs win f
+	stub="$(_winget_stub 20)"
+	vs="$(_vs_stubs 'C:\BuildTools' yes)"
+	win="$(_win_exit_stub 0)"
+	f="$(_vs_toml)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		install-deps.sh -s winget "${f}"
+	assert_success
+	# Probed by id and installed by winget directly, with the same flags
+	# and no --override; never through the stand-in or vswhere.
+	run cat "${WINGET_LOG}"
+	assert_line "list --id Kitware.CMake --exact --disable-interactivity"
+	assert_line "install --id Kitware.CMake --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity"
+	run grep -c 'Kitware' "${VS_LOG}"
+	assert_output 0
+}
+
+@test 'vs_requires refuses a value that is not a workload id' {
+	local stub f="${BATS_TEST_TMPDIR}/bad.toml"
+	stub="$(_winget_stub 20)"
+	printf '[runtime.winget]\npackages = ["X.Y"]\n\n[runtime.winget."X.Y"]\nvs_requires = ["A B; rm"]\n' >"${f}"
+	run env JB_WINGET="${stub}" install-deps.sh -n -s winget "${f}"
+	assert_failure
+	assert_output --partial "not a workload id: A B; rm"
 }
 
 # ---------------------------------------------------------------------------

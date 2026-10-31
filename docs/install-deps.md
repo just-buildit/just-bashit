@@ -484,6 +484,42 @@ Three things follow from winget itself rather than from any choice here:
     raises Windows' own elevation prompt. Reached from WSL as `winget.exe`, a
     sudo prefix would only run the interop call as Linux root.
 
+#### A package that provides Visual Studio workloads
+
+`Microsoft.VisualStudio.BuildTools` installs the Visual Studio Installer
+*shell*; the compiler, the MSVC libraries and the Windows SDK are a
+**workload** added to it. Its id says nothing about which workloads are
+there, so `winget list` finding it proves nothing. Such a package names what
+it provides in a table of its own, keyed by the id:
+
+```toml
+[dev.winget]
+packages = ["Microsoft.VisualStudio.BuildTools"]
+
+[dev.winget."Microsoft.VisualStudio.BuildTools"]
+vs_requires = ["Microsoft.VisualStudio.Workload.VCTools"]
+```
+
+That one list is both the probe and the install, so the two cannot disagree.
+The probe replaces the id probe for that package:
+
+| `vswhere -products * -requires <workloads>` | `winget list` | What runs                                                                                                                                                        |
+| ------------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| finds an instance                           | —             | nothing                                                                                                                                                          |
+| finds none                                  | absent        | `winget install --id <id> ... --override "--quiet --wait --norestart --add <workload>... --includeRecommended"`                                                  |
+| finds none                                  | present       | the installed VS Installer's `setup.exe modify --installPath <path> --add <workload>... --includeRecommended --quiet --norestart`, elevated through a UAC prompt |
+
+The middle path cannot repair a present shell: winget cancels a re-install of
+an id it already lists. Nor can `winget install --force`: a newer bootstrapper
+refuses to modify an older install whenever an update is pending. Both
+programs live in `%ProgramFiles(x86)%\Microsoft Visual Studio\Installer`.
+
+Exit 0 and 3010 are success, and 3010 is reported as *reboot required*; any
+other code fails the run and is named in full. A shell sees only an exit
+code's low byte (3010 arrives as 194), so both installs run through
+PowerShell's `Start-Process`, which reports the whole code.
+Whether the package is installed is never read from an install's exit code.
+
 !!! warning "winget ignores `http_proxy`"
 
     It fetches through WinHTTP and takes the **system** proxy. Its own
