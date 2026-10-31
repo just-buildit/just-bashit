@@ -16,6 +16,13 @@ What that installs, why it is sourced, and how to reinstall are in
 [Getting just-runit](just-runit.md#getting-just-runit). From there,
 `jbx setup-system` sets up the rest of the machine.
 
+On Windows, from PowerShell 5.1 or 7, `get-jb.ps1` does the same without a bash
+window — see [From PowerShell](just-runit.md#from-powershell-windows):
+
+```powershell
+irm https://just-buildit.github.io/get-jb.ps1 | iex
+```
+
 ### The libraries
 
 To source the libraries from your own scripts, download `just-bashit.tar.gz`

@@ -55,6 +55,53 @@ To force reinstall even when already at the current version:
 JB_REINSTALL=1 . <(curl -sSL https://just-buildit.github.io/get-jb.sh)
 ```
 
+### From PowerShell (Windows)
+
+```powershell
+irm https://just-buildit.github.io/get-jb.ps1 | iex
+jbx setup-system
+```
+
+`get-jb.ps1` runs in Windows PowerShell 5.1 and PowerShell 7. jbx is bash, so
+bash is still what runs it — but as a runtime you never open:
+
+1. It finds Git for Windows' `bash.exe` (the registry, the `git` on `PATH`,
+    then the default install directories) and never the WSL launcher in
+    `System32`. With none, it installs `Git.Git` with winget (a machine-wide
+    install, so one UAC prompt) and looks again.
+1. With no `uv` on `PATH`, it installs `astral-sh.uv` with winget, so an ARM64
+    machine gets the native build, and puts winget's Links directory on this
+    session's `PATH` so bash sees it. On ARM64 winget also installs uv's
+    dependency, the Arm64 Visual C++ Redistributable, which asks for elevation:
+    expect one UAC prompt there.
+1. It runs `get-jb.sh` in that bash — the same installer as above, so a
+    `JB_REINSTALL=1` set in the session reaches it.
+1. It writes `jbx` and `just-runit` **functions** into a marked block of your
+    profile and defines them in the current session. Re-running rewrites the
+    block in place.
+
+The block goes in the `CurrentUserAllHosts` profile of **both** editions —
+`Documents\WindowsPowerShell\profile.ps1` and `Documents\PowerShell\profile.ps1`
+— since they read different files and `setup-system` installs PowerShell 7 on a
+machine that has only 5.1. `JB_PS_PROFILE` names one file to use instead.
+
+The functions forward arguments, piped input and the exit code (`$LASTEXITCODE`).
+Arguments travel in the environment to a small driver,
+`%LOCALAPPDATA%\just-bashit\jbx-ps.sh`, not on bash's command line, which the
+MSYS runtime would glob (`*`) and re-quote (`'`, `"`): each one arrives as
+typed, empty ones included. Two things are PowerShell's own and happen before
+jbx sees anything: a bare `--` is consumed by PowerShell, and an unquoted
+`$name` is expanded by it.
+
+!!! warning "Windows PowerShell 5.1 and the execution policy"
+
+    5.1 runs a profile only when the execution policy allows scripts, and a
+    fresh Windows client is `Restricted`. `get-jb.ps1` warns rather than
+    changing a security setting; `jbx` works in the session that ran it, and
+    for new sessions run
+    `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. PowerShell 7's
+    default already allows it.
+
 ______________________________________________________________________
 
 ## How it works

@@ -164,6 +164,21 @@ jobs:
         with:
           submodules: recursive
 
+      # get-jb.ps1, the PowerShell front door (#172), run the way a user
+      # runs it: through `iex`, from pwsh 7 and from Windows PowerShell 5.1,
+      # against the runner's preinstalled Git for Windows. So this proves
+      # the present-Git path; installing Git.Git with winget is covered by
+      # the bats suite's stub only. Before MSYS2 on purpose: nothing here
+      # may lean on it. get-jb.sh comes from this checkout; the just-runit
+      # it downloads is the published one.
+      - name: get-jb.ps1 (pwsh 7)
+        shell: pwsh
+        run: pwsh -NoProfile -File test/get-jb-ps1.windows.ps1
+
+      - name: get-jb.ps1 (Windows PowerShell 5.1)
+        shell: pwsh
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File test/get-jb-ps1.windows.ps1
+
       # setup-msys2 takes its packages as an action input, which is evaluated
       # before any step of its own could read a file — so this is the one job
       # that cannot simply run install-deps.sh after checkout. Lifting the
