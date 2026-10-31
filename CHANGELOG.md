@@ -4,6 +4,18 @@
 
 ### Added
 
+- **`get-jb.ps1`: jbx on native Windows from PowerShell, with no bash
+    window (#172).** `irm https://just-buildit.github.io/get-jb.ps1 | iex`
+    in Windows PowerShell 5.1 or pwsh 7 finds Git for Windows' `bash.exe`
+    (never the WSL launcher; `Git.Git` via winget when there is none),
+    installs uv with winget (`astral-sh.uv`, native on ARM64) when absent,
+    runs `get-jb.sh` in that bash, and writes `jbx` and `just-runit`
+    functions into a marked, idempotent block of both editions' profiles
+    (`JB_PS_PROFILE` overrides). The functions pass arguments through the
+    environment rather than bash's command line, which MSYS would glob and
+    re-quote, and forward stdin and the exit code. Windows CI runs it from
+    pwsh.
+
 - **`setup-system -s certs` puts Windows' trusted roots into WSL.** An
     opt-in step, like `sshd`: a default run does not touch the trust store.
     It exports `Cert:\LocalMachine\Root` and `Cert:\CurrentUser\Root`
