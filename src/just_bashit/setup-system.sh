@@ -524,9 +524,6 @@ read -r -d '' _BASELINE_TOML <<-'EOF' || true
 	[baseline.winget."Git.Git"]
 	provides = ["git"]
 
-	[baseline.winget."LLVM.LLVM"]
-	provides = ["clang-cl"]
-
 	[baseline.winget."Microsoft.PowerShell"]
 	provides = ["pwsh"]
 
