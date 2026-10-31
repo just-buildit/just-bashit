@@ -14,8 +14,12 @@
     agent with Windows' own `System32\OpenSSH\ssh-add.exe` -- once: a key
     already listed is left alone, and a key with a passphrase is reported
     with the command to run, never prompted for under `--yes`. The git step
-    sets `core.sshCommand` to Windows' `ssh.exe` where it is unset, so Git
-    for Windows, pwsh and VS Code share the one agent. `GitHub.cli` joins
+    points git at that agent's client, `core.sshCommand` =
+    `C:/Windows/System32/OpenSSH/ssh.exe`, so Git for Windows, pwsh and VS
+    Code share the one agent: decided on the GLOBAL value only (a system
+    gitconfig from the Git for Windows installer does not block it), a
+    global value already there kept and reported, and nothing set when that
+    ssh.exe is absent; the summary line names which. `GitHub.cli` joins
     `[baseline.winget]` (`provides = ["gh"]`): the sshd step authorizes the
     keys of the account gh is signed in to.
 
