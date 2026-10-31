@@ -514,11 +514,15 @@ an id it already lists. Nor can `winget install --force`: a newer bootstrapper
 refuses to modify an older install whenever an update is pending. Both
 programs live in `%ProgramFiles(x86)%\Microsoft Visual Studio\Installer`.
 
-Exit 0 and 3010 are success, and 3010 is reported as *reboot required*; any
-other code fails the run and is named in full. A shell sees only an exit
-code's low byte (3010 arrives as 194), so both installs run through
-PowerShell's `Start-Process`, which reports the whole code.
-Whether the package is installed is never read from an install's exit code.
+After either install the probe runs again, and it decides the outcome, not
+the exit code. If it finds no instance with the workloads, the run fails and
+names the code, even when that code is 0: an installer that reports success
+without installing is caught. If the probe passes, the run succeeds. A code
+of 3010, or one of winget's reboot HRESULTs (`0x8A150109`-`0x8A15010B`),
+reads *reboot required*, and any other non-zero code is named in a warning.
+A shell sees only an exit code's low byte (3010 arrives as 194), so both
+installs run through PowerShell's `Start-Process`, which reports the whole
+code.
 
 !!! warning "winget ignores `http_proxy`"
 
