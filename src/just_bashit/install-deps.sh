@@ -362,10 +362,14 @@ _WINGET_INSTALL_FLAGS=(
 #                       modify an older install whenever an update is
 #                       pending (installer exit 1, measured 2026-10-31).
 #
-# Exit 0 and 3010 are success, 3010 reported as "reboot required"; any other
-# code fails the run and is named. A shell sees only an exit code's low
-# byte (3010 arrives as 194), so the full code is read back through
-# PowerShell -- see _win_exit.
+# The probe decides the OUTCOME too: after either install it runs again, and
+# only an instance with every id is success. An installer that exits 0
+# without providing the workload is refused; one that provides it under a
+# code nobody expected passes with a warning naming the code. The code
+# itself only shapes the report: 3010, or a winget reboot HRESULT, reads
+# "reboot required". A shell sees only an exit code's low byte (3010
+# arrives as 194), so the full code is read back through PowerShell -- see
+# _win_exit.
 # ---------------------------------------------------------------------------
 
 # _vs_requires GROUP ID -- the vs_requires ids declared for winget package
@@ -525,20 +529,43 @@ _win_exit() {
 		"${_cmd[@]}" 2>&1 >&3 3>&- || true)
 }
 
-# _win_verdict WHAT -- report _WIN_RC for WHAT; return 1 unless success.
-# An if chain, not a case: a one-tab `0)` arm reads to the package-manager
+# The exit codes that mean "reboot required": Windows' own
+# ERROR_SUCCESS_REBOOT_REQUIRED (3010), and winget's three reboot HRESULTs as
+# signed decimals, from winget-cli's
+# src/AppInstallerSharedLib/Public/AppInstallerErrors.h (read at commit
+# c608376673762a10971e6bf2cbeedb6b6a7cae88):
+#   0x8A150109 APPINSTALLER_CLI_ERROR_INSTALL_REBOOT_REQUIRED_TO_FINISH
+#   0x8A15010A APPINSTALLER_CLI_ERROR_INSTALL_REBOOT_REQUIRED_FOR_INSTALL
+#   0x8A15010B APPINSTALLER_CLI_ERROR_INSTALL_REBOOT_INITIATED
+# That winget's InstallFlow.cpp turns TO_FINISH into S_OK (exit 0), so on
+# that release the fresh path reports 0; the HRESULT is kept for any other.
+_REBOOT_CODES=(3010 -1978334967 -1978334966 -1978334965)
+
+# _win_verdict WHAT DIR REQUIRES... -- the outcome of an install of WHAT,
+# decided by probing DIR's vswhere for REQUIRES again, with _WIN_RC only
+# shaping the report. Returns 1 unless the probe now passes.
+# If chains, not a case: a one-tab `0)` arm reads to the package-manager
 # gate in test/install-deps.bats as a _do_install arm.
 _win_verdict() {
-	if [ "${_WIN_RC}" = "0" ]; then
-		echo "install-deps: $1: done" >&2
-	elif [ "${_WIN_RC}" = "3010" ]; then
-		echo "install-deps: $1: done, reboot required (exit 3010)" >&2
-	elif [ -z "${_WIN_RC}" ]; then
-		echo "error: $1: no exit code reported (was the UAC prompt declined?)" >&2
+	local _what="$1" _dir="$2" _c _reboot=0
+	shift 2
+	for _c in "${_REBOOT_CODES[@]}"; do
+		[ "${_WIN_RC}" = "${_c}" ] && _reboot=1
+	done
+	if [ -z "$(_vswhere "${_dir}" -requires "$@")" ]; then
+		if [ -z "${_WIN_RC}" ]; then
+			echo "error: ${_what}: no exit code reported (was the UAC prompt declined?)" >&2
+		else
+			echo "error: ${_what}: failed, exit code ${_WIN_RC}; vswhere finds no instance with $*" >&2
+		fi
 		return 1
+	fi
+	if [ "${_reboot}" -eq 1 ]; then
+		echo "install-deps: ${_what}: done, reboot required (exit ${_WIN_RC})" >&2
+	elif [ "${_WIN_RC}" = "0" ]; then
+		echo "install-deps: ${_what}: done" >&2
 	else
-		echo "error: $1: failed, exit code ${_WIN_RC}" >&2
-		return 1
+		echo "install-deps: warning: ${_what}: exit code ${_WIN_RC:-(none)}, but vswhere finds $*: done" >&2
 	fi
 }
 
@@ -580,11 +607,11 @@ _winget_vs() {
 		echo "install-deps: ${_p} is present without $*; modifying ${_shell}" >&2
 		_win_exit --runas "${_dir}/setup.exe" modify --installPath "${_shell}" \
 			"${_add[@]}" --includeRecommended --quiet --norestart
-		_win_verdict "${_p} (setup.exe modify)"
+		_win_verdict "${_p} (setup.exe modify)" "${_dir}" "$@"
 	else
 		_win_exit "${_w}" install --id "${_p}" "${_WINGET_INSTALL_FLAGS[@]}" \
 			--override "${_override}"
-		_win_verdict "${_p} (winget install)"
+		_win_verdict "${_p} (winget install)" "${_dir}" "$@"
 	fi
 }
 
