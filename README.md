@@ -29,7 +29,14 @@ Fedora, Alpine, macOS and Windows for every change.
 jbx setup-system                                          # the rest of the box
 ```
 
-Only `bash` and `curl` needed.
+Only `bash` and `curl` needed. On Windows, from PowerShell — no bash window
+to open:
+
+```powershell
+irm https://just-buildit.github.io/get-jb.ps1 | iex   # jbx, as a PowerShell function
+jbx setup-system
+```
+
 [Setting up a new machine](https://just-buildit.github.io/just-bashit/guides/new-machine/)
 walks through it.
 

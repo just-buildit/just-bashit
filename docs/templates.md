@@ -126,6 +126,11 @@ where the host supports them.
 PSReadLine's defaults and are deliberately **not** re-bound — a binding
 restated is a binding that can drift from the default it was copying.
 
+The `jbx` and `just-runit` functions are not part of this template:
+[`get-jb.ps1`](just-runit.md#from-powershell-windows) writes them into a marked
+block of the same profile file and refreshes it on every run, so the two live
+side by side.
+
 !!! warning "`$PROFILE` may live in OneDrive"
 
     With OneDrive's Known Folder Move enabled — the default on many Windows

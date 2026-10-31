@@ -57,6 +57,19 @@ you are sitting in. If you pipe it instead, open a new shell afterwards.
 `jbx` fetches a script, runs it, and discards it — nothing is installed for
 `setup-system` itself. See [just-runit](../just-runit.md).
 
+!!! tip "Native Windows: start in PowerShell"
+
+    ```powershell
+    irm https://just-buildit.github.io/get-jb.ps1 | iex
+    jbx setup-system --dry-run
+    jbx setup-system
+    ```
+
+    `get-jb.ps1` finds Git for Windows' bash (installing `Git.Git` with winget
+    when there is none), installs uv with winget, runs `get-jb.sh` in that
+    bash, and adds `jbx` to your PowerShell profile. bash does the work; you
+    never open it. Details: [From PowerShell](../just-runit.md#from-powershell-windows).
+
 ______________________________________________________________________
 
 ## Step 2 — look at the plan
