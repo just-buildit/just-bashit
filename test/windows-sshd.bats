@@ -249,3 +249,50 @@ adds=1"
 	assert_output "proceeded
 adds=1"
 }
+
+# ---------------------------------------------------------------------------
+# The PowerShell MSI's architecture (#171). An x64 process emulated on ARM64
+# Windows -- one started from x64 Git Bash -- sees AMD64 in every
+# environment variable; the registry value is the machine's. Get-ItemProperty
+# is stubbed: a function shadows the cmdlet, and Linux pwsh has no HKLM:.
+# ---------------------------------------------------------------------------
+_arch_stub() {
+	# $1: what the registry holds, or empty for a read that fails.
+	if [[ -n $1 ]]; then
+		printf 'function Get-ItemProperty { param($LiteralPath, $Name, $ErrorAction) if ($LiteralPath -ne $MachineArchKey -or $Name -ne "PROCESSOR_ARCHITECTURE") { throw "wrong key" }; [pscustomobject]@{ PROCESSOR_ARCHITECTURE = "%s" } }' "$1"
+	else
+		printf 'function Get-ItemProperty { param($LiteralPath, $Name, $ErrorAction) throw "no such key" }'
+	fi
+}
+
+@test 'windows-sshd: an emulated x64 process on ARM64 still picks the arm64 MSI' {
+	run _ps "$(_arch_stub ARM64); \$env:PROCESSOR_ARCHITECTURE = 'AMD64'; \$env:PROCESSOR_ARCHITEW6432 = ''; Get-MachineArch"
+	assert_success
+	assert_output "arm64"
+}
+
+@test 'windows-sshd: the registry names x64 on an x64 machine' {
+	run _ps "$(_arch_stub AMD64); \$env:PROCESSOR_ARCHITECTURE = 'AMD64'; Get-MachineArch"
+	assert_success
+	assert_output "x64"
+}
+
+@test 'windows-sshd: a failed registry read falls back to the environment' {
+	run _ps "$(_arch_stub ''); \$env:PROCESSOR_ARCHITECTURE = 'x86'; \$env:PROCESSOR_ARCHITEW6432 = 'ARM64'; Get-MachineArch"
+	assert_success
+	assert_output "arm64"
+}
+
+@test 'windows-sshd: an architecture with no MSI is refused, by name' {
+	run _ps "$(_arch_stub IA64); Get-MachineArch"
+	assert_failure
+	assert_output --partial "no PowerShell MSI for architecture IA64"
+}
+
+@test 'windows-sshd: the MSI pick goes through Get-MachineArch' {
+	run grep -c 'arch = Get-MachineArch' "${PROJECT_ROOT}/src/just_bashit/windows-sshd.ps1"
+	assert_output "1"
+	run grep -n 'env:PROCESSOR_ARCHITE' "${PROJECT_ROOT}/src/just_bashit/windows-sshd.ps1"
+	assert_output --regexp '^[0-9]+:    if \(-not \$machine\) \{ \$machine = \$env:PROCESSOR_ARCHITEW6432 \}
+[0-9]+:    if \(-not \$machine\) \{ \$machine = \$env:PROCESSOR_ARCHITECTURE \}$'
+}

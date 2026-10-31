@@ -32,6 +32,26 @@
 
 ### Fixed
 
+- **ARM64 Windows gets the native uv, and the native PowerShell MSI, even
+    from an emulated x64 shell (#171).** From x64 Git Bash every signal says
+    x64: `uname -m`, `PROCESSOR_ARCHITECTURE`, even `OSArchitecture` in a
+    `powershell.exe` it starts. astral's `install.sh` reads only `uname -m`,
+    so `get-jb.sh` and `setup-system`'s `tools` step installed an x86_64 uv
+    that then ran emulated. They now share one installer with jbx's Python
+    runner: `pkg.sh`'s new `install-uv`. On Windows it uses winget
+    (`astral-sh.uv`), which picks the machine's build. Everywhere else, and
+    when winget is missing or fails, it falls back to `install.sh`. Both
+    callers put winget's Links directory on the running shell's PATH,
+    because winget adds it only to the user PATH. `get-jb.sh` sets it
+    directly; `setup-system` sets it for the rest of the run and hands it
+    to the `jbx` shell function. `windows-sshd.ps1` now reads the
+    machine's architecture from the registry
+    (`Session Manager\Environment`), which reports ARM64 even to an
+    emulated process. It falls back to the environment variables only when
+    that read fails. `_winget_installed` and the shared winget install flags
+    moved from `install-deps.sh` into `pkg.sh`, so both installers use the
+    same copy.
+
 - **`setup-system -s sshd` refuses clearly when Windows has a reboot
     pending (#166).** With the servicing stack waiting on a reboot, the
     OpenSSH capability install failed with a raw `Add-WindowsCapability   failed. Error code = 0x800f0950` and the summary said only "see the log

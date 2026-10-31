@@ -30,6 +30,11 @@ current shell immediately (no new terminal needed):
 
 That's it. `jb` and `jbx` are live in the shell you ran that in.
 
+It also installs `uv` if it is missing, which Python scripts run through.
+It uses [`install-uv`](libraries/pkg.md#install-uv), so on Windows that
+means winget and the machine's native build, even from an emulated x64 Git
+Bash on ARM64. The directory uv lands in goes on your PATH right away.
+
 !!! warning "Use at your own risk"
 
     This script is provided as-is, without warranty of any kind. It writes
@@ -198,7 +203,8 @@ inspects traffic. On a box that does not trust that CA, every jbx download
 fails with a certificate error. `--no-verify` makes jbx's own downloads skip
 the check, as `curl --insecure` does. That covers the script, the
 `aliases.toml` lookup, the just-bashit co-fetch bundle, the probe that
-resolves a bare name, and the nested uv install. It prints a warning on
+resolves a bare name, and the nested uv install (`JB_NO_VERIFY=1` carries
+it to [`install-uv`](libraries/pkg.md#install-uv)'s download). It prints a warning on
 every run.
 
 ```bash
