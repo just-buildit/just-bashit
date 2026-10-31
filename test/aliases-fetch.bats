@@ -184,3 +184,36 @@ _stale_cache() {
 	assert_output --partial 'failed to download jb'
 	refute [ -e "${home}/.local/bin/just-runit" ]
 }
+
+# get-jb.sh installs uv through jbx and pkg.sh's install-uv (#171). On
+# Windows that is winget, whose Links directory reaches only new shells; the
+# script is sourced, so it puts that directory on the caller's PATH itself.
+# Everything is a fixture: just-runit and the libraries are the real ones,
+# winget a stub linking uv where the real one does.
+@test 'get-jb.sh installs uv through winget on Windows and puts it on PATH' {
+	_case get-jb-uv
+	local home="${BATS_TEST_TMPDIR}/home" lad="${BATS_TEST_TMPDIR}/lad"
+	local links="${lad}/Microsoft/WinGet/Links"
+	mkdir -p "${home}"
+	cp "${PROJECT_ROOT}"/src/just_bashit/*.sh "${PROJECT_ROOT}/src/just_bashit/just-runit" \
+		"${CASE_FX}/"
+	cat >"${BATS_TEST_TMPDIR}/winget" <<-EOF
+		#!/usr/bin/env bash
+		case "\$1" in
+		list) [ -e '${links}/uv' ] || exit 20 ;;
+		install)
+			mkdir -p '${links}'
+			printf '#!/bin/sh\necho "uv 0.13.6 (aarch64-pc-windows-msvc)"\n' >'${links}/uv'
+			chmod +x '${links}/uv'
+			;;
+		esac
+	EOF
+	chmod +x "${BATS_TEST_TMPDIR}/winget"
+	HOME="${home}" LOCALAPPDATA="${lad}" JB_WINGET="${BATS_TEST_TMPDIR}/winget" \
+		JB_UNAME_S=MINGW64_NT-10.0-26100 XDG_CACHE_HOME="${CASE_CACHE}" \
+		PATH="${BATS_TEST_TMPDIR}/fixture-curl:$(_bin_without uv)" \
+		run bash -c '. "$1" && command -v uv' _ "${PROJECT_ROOT}/src/just_bashit/get-jb.sh"
+	assert_success
+	assert_output --partial "uv installed (uv 0.13.6 (aarch64-pc-windows-msvc))"
+	assert_line "${links}/uv"
+}

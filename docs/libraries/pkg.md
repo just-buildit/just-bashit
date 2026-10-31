@@ -86,3 +86,37 @@ else
     echo "curl is not installed"
 fi
 ```
+
+______________________________________________________________________
+
+## install-uv
+
+Install [uv](https://docs.astral.sh/uv/) and print the directory it is in.
+This is the one uv installer in just-bashit: `get-jb.sh`, `setup-system`'s
+`tools` step and jbx's Python runner all call it.
+
+- **Windows** (Git Bash, MSYS2, Cygwin) with winget: `winget install --id   astral-sh.uv`. winget picks the build for the *machine*, so ARM64
+    Windows gets `aarch64-pc-windows-msvc` even when the calling shell is an
+    emulated x64 Git Bash. Every signal that shell can see says x64, and
+    astral's `install.sh` reads only `uname -m`, so it used to install an x64
+    uv there that then ran emulated (#171). winget links uv into
+    `%LOCALAPPDATA%\Microsoft\WinGet\Links` and adds that directory to the
+    *user* PATH, which new shells see and the running one does not. The
+    first install may show one UAC prompt, for the Visual C++ runtime that
+    winget installs as a dependency.
+- **Everywhere else**, and on Windows when winget is missing or fails:
+    astral's `install.sh`. It needs `curl` and `awk`, and `install-uv`
+    stops and says why when either is missing.
+
+Only the directory goes to stdout; the installers' own output goes to
+stderr. The caller decides whether to put the directory on its PATH:
+
+```bash
+. just-bashit/src/just_bashit/pkg.sh
+
+dir="$(install-uv)" && PATH="${dir}:${PATH}"
+install-uv -n    # print the command it would run, and run nothing
+```
+
+`JB_NO_VERIFY=1` adds `--insecure` to the `install.sh` download. This is
+how `jbx --no-verify` reaches it.

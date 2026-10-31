@@ -198,11 +198,15 @@ _jbs_fixtures() {
 		"${before}"
 }
 
-# With no uv, a Python script installs it through a nested run of jbx. That
-# run must inherit -n, or the installer lands in the cache.
+# With no uv, a Python script installs it through a nested run of jbx --
+# `just-bashit:pkg install-uv`, the installer get-jb.sh and setup-system
+# share (#171). That run must inherit -n, or the libraries land in the cache.
+# The fixtures are the real libraries, so the nested run executes the real
+# install-uv, which fetches astral's installer (a fixture here).
 @test '-n reaches the nested run that installs uv' {
 	local fx="${BATS_TEST_TMPDIR}/fixtures" uvbin="${BATS_TEST_TMPDIR}/uvbin"
 	mkdir -p "${fx}" "${uvbin}"
+	cp "${PROJECT_ROOT}"/src/just_bashit/*.sh "${fx}/"
 	printf '%s\n' "mkdir -p '${uvbin}'" \
 		"printf '#!/bin/sh\\necho \"uv stub: \$1\"\\n' >'${uvbin}/uv'" \
 		"chmod +x '${uvbin}/uv'" >"${fx}/install.sh"
@@ -214,4 +218,35 @@ _jbs_fixtures() {
 	assert_success
 	assert_output --partial 'uv stub:'
 	refute [ -e "${BATS_TEST_TMPDIR}/cache/just-runit" ]
+}
+
+# On Windows that nested install is winget's, so an emulated x64 Git Bash on
+# ARM64 gets the native uv (#171); the directory it prints is put on PATH
+# for the `uv run` that follows.
+@test 'a Python script on Windows installs uv through winget' {
+	local fx="${BATS_TEST_TMPDIR}/fixtures" lad="${BATS_TEST_TMPDIR}/lad"
+	local links="${BATS_TEST_TMPDIR}/lad/Microsoft/WinGet/Links"
+	mkdir -p "${fx}"
+	cp "${PROJECT_ROOT}"/src/just_bashit/*.sh "${fx}/"
+	echo 'print("python ran")' >"${fx}/tool.py"
+	cat >"${BATS_TEST_TMPDIR}/winget" <<-EOF
+		#!/usr/bin/env bash
+		case "\$1" in
+		list) [ -e '${links}/uv' ] || exit 20 ;;
+		install)
+			mkdir -p '${links}'
+			printf '#!/bin/sh\necho "winget uv: \$1"\n' >'${links}/uv'
+			chmod +x '${links}/uv'
+			;;
+		esac
+	EOF
+	chmod +x "${BATS_TEST_TMPDIR}/winget"
+	local farm
+	farm="$(_bin_without uv)"
+	LOCALAPPDATA="${lad}" JB_WINGET="${BATS_TEST_TMPDIR}/winget" \
+		JB_UNAME_S=MINGW64_NT-10.0-26100 \
+		PATH="${PROJECT_ROOT}/src/just_bashit:${farm}" \
+		_no_cache_run https://fixture.invalid/tool.py
+	assert_success
+	assert_output --partial 'winget uv: run'
 }

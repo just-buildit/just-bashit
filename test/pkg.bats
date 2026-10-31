@@ -265,3 +265,150 @@ _stub_exe() {
 	assert_success
 	assert_output ''
 }
+
+# ---------------------------------------------------------------------------
+# install-uv (#171). On Windows uv comes from winget, which picks the
+# machine's native build: astral's install.sh reads only `uname -m`, and an
+# emulated x64 Git Bash on ARM64 Windows reads x86_64 there. winget is a stub
+# that logs its arguments; `install` links uv into LOCALAPPDATA's
+# Microsoft/WinGet/Links, as the real one does. astral's installer is a
+# fixture behind the suite's fixture curl, writing ~/.local/bin/uv.
+# ---------------------------------------------------------------------------
+
+# ARGS: more programs to leave off PATH. _bin_without builds one directory
+# per test, so it is called once, here.
+_uv_setup() {
+	export HOME="${BATS_TEST_TMPDIR}/home" LOCALAPPDATA="${BATS_TEST_TMPDIR}/lad"
+	UV_LINKS="${LOCALAPPDATA}/Microsoft/WinGet/Links"
+	WINGET_LOG="${BATS_TEST_TMPDIR}/winget.log"
+	mkdir -p "${HOME}" "${LOCALAPPDATA}"
+	local fx="${BATS_TEST_TMPDIR}/fixtures"
+	mkdir -p "${fx}"
+	# shellcheck disable=SC2016  # expanded when the installer runs
+	printf '%s\n' 'mkdir -p "${HOME}/.local/bin"' \
+		'printf "#!/bin/sh\necho uv-from-install-sh\n" >"${HOME}/.local/bin/uv"' \
+		'chmod +x "${HOME}/.local/bin/uv"' >"${fx}/install.sh"
+	_serve_fixtures "${fx}"
+	: >"${JB_FIXTURES_LOG}"
+	# No uv anywhere but where an installer puts it.
+	PATH="${BATS_TEST_TMPDIR}/fixture-curl:$(_bin_without uv "$@")"
+	# The winget stub: `list` finds the id only once it is installed.
+	cat >"${BATS_TEST_TMPDIR}/winget" <<-EOF
+		#!/usr/bin/env bash
+		echo "\$*" >>'${WINGET_LOG}'
+		case "\$1" in
+		list) [ -e '${UV_LINKS}/uv' ] || exit 20 ;;
+		install)
+			[ -e '${BATS_TEST_TMPDIR}/winget-fails' ] && exit 1
+			mkdir -p '${UV_LINKS}'
+			printf '#!/bin/sh\necho uv-from-winget\n' >'${UV_LINKS}/uv'
+			chmod +x '${UV_LINKS}/uv'
+			;;
+		esac
+	EOF
+	chmod +x "${BATS_TEST_TMPDIR}/winget"
+	export JB_WINGET="${BATS_TEST_TMPDIR}/winget"
+}
+
+@test 'install-uv on Windows installs astral-sh.uv through winget' {
+	_uv_setup
+	export JB_UNAME_S="MINGW64_NT-10.0-26100"
+	run install-uv
+	assert_success
+	assert_output "${UV_LINKS}"
+	run grep -c '^install --id astral-sh.uv --exact --source winget --silent' "${WINGET_LOG}"
+	assert_output 1
+	# astral's installer was never fetched.
+	run grep -c 'install.sh' "${JB_FIXTURES_LOG}"
+	assert_output 0
+}
+
+@test 'install-uv on Windows does not reinstall what winget lists' {
+	_uv_setup
+	export JB_UNAME_S="MSYS_NT-10.0-26100"
+	mkdir -p "${UV_LINKS}"
+	printf '#!/bin/sh\n' >"${UV_LINKS}/uv"
+	chmod +x "${UV_LINKS}/uv"
+	run install-uv
+	assert_success
+	assert_output "${UV_LINKS}"
+	run grep -c '^install' "${WINGET_LOG}"
+	assert_output 0
+}
+
+@test 'install-uv on Windows without winget runs install.sh' {
+	_uv_setup
+	export JB_UNAME_S="MINGW64_NT-10.0-26100" JB_WINGET=""
+	run install-uv
+	assert_success
+	assert_output "${HOME}/.local/bin"
+	run grep -c '^https://astral.sh/uv/install.sh$' "${JB_FIXTURES_LOG}"
+	assert_output 1
+}
+
+@test 'install-uv falls back to install.sh when winget fails, and says so' {
+	_uv_setup
+	export JB_UNAME_S="MINGW64_NT-10.0-26100"
+	touch "${BATS_TEST_TMPDIR}/winget-fails"
+	install-uv >"${BATS_TEST_TMPDIR}/out" 2>"${BATS_TEST_TMPDIR}/err"
+	assert_equal "$(<"${BATS_TEST_TMPDIR}/out")" "${HOME}/.local/bin"
+	run grep -c 'winget did not install astral-sh.uv' "${BATS_TEST_TMPDIR}/err"
+	assert_output 1
+}
+
+@test 'install-uv off Windows runs install.sh, never winget' {
+	_uv_setup
+	export JB_UNAME_S="Linux"
+	run install-uv
+	assert_success
+	assert_output "${HOME}/.local/bin"
+	refute [ -e "${WINGET_LOG}" ]
+}
+
+@test 'install-uv refuses, naming awk, where there is none' {
+	_uv_setup awk gawk mawk
+	export JB_UNAME_S="Linux"
+	run install-uv
+	assert_failure
+	assert_output --partial "needs awk"
+	run grep -c 'install.sh' "${JB_FIXTURES_LOG}"
+	assert_output 0
+}
+
+@test 'install-uv -n prints the winget command on Windows and runs nothing' {
+	_uv_setup
+	export JB_UNAME_S="MINGW64_NT-10.0-26100"
+	IFS=$'\n\t' run install-uv -n
+	assert_success
+	assert_output "${JB_WINGET} install --id astral-sh.uv --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity"
+	refute [ -e "${WINGET_LOG}" ]
+}
+
+@test 'install-uv -n prints the install.sh line off Windows' {
+	_uv_setup
+	export JB_UNAME_S="Darwin"
+	run install-uv -n
+	assert_success
+	assert_output "curl -LsSf https://astral.sh/uv/install.sh | sh"
+}
+
+# `jbx --no-verify` documents covering the nested uv install; it reaches
+# install-uv's own fetch of astral's installer as JB_NO_VERIFY=1.
+@test 'install-uv passes --insecure to curl only under JB_NO_VERIFY=1' {
+	_uv_setup
+	export JB_UNAME_S="Linux"
+	local real="${BATS_TEST_TMPDIR}/fixture-curl/curl"
+	mv "${real}" "${real}.real"
+	printf '#!/usr/bin/env bash\necho "$*" >>%q\nexec %q "$@"\n' \
+		"${BATS_TEST_TMPDIR}/curl-args" "${real}.real" >"${real}"
+	chmod +x "${real}"
+	JB_NO_VERIFY=1 run install-uv
+	assert_success
+	run grep -c -- '--insecure' "${BATS_TEST_TMPDIR}/curl-args"
+	assert_output 1
+	rm -f "${HOME}/.local/bin/uv" "${BATS_TEST_TMPDIR}/curl-args"
+	run install-uv
+	assert_success
+	run grep -c -- '--insecure' "${BATS_TEST_TMPDIR}/curl-args"
+	assert_output 0
+}

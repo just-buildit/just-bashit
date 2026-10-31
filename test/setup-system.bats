@@ -9,7 +9,11 @@ _common_setup
 setup() {
 	HOME="${BATS_TEST_TMPDIR}/home"
 	XDG_CONFIG_HOME="${HOME}/.config"
-	export HOME XDG_CONFIG_HOME
+	# The jbx reload marker goes under XDG_STATE_HOME; inherited, a run with
+	# JB_CALLER_APPLIES=1 wrote it into the developer's real state directory,
+	# where their next `jbx` applied the test's PATH (found 2026-10-31).
+	XDG_STATE_HOME="${HOME}/.local/state"
+	export HOME XDG_CONFIG_HOME XDG_STATE_HOME
 	mkdir -p "${HOME}"
 	cd "${BATS_TEST_TMPDIR}" || return 1
 
@@ -1879,4 +1883,52 @@ _profile_ssl() {
 	SSL_CERT_FILE=/the/users/own.pem _profile_ssl
 	assert_success
 	assert_output --partial "ssl=/the/users/own.pem"
+}
+
+# ---------------------------------------------------------------------------
+# The tools step installs uv through pkg.sh's install-uv (#171): winget on
+# Windows, which picks the machine's native build even from an emulated x64
+# Git Bash. winget is a stub that links uv into LOCALAPPDATA's
+# Microsoft/WinGet/Links, as the real one does -- a directory that reaches
+# the USER PATH and so only new shells.
+# ---------------------------------------------------------------------------
+_tools_winget_stub() {
+	export LOCALAPPDATA="${BATS_TEST_TMPDIR}/lad"
+	UV_LINKS="${LOCALAPPDATA}/Microsoft/WinGet/Links"
+	cat >"${BATS_TEST_TMPDIR}/winget" <<-EOF
+		#!/usr/bin/env bash
+		echo "\$*" >>'${BATS_TEST_TMPDIR}/winget.log'
+		case "\$1" in
+		list) [ -e '${UV_LINKS}/uv' ] || exit 20 ;;
+		install)
+			mkdir -p '${UV_LINKS}'
+			printf '#!/bin/sh\necho "uv 0.13.6 (aarch64-pc-windows-msvc)"\n' >'${UV_LINKS}/uv'
+			chmod +x '${UV_LINKS}/uv'
+			;;
+		esac
+	EOF
+	chmod +x "${BATS_TEST_TMPDIR}/winget"
+	export JB_WINGET="${BATS_TEST_TMPDIR}/winget"
+}
+
+@test 'tools: a dry run on Windows names the winget install of uv' {
+	_tools_winget_stub
+	JB_UNAME_S=MINGW64_NT-10.0-26100 PATH="$(_path_without uv)" \
+		run setup-system.sh -n -s tools
+	assert_success
+	assert_output --partial "would run: ${JB_WINGET} install --id astral-sh.uv --exact --source winget"
+	refute [ -e "${BATS_TEST_TMPDIR}/winget.log" ]
+}
+
+@test "tools: uv from winget is used by this run and put on the caller's PATH" {
+	_tools_winget_stub
+	JB_UNAME_S=MINGW64_NT-10.0-26100 JB_INSTALLED_REPORT=1 JB_CALLER_APPLIES=1 \
+		PATH="$(_path_without uv)" run setup-system.sh -s tools
+	assert_success
+	assert_output --partial "uv installed in ${UV_LINKS}"
+	# The rest of the run finds it: the installed report reads its version.
+	assert_output --regexp "    uv +0\.13\.6 .*${UV_LINKS}/uv"
+	assert_output --partial "(${UV_LINKS} is not on this shell's PATH)"
+	run cat "${XDG_STATE_HOME:-${HOME}/.local/state}/just-bashit/reload"
+	assert_line "path ${UV_LINKS}"
 }
