@@ -30,6 +30,11 @@ ______________________________________________________________________
 | `pwsh`   | Installs PowerShell 7 and the PSScriptAnalyzer module, so `.ps1` files can be linted on this machine. Linux and macOS only — see below.                                                                                                                         |
 | `claude` | Installs Claude Code if the `claude` command is missing.                                                                                                                                                                                                        |
 
+On native Windows the `deps` baseline is clang-cl, CMake, Git, PowerShell 7
+and the MSVC Build Tools' C++ workload, by winget. A Build Tools install that
+lacks the workload has it added, and one that has it is left alone
+([how](install-deps.md#a-package-that-provides-visual-studio-workloads)).
+
 They always run in that order, whatever order you list them in — packages
 land before the steps that need `git`, `curl` and `ssh-keygen`. Every step
 runs by default except `sshd`, which opens a listening port, and `certs`, which
