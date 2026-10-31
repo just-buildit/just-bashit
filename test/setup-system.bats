@@ -2167,3 +2167,144 @@ _tools_winget_stub() {
 	run cat "${XDG_STATE_HOME:-${HOME}/.local/state}/just-bashit/reload"
 	assert_line "path ${UV_LINKS}"
 }
+
+# ---------------------------------------------------------------------------
+# claude on native Windows (#189). Anthropic's install.sh refuses a
+# MINGW/MSYS/CYGWIN uname, so there the step uses winget
+# (Anthropic.ClaudeCode), the same shape as install-uv, and falls back to
+# install.ps1 through Windows PowerShell when winget is absent. curl is a
+# logging stub: it must never run there. No test reaches the network.
+# ---------------------------------------------------------------------------
+_claude_win_stubs() {
+	export LOCALAPPDATA="${BATS_TEST_TMPDIR}/lad"
+	CLAUDE_LINKS="${LOCALAPPDATA}/Microsoft/WinGet/Links"
+	mkdir -p "${BATS_TEST_TMPDIR}/cbin"
+	cat >"${BATS_TEST_TMPDIR}/cbin/curl" <<-EOF
+		#!/usr/bin/env bash
+		echo "\$*" >>'${BATS_TEST_TMPDIR}/curl.log'
+		exit 1
+	EOF
+	cat >"${BATS_TEST_TMPDIR}/winget" <<-EOF
+		#!/usr/bin/env bash
+		echo "\$*" >>'${BATS_TEST_TMPDIR}/winget.log'
+		case "\$1" in
+		list) [ -e '${CLAUDE_LINKS}/claude' ] || exit 20 ;;
+		install)
+			mkdir -p '${CLAUDE_LINKS}'
+			printf '#!/bin/sh\necho "2.1.302 (Claude Code)"\n' >'${CLAUDE_LINKS}/claude'
+			chmod +x '${CLAUDE_LINKS}/claude'
+			;;
+		esac
+	EOF
+	chmod +x "${BATS_TEST_TMPDIR}/cbin/curl" "${BATS_TEST_TMPDIR}/winget"
+	# The PowerShell that runs is pwsh on this runner, so the path handed to
+	# it must be one THIS pwsh opens: the real cygpath's Windows spelling on
+	# the MSYS runner, the path unchanged elsewhere -- including on a WSL
+	# developer's box, whose real wslpath (which _win_path prefers) would
+	# hand Linux pwsh a \\wsl.localhost path it cannot open.
+	if command -v cygpath >/dev/null 2>&1; then
+		CLAUDE_WIN_PATH="cygpath -w"
+	else
+		CLAUDE_WIN_PATH="printf %s"
+		printf '#!/bin/sh\nprintf "%%s\\n" "$2"\n' >"${BATS_TEST_TMPDIR}/cbin/cygpath"
+		cp "${BATS_TEST_TMPDIR}/cbin/cygpath" "${BATS_TEST_TMPDIR}/cbin/wslpath"
+		chmod +x "${BATS_TEST_TMPDIR}/cbin/cygpath" "${BATS_TEST_TMPDIR}/cbin/wslpath"
+	fi
+	export JB_WINGET="${BATS_TEST_TMPDIR}/winget"
+	CLAUDE_PATH="${BATS_TEST_TMPDIR}/cbin:$(_path_without claude)"
+}
+
+@test 'claude: a dry run on Windows names the winget install, not install.sh' {
+	_claude_win_stubs
+	JB_UNAME_S=MINGW64_NT-10.0-26100 PATH="${CLAUDE_PATH}" \
+		run setup-system.sh -n -s claude
+	assert_success
+	assert_output --partial "would run: ${JB_WINGET} install --id Anthropic.ClaudeCode --exact --source winget"
+	refute_output --partial "install.sh"
+	assert_output --partial "claude:  ok (dry run)"
+	refute [ -e "${BATS_TEST_TMPDIR}/winget.log" ]
+	refute [ -e "${BATS_TEST_TMPDIR}/curl.log" ]
+}
+
+@test "claude: winget's install is used by this run and put on the caller's PATH" {
+	_claude_win_stubs
+	JB_UNAME_S=MINGW64_NT-10.0-26100 JB_INSTALLED_REPORT=1 JB_CALLER_APPLIES=1 \
+		PATH="${CLAUDE_PATH}" run setup-system.sh -s claude
+	assert_success
+	assert_output --partial "claude installed in ${CLAUDE_LINKS}"
+	assert_output --partial "claude:  ok (installed)"
+	assert_output --regexp "    claude +2\.1\.302 .*${CLAUDE_LINKS}/claude"
+	assert_output --partial "(${CLAUDE_LINKS} is not on this shell's PATH)"
+	refute [ -e "${BATS_TEST_TMPDIR}/curl.log" ]
+	run cat "${XDG_STATE_HOME}/just-bashit/reload"
+	assert_line "path ${CLAUDE_LINKS}"
+}
+
+@test 'claude: off Windows the step still runs install.sh' {
+	_claude_win_stubs
+	JB_UNAME_S=Linux PATH="${CLAUDE_PATH}" run setup-system.sh -n -s claude
+	assert_success
+	assert_output --partial "would run: curl -fsSL https://claude.ai/install.sh | bash"
+}
+
+# The fallback, with winget absent (JB_WINGET empty). powershell is a stub;
+# for a real run it hands the command to Linux pwsh with the registry read
+# answering ARM64 while this process says AMD64 -- an emulated x64 shell on
+# ARM64 Windows -- and Invoke-RestMethod shadowed by a function whose
+# "installer" prints the architecture install.ps1 would choose from, or
+# fails. Not `function irm`: PowerShell resolves an alias before a function,
+# so that shadow is ignored and the real installer is fetched. irm is an
+# alias for the cmdlet, and a function does shadow a cmdlet.
+_claude_ps_stub() {
+	# $1: the script the shadowed Invoke-RestMethod returns.
+	export JB_WINGET=""
+	local installer
+	printf '%s\n' "$1" >"${BATS_TEST_TMPDIR}/installer.ps1"
+	installer="$(${CLAUDE_WIN_PATH} "${BATS_TEST_TMPDIR}/installer.ps1")"
+	printf '%s' "function Get-ItemProperty { [pscustomobject]@{ PROCESSOR_ARCHITECTURE = 'ARM64' } }; function Invoke-RestMethod { Get-Content -Raw '${installer}' }; \$env:PROCESSOR_ARCHITECTURE = 'AMD64'; " >"${BATS_TEST_TMPDIR}/prelude.ps1"
+	# A dead proxy as well: should the shadow ever stop shadowing, the real
+	# installer's fetch fails fast instead of reaching the network (#157).
+	cat >"${BATS_TEST_TMPDIR}/cbin/powershell" <<-EOF
+		#!/usr/bin/env bash
+		echo "\$*" >>'${BATS_TEST_TMPDIR}/powershell.log'
+		export HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9
+		for a; do cmd="\$a"; done
+		exec pwsh -NoProfile -Command "\$(cat '${BATS_TEST_TMPDIR}/prelude.ps1')\${cmd}"
+	EOF
+	chmod +x "${BATS_TEST_TMPDIR}/cbin/powershell"
+}
+
+@test 'claude: with no winget, a dry run names install.ps1 and the machine arch' {
+	_claude_win_stubs
+	_claude_ps_stub 'exit 0'
+	JB_UNAME_S=MINGW64_NT-10.0-26100 PATH="${CLAUDE_PATH}" \
+		run setup-system.sh -n -s claude
+	assert_success
+	assert_output --partial "would run: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command"
+	assert_output --partial "windows-sshd.ps1'; \$env:PROCESSOR_ARCHITECTURE = @{ arm64 = 'ARM64'; x64 = 'AMD64' }[(Get-MachineArch)]; irm 'https://claude.ai/install.ps1' | iex"
+	refute [ -e "${BATS_TEST_TMPDIR}/powershell.log" ]
+	refute [ -e "${BATS_TEST_TMPDIR}/curl.log" ]
+}
+
+@test 'claude: install.ps1 sees the machine arch, not the emulated process' {
+	command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed (setup-system -s pwsh)"
+	_claude_win_stubs
+	_claude_ps_stub 'Write-Output "install.ps1 saw $env:PROCESSOR_ARCHITECTURE"'
+	JB_UNAME_S=MINGW64_NT-10.0-26100 PATH="${CLAUDE_PATH}" \
+		run setup-system.sh -s claude
+	assert_success
+	assert_output --partial "install.ps1 saw ARM64"
+	assert_output --partial "claude:  ok (installed)"
+	refute [ -e "${BATS_TEST_TMPDIR}/curl.log" ]
+}
+
+@test 'claude: a failed install.ps1 is reported as failed' {
+	command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed (setup-system -s pwsh)"
+	_claude_win_stubs
+	_claude_ps_stub 'exit 3'
+	JB_UNAME_S=MINGW64_NT-10.0-26100 PATH="${CLAUDE_PATH}" \
+		run setup-system.sh -s claude
+	assert_success
+	assert_output --partial "install.ps1, exit 3"
+	assert_output --partial "claude:  failed"
+}

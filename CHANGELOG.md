@@ -58,6 +58,21 @@
 
 ### Fixed
 
+- **setup-system's `claude` step installs Claude Code on native Windows
+    (#189).** It ran Anthropic's `install.sh` everywhere, which refuses a
+    MINGW/MSYS/CYGWIN `uname` ("Windows is not supported by this script"),
+    so the step always failed there unless `claude` was already installed.
+    On native Windows it now installs through winget
+    (`Anthropic.ClaudeCode`), which picks the machine's native build, and
+    puts winget's Links directory on the run's `PATH` and in the closing
+    advice, as uv's install does. When winget is absent or fails it runs
+    `install.ps1` through Windows PowerShell, with `PROCESSOR_ARCHITECTURE`
+    set for that one process from `windows-sshd.ps1`'s `Get-MachineArch`,
+    so an emulated x64 shell on ARM64 still gets the arm64 build. pkg.sh's
+    `_winget_portable`, `_winget_install_line` and `_cmd_dir_in` are the
+    winget half of `install-uv`, now shared with this step, and
+    `_ps_literal` moved to pkg.sh beside `_powershell_bin`.
+
 - **clang-cl on native Windows is the Build Tools' clang component, so a
     Developer PowerShell finds it (#181).** `LLVM.LLVM` installed
     `C:\Program Files\LLVM\bin\clang-cl.exe` and added that directory to
