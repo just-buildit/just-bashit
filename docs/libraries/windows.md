@@ -64,3 +64,51 @@ batch mode, a connect timeout, and the key named after this host
 (`~/.ssh/<hostname>`) when it exists. The channel exists once
 `setup-system -s sshd` has run once: it adds the firewall rule that admits
 WSL.
+
+______________________________________________________________________
+
+## win-elevated
+
+Return 0 when this process's Windows token is elevated — an admin
+PowerShell, or a shell started from one — and 1 otherwise or when there is no
+Windows to ask. A Windows program started from here inherits that token, so
+an elevated step can run directly, with no UAC prompt.
+
+```bash
+. just-bashit/src/just_bashit/windows.sh
+
+if win-elevated; then echo "admin: no prompt needed"; fi
+```
+
+It asks PowerShell `WIN_ELEVATED_PS`, the one elevation check:
+`whoami.exe /groups` lists S-1-16-12288, the High Mandatory Level SID.
+`win-admin-channel` asks the far end the same expression. `whoami.exe` is
+named by its full path, because a PowerShell started from Git Bash inherits
+Git's `PATH`, whose own `whoami` refuses `/groups`. `JB_WIN_ELEVATED=1` or
+`0` answers instead, for a test.
+
+______________________________________________________________________
+
+## win-admin-route
+
+How a step that needs admin runs on this machine, printed as one word (and
+a destination); the first that applies wins:
+
+| Prints     | When                                      | The step                      |
+| ---------- | ----------------------------------------- | ----------------------------- |
+| `elevated` | `win-elevated`                            | runs directly, no prompt      |
+| `ssh DEST` | `win-admin-channel` finds one             | runs over ssh, no prompt      |
+| `skip`     | the argument is 1 (`--yes`: never prompt) | is skipped, `WIN_NEEDS_ADMIN` |
+| `uac`      | otherwise                                 | raises one UAC prompt         |
+
+```bash
+. just-bashit/src/just_bashit/windows.sh
+
+IFS=' ' read -r how dest <<<"$(win-admin-route "${ASSUME_YES}")"
+```
+
+`setup-system`'s sshd step and `install-deps`' Visual Studio modify both take
+it, so `--yes` means the same in both. Only the step that needs admin runs
+elevated: relaunching a whole run elevated leaves files in the user's profile
+owned by Administrators, which git's `safe.directory` and `~/.ssh`'s ACLs
+refuse.

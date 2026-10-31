@@ -231,17 +231,18 @@ ______________________________________________________________________
 
 ## Options
 
-| Flag         | Long form           | Description                                                |
-| ------------ | ------------------- | ---------------------------------------------------------- |
-| `-h`         | `--help`            | Show help and exit                                         |
-| `-n`         | `--dry-run`         | Print commands without executing                           |
-| `-v`         | `--verbose`         | Print section, groups, and packages before acting          |
-| `-s SECTION` | `--section SECTION` | Override auto-detected package manager                     |
-| `-g GROUP`   | `--groups GROUP`    | Comma-separated groups to install (overrides all defaults) |
-|              | `--no-sudo`         | Never prefix `sudo` (root containers, images without it)   |
-|              | `--sudo`            | Always prefix `sudo`, even when already root               |
-|              | `--proxy URL`       | Proxy for package downloads; overrides the environment     |
-|              | `--template [PATH]` | Write scaffold deps.toml to PATH, or stdout if omitted     |
+| Flag         | Long form           | Description                                                                                       |
+| ------------ | ------------------- | ------------------------------------------------------------------------------------------------- |
+| `-h`         | `--help`            | Show help and exit                                                                                |
+| `-n`         | `--dry-run`         | Print commands without executing                                                                  |
+| `-v`         | `--verbose`         | Print section, groups, and packages before acting                                                 |
+| `-y`         | `--yes`             | Never raise a UAC prompt ([how](#a-package-that-provides-visual-studio-workloads-and-components)) |
+| `-s SECTION` | `--section SECTION` | Override auto-detected package manager                                                            |
+| `-g GROUP`   | `--groups GROUP`    | Comma-separated groups to install (overrides all defaults)                                        |
+|              | `--no-sudo`         | Never prefix `sudo` (root containers, images without it)                                          |
+|              | `--sudo`            | Always prefix `sudo`, even when already root                                                      |
+|              | `--proxy URL`       | Proxy for package downloads; overrides the environment                                            |
+|              | `--template [PATH]` | Write scaffold deps.toml to PATH, or stdout if omitted                                            |
 
 ______________________________________________________________________
 
@@ -522,6 +523,14 @@ The probe replaces the id probe for that package:
 | finds an instance                     | —             | nothing                                                                                                                                                    |
 | finds none                            | absent        | `winget install --id <id> ... --override "--quiet --wait --norestart --add <id>... --includeRecommended"`                                                  |
 | finds none                            | present       | the installed VS Installer's `setup.exe modify --installPath <path> --add <id>... --includeRecommended --quiet --norestart`, elevated through a UAC prompt |
+
+The modify needs admin, and how it gets it is `win-admin-route` in
+[`windows.sh`](libraries/windows.md), the ladder `setup-system`'s sshd step
+uses too: directly when the shell is already elevated, over the admin ssh
+channel when there is one, and otherwise through a UAC prompt -- except under
+`--yes`, which never prompts. Then the modify is skipped,
+`skipped: needs admin -- re-run from an admin PowerShell`, and the run fails,
+since what it wanted is not installed. The dry run names which it would be.
 
 The middle path cannot repair a present shell: winget cancels a re-install of
 an id it already lists. Nor can `winget install --force`: a newer bootstrapper

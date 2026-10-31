@@ -99,6 +99,72 @@ _channel_stubs() {
 	assert_failure
 }
 
+# The elevation check is ONE expression (#184): what win-elevated asks this
+# machine's PowerShell is what win-admin-channel asks the far end.
+_ps_stub() {
+	mkdir -p "${BATS_TEST_TMPDIR}/bin"
+	cat >"${BATS_TEST_TMPDIR}/bin/powershell.exe" <<-'STUB'
+		#!/bin/bash
+		printf '%s\n' "${@: -1}" >"${BATS_TEST_TMPDIR}/ps.cmd"
+		printf '%s\r\n' "${LOCAL_HIGH:-False}"
+	STUB
+	chmod +x "${BATS_TEST_TMPDIR}/bin/powershell.exe"
+	export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
+	unset JB_WIN_ELEVATED
+}
+
+@test 'win-elevated: True from PowerShell is elevated, anything else is not' {
+	_ps_stub
+	LOCAL_HIGH=True run win-elevated
+	assert_success
+	run cat "${BATS_TEST_TMPDIR}/ps.cmd"
+	assert_output "${WIN_ELEVATED_PS}"
+	LOCAL_HIGH=False run win-elevated
+	assert_failure
+}
+
+@test 'win-elevated: the check names whoami.exe by full path, for the High SID' {
+	# Git Bash's PATH puts Git's own whoami first, which refuses /groups.
+	assert [ -n "${WIN_ELEVATED_PS}" ]
+	[[ ${WIN_ELEVATED_PS} == *"Join-Path \$env:SystemRoot 'System32\whoami.exe'"* ]]
+	[[ ${WIN_ELEVATED_PS} == *S-1-16-12288* ]]
+}
+
+@test 'win-admin-channel asks the far end the same elevation check' {
+	_channel_stubs
+	cat >"${BATS_TEST_TMPDIR}/bin/ssh" <<-'STUB'
+		#!/bin/bash
+		printf '%s\n' "${@: -1}" >"${BATS_TEST_TMPDIR}/ssh.cmd"
+		printf 'TESTHOST\r\nTrue\r\n'
+	STUB
+	run win-admin-channel
+	assert_success
+	run cat "${BATS_TEST_TMPDIR}/ssh.cmd"
+	assert_output "\$env:COMPUTERNAME; ${WIN_ELEVATED_PS}"
+}
+
+@test 'win-elevated: JB_WIN_ELEVATED answers instead of PowerShell' {
+	_ps_stub
+	LOCAL_HIGH=True JB_WIN_ELEVATED=0 run win-elevated
+	assert_failure
+	JB_WIN_ELEVATED=1 run win-elevated
+	assert_success
+	assert [ ! -e "${BATS_TEST_TMPDIR}/ps.cmd" ]
+}
+
+# win-admin-route: elevated, then the channel, then --yes skips, else UAC.
+@test 'win-admin-route: elevated wins, then the channel, then --yes, then UAC' {
+	_channel_stubs
+	JB_WIN_ELEVATED=1 run win-admin-route 1
+	assert_output "elevated"
+	JB_WIN_ELEVATED=0 run win-admin-route 1
+	assert_output "ssh tester@192.0.2.1"
+	JB_WIN_ELEVATED=0 FAR_RC=255 run win-admin-route 1
+	assert_output "skip"
+	JB_WIN_ELEVATED=0 FAR_RC=255 run win-admin-route 0
+	assert_output "uac"
+}
+
 # A box with no hostname command (a minimal Fedora image) and an existing
 # ~/.ssh: sourcing this under `set -e` killed the caller with 127, silently.
 @test 'sourcing survives a missing hostname, and offers no key' {

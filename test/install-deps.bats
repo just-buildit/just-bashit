@@ -11,6 +11,19 @@ setup() {
 	# and the stand-in for PowerShell that runs them.
 	VS_LOG="${BATS_TEST_TMPDIR}/vs.log"
 
+	# How an elevated step runs (#184): not elevated, and no admin ssh
+	# channel -- cmd.exe answers, ssh does not -- unless a test says so.
+	# Set for every test, first on PATH: on a WSL box the real cmd.exe and
+	# ssh reach the developer's own elevated sshd, and CI's Windows runners
+	# are elevated, so an unpinned test would test the machine.
+	export JB_WIN_ELEVATED=0 JB_WIN_HOST=192.0.2.1
+	mkdir -p "${BATS_TEST_TMPDIR}/winbin"
+	printf '#!/bin/bash\ncase "$*" in *USERNAME*) printf "tester\\r\\n" ;; *COMPUTERNAME*) printf "TESTHOST\\r\\n" ;; esac\n' \
+		>"${BATS_TEST_TMPDIR}/winbin/cmd.exe"
+	printf '#!/bin/bash\nexit 255\n' >"${BATS_TEST_TMPDIR}/winbin/ssh"
+	chmod +x "${BATS_TEST_TMPDIR}"/winbin/*
+	PATH="${BATS_TEST_TMPDIR}/winbin:${PATH}"
+
 	GROUPED_FILE="${BATS_TEST_TMPDIR}/grouped.toml"
 	INLINE_FILE="${BATS_TEST_TMPDIR}/inline.toml"
 	EMPTY_FILE="${BATS_TEST_TMPDIR}/empty.toml"
@@ -1086,7 +1099,10 @@ _win_exit_stub() {
 	cat >"${path}" <<-EOF
 		#!/usr/bin/env bash
 		printf 'win-exit %s\n' "\$*" >>"${VS_LOG}"
-		[ "\$1" = "--runas" ] && shift
+		case "\$1" in
+		--runas) shift ;;
+		--ssh) shift 2 ;;
+		esac
 		"\$@"
 		: >"${provided}"
 		echo "jb-exit:$1" >&2
@@ -1286,6 +1302,71 @@ _vs_toml() {
 	run cat "${VS_LOG}"
 	assert_line "vswhere -products * -requires ${_VS_WL} ${comp} -property installationPath"
 	assert_line "setup.exe modify --installPath C:\\BuildTools --add ${_VS_WL} --add ${comp} --includeRecommended --quiet --norestart"
+}
+
+# How the modify elevates (#184), by windows.sh's win-admin-route.
+@test 'vs_requires: already elevated, the modify runs directly, no prompt' {
+	local stub vs win f
+	stub="$(_winget_stub 0)"
+	vs="$(_vs_stubs 'C:\BuildTools')"
+	win="$(_win_exit_stub 0)"
+	f="$(_vs_toml)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		JB_WIN_ELEVATED=1 install-deps.sh -s winget "${f}"
+	assert_success
+	assert_output --partial "already elevated, no prompt"
+	run cat "${VS_LOG}"
+	assert_line "win-exit ${vs}/setup.exe modify --installPath C:\\BuildTools --add ${_VS_WL} --includeRecommended --quiet --norestart"
+}
+
+@test 'vs_requires: --yes, not elevated and no channel, skips the modify' {
+	local stub vs win f
+	stub="$(_winget_stub 0)"
+	vs="$(_vs_stubs 'C:\BuildTools')"
+	win="$(_win_exit_stub 0)"
+	f="$(_vs_toml)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		install-deps.sh --yes -s winget "${f}"
+	assert_failure
+	assert_output --partial "skipped: needs admin -- re-run from an admin PowerShell"
+	run grep -c 'setup.exe' "${VS_LOG}"
+	assert_output 0
+}
+
+@test 'vs_requires: --yes over an admin ssh channel modifies with no prompt' {
+	local stub vs win f
+	stub="$(_winget_stub 0)"
+	vs="$(_vs_stubs 'C:\BuildTools')"
+	win="$(_win_exit_stub 0)"
+	f="$(_vs_toml)"
+	# The far end: this machine, elevated.
+	printf '#!/bin/bash\nprintf "TESTHOST\\r\\nTrue\\r\\n"\n' >"${BATS_TEST_TMPDIR}/winbin/ssh"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		install-deps.sh -y -s winget "${f}"
+	assert_success
+	assert_output --partial "over the admin ssh channel (tester@192.0.2.1), no prompt"
+	run cat "${VS_LOG}"
+	assert_line "win-exit --ssh tester@192.0.2.1 ${vs}/setup.exe modify --installPath C:\\BuildTools --add ${_VS_WL} --includeRecommended --quiet --norestart"
+}
+
+@test 'vs_requires: the dry run names how the modify would elevate' {
+	local stub vs win f
+	stub="$(_winget_stub 0)"
+	vs="$(_vs_stubs 'C:\BuildTools')"
+	win="$(_win_exit_stub 0)"
+	f="$(_vs_toml)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		JB_WIN_ELEVATED=1 install-deps.sh -n -s winget "${f}"
+	assert_success
+	assert_output --partial "present without ${_VS_WL}, already elevated, no prompt:"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		install-deps.sh -n -y -s winget "${f}"
+	assert_success
+	assert_output --partial "skipped under --yes: needs admin"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		install-deps.sh -n -s winget "${f}"
+	assert_output --partial "elevated, through a UAC prompt:"
+	assert [ ! -e "${VS_LOG}" ]
 }
 
 @test 'vs_requires refuses a value that is not a workload or component id' {
