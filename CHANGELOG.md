@@ -18,6 +18,17 @@
 
 ### Fixed
 
+- **`setup-system -s sshd` refuses clearly when Windows has a reboot
+    pending (#166).** With the servicing stack waiting on a reboot, the
+    OpenSSH capability install failed with a raw `Add-WindowsCapability   failed. Error code = 0x800f0950` and the summary said only "see the log
+    above". `windows-sshd.ps1` now checks Component Based Servicing's
+    `RebootPending` and `RebootInProgress` before installing, stops before
+    changing anything, and says to reboot Windows and re-run; setup-system's
+    summary names the reason, over ssh or through UAC. An sshd already
+    installed is not blocked, and Windows Update's `RebootRequired` and
+    `PendingFileRenameOperations` (often full of harmless temp-file
+    deletions) are not counted.
+
 - **`setup-system -s sshd`'s WSL firewall rule survives a reboot (#80).**
     `jb-sshd-wsl` was scoped with `-InterfaceAlias 'vEthernet (WSL*'`, which
     Windows stores as the adapter's GUID, and WSL rebuilds that adapter with

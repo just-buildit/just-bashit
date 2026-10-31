@@ -191,3 +191,61 @@ norule=False"
 	assert_success
 	assert_output "scoped=2 outside=0 callers=2"
 }
+
+# ---------------------------------------------------------------------------
+# A pending servicing reboot (#166). Add-WindowsCapability fails with a raw
+# 0x800f0950 while CBS waits on a reboot; the script refuses first, and
+# only when the capability actually needs installing. Test-Path answers
+# from $global:present for the registry, so a test names the keys present.
+# ---------------------------------------------------------------------------
+_cap_stubs() {
+	cat <<-'EOF2'
+		$InformationPreference = 'SilentlyContinue'
+		$global:adds = 0
+		$global:present = @()
+		$global:capState = 'NotPresent'
+		$cbs = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing'
+		function Get-WindowsCapability { param([switch]$Online, $Name)
+		    [pscustomobject]@{ Name = 'OpenSSH.Server~~~~0.0.1.0'; State = $global:capState } }
+		function Add-WindowsCapability { param([switch]$Online, $Name) $global:adds++ }
+		function Test-Path { param($LiteralPath) $global:present -contains $LiteralPath }
+		function Try-Install { try { Install-SshdCapability; 'proceeded' } catch { "refused: $_" }; "adds=$($global:adds)" }
+	EOF2
+}
+
+_psc() { _ps "$(_cap_stubs); $1"; }
+
+@test 'windows-sshd: a pending reboot with sshd missing refuses and installs nothing' {
+	run _psc '$global:present = @("$cbs\RebootPending"); Try-Install'
+	assert_success
+	assert_line --regexp '^refused: reboot pending: .*\(RebootPending\).*Reboot Windows, then re-run setup-system -s sshd\.$'
+	assert_line "adds=0"
+}
+
+@test 'windows-sshd: a pending reboot does not block an installed sshd' {
+	run _psc '$global:present = @("$cbs\RebootPending", "$cbs\RebootInProgress")
+		$global:capState = "Installed"; Try-Install
+		$global:capState = "InstallPending"; Try-Install'
+	assert_success
+	assert_output "proceeded
+adds=0
+proceeded
+adds=0"
+}
+
+@test 'windows-sshd: with no reboot pending a missing sshd is installed' {
+	run _psc 'Try-Install'
+	assert_success
+	assert_output "proceeded
+adds=1"
+}
+
+@test "windows-sshd: Windows Update's flag and pending renames alone do not refuse" {
+	run _psc '$global:present = @(
+		    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired",
+		    "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager")
+		Try-Install'
+	assert_success
+	assert_output "proceeded
+adds=1"
+}

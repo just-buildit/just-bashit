@@ -1362,14 +1362,15 @@ _sshd_stubs() {
 		printf '%s\n' "${WINTEMP}\${p#C:/Users/tester/AppData/Local/Temp}"
 	EOF
 	# Records its argv and the elevated body, then plays the elevated
-	# script: writes its log and exits with STUB_RC. STUB_NOLOG plays a
-	# declined UAC prompt, where the elevated process never starts.
+	# script: writes its log (STUB_LOG, else a success line) and exits with
+	# STUB_RC. STUB_NOLOG plays a declined UAC prompt, where the elevated
+	# process never starts.
 	cat >"${STUBS}/powershell.exe" <<-EOF
 		#!/bin/bash
 		printf '%s\n' "\$@" >"${CALLS}.argv"
 		cp "${WINTEMP}/jb-windows-sshd/run.ps1" "${CALLS}"
 		if [ -z "\${STUB_NOLOG:-}" ]; then
-			printf '  ok    sshd running\r\n' >"${WINTEMP}/jb-windows-sshd/log.txt"
+			printf '%s\r\n' "\${STUB_LOG:-  ok    sshd running}" >"${WINTEMP}/jb-windows-sshd/log.txt"
 		fi
 		exit "\${STUB_RC:-0}"
 	EOF
@@ -1566,7 +1567,8 @@ _admin_channel_stub() {
 		case "\$*" in
 		*COMPUTERNAME*) printf 'TESTHOST\\r\\nTrue\\r\\n' ;;
 		*) printf '%s\\n' "\${@: -1}" >"${CALLS}.ssh"
-		   printf '  ok    sshd running\\r\\n'
+		   if [ -n "\${STUB_LOG:-}" ]; then printf '%s\\r\\n' "\${STUB_LOG}" >&2
+		   else printf '  ok    sshd running\\r\\n'; fi
 		   exit "\${STUB_RC:-0}" ;;
 		esac
 	EOF
@@ -1595,6 +1597,28 @@ _admin_channel_stub() {
 	assert_success
 	assert_output --partial "sshd:    failed (see above)"
 	assert [ ! -e "${CALLS}" ]
+}
+
+# The refusal windows-sshd.ps1 raises with a servicing reboot pending
+# (Install-SshdCapability), as each path relays it: the UAC path through
+# log.txt, the ssh path on stderr.
+_REBOOT_REFUSAL="windows-sshd.ps1 : reboot pending: Windows is waiting on a reboot to finish servicing (RebootPending)"
+
+@test 'sshd: a pending Windows reboot is named in the summary (UAC path)' {
+	_sshd_stubs
+	STUB_RC=1 STUB_LOG="${_REBOOT_REFUSAL}" run setup-system.sh -s sshd --github-user octocat
+	assert_success
+	assert_output --partial "${_REBOOT_REFUSAL}"
+	assert_output --partial "sshd:    failed (Windows reboot pending: reboot, then re-run setup-system -s sshd)"
+}
+
+@test 'sshd: a pending Windows reboot is named in the summary (ssh path)' {
+	_sshd_stubs
+	_admin_channel_stub
+	STUB_RC=1 STUB_LOG="${_REBOOT_REFUSAL}" run setup-system.sh -s sshd --github-user octocat
+	assert_success
+	assert_output --partial "${_REBOOT_REFUSAL}"
+	assert_output --partial "sshd:    failed (Windows reboot pending: reboot, then re-run setup-system -s sshd)"
 }
 
 @test 'sshd: the dry run names the channel it would use' {
