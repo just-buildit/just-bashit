@@ -10,6 +10,13 @@ setup() {
 	# The same, for the Visual Studio Installer stubs (vswhere, setup.exe)
 	# and the stand-in for PowerShell that runs them.
 	VS_LOG="${BATS_TEST_TMPDIR}/vs.log"
+	# The Windows %TEMP% the VS Installer writes its dd_setup logs to, and
+	# the temp directory the installer's captured output goes to (#195).
+	# Pinned for every test: on a WSL box PowerShell answers with the real
+	# %TEMP%, where a modify the developer is running writes a live log.
+	export JB_VS_TEMP="${BATS_TEST_TMPDIR}/wintemp"
+	export TMPDIR="${BATS_TEST_TMPDIR}/tmp"
+	mkdir -p "${JB_VS_TEMP}" "${TMPDIR}"
 
 	# How an elevated step runs (#184): not elevated, and no admin ssh
 	# channel -- cmd.exe answers, ssh does not -- unless a test says so.
@@ -1366,6 +1373,194 @@ _vs_toml() {
 	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
 		install-deps.sh -n -s winget "${f}"
 	assert_output --partial "elevated, through a UAC prompt:"
+	assert [ ! -e "${VS_LOG}" ]
+}
+
+# ---------------------------------------------------------------------------
+# What a VS install prints (#195): only the missing ids, on one line; the
+# installer's output in a log file, its tail only on a failed verdict; and a
+# progress line while it runs.
+# ---------------------------------------------------------------------------
+
+_VS_CLANG="Microsoft.VisualStudio.Component.VC.Llvm.Clang"
+
+# _vs_noisy_stubs HAVE -- the fake installer directory, with a vswhere that
+# finds an instance only for ids in HAVE (space-separated) -- or for any,
+# once an install has provided them -- and a setup.exe that prints the
+# installer's console noise on both streams, writes a main dd_setup log
+# into JB_VS_TEMP the way the VS Installer does -- then a newer one with no
+# step in it, as a real modify did -- prints SETUP_SAYS when set,
+# and runs for SETUP_SECS.
+_vs_noisy_stubs() {
+	local d="${BATS_TEST_TMPDIR}/vs-installer"
+	mkdir -p "${d}"
+	cat >"${d}/vswhere.exe" <<-EOF
+		#!/usr/bin/env bash
+		printf 'vswhere %s\n' "\$*" >>"${VS_LOG}"
+		want=() on=0
+		for a in "\$@"; do
+			case "\$a" in -requires) on=1 ;; -*) on=0 ;; *) [ "\$on" -eq 1 ] && want+=("\$a") ;; esac
+		done
+		if [ "\${#want[@]}" -gt 0 ] && [ ! -e "${d}/provided" ]; then
+			for w in "\${want[@]}"; do
+				case " $1 " in *" \$w "*) ;; *) exit 0 ;; esac
+			done
+		fi
+		printf 'C:\\\\BuildTools\r\n'
+	EOF
+	cat >"${d}/setup.exe" <<-EOF
+		#!/usr/bin/env bash
+		printf 'setup.exe %s\n' "\$*" >>"${VS_LOG}"
+		echo 'Telemetry: VS-NOISE-OUT session started'
+		echo 'System.OperationCanceledException: VS-NOISE-ERR The operation was canceled.' >&2
+		printf '[1:2][2026-10-31T19:22:46] BEGIN: Installing "%s,version=18.9,productarch=neutral"\r\n' \
+			"${_VS_CLANG}" >"${JB_VS_TEMP}/dd_setup_20261031192233.log"
+		printf '[3:4][x] Loading packages for instance\r\n' \
+			>"${JB_VS_TEMP}/dd_setup_20261031193128.log"
+		[ -z "\${SETUP_SAYS:-}" ] || printf '%s\n' "\${SETUP_SAYS}"
+		sleep "\${SETUP_SECS:-0}"
+	EOF
+	chmod +x "${d}"/*.exe
+	printf '%s\n' "${d}"
+}
+
+# The baseline's two ids, the workload already installed (#195's box).
+_vs_toml2() {
+	local f="${BATS_TEST_TMPDIR}/vs2.toml"
+	printf '[runtime.winget]\npackages = ["Microsoft.VisualStudio.BuildTools"]\n\n[runtime.winget."Microsoft.VisualStudio.BuildTools"]\nvs_requires = ["%s", "%s"]\n' \
+		"${_VS_WL}" "${_VS_CLANG}" >"${f}"
+	printf '%s\n' "${f}"
+}
+
+@test 'vs_requires: one present-without line, naming only the missing id' {
+	local stub vs win f
+	stub="$(_winget_stub 0)"
+	vs="$(_vs_noisy_stubs "${_VS_WL}")"
+	win="$(_win_exit_stub 0)"
+	f="$(_vs_toml2)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		JB_WIN_ELEVATED=1 install-deps.sh -s winget "${f}"
+	assert_success
+	assert_line "install-deps: Microsoft.VisualStudio.BuildTools is present without ${_VS_CLANG}; modifying C:\\BuildTools, already elevated, no prompt"
+	refute_output --partial "without ${_VS_WL}"
+	# Every id is still added: the verdict probes them all together.
+	run cat "${VS_LOG}"
+	assert_line "setup.exe modify --installPath C:\\BuildTools --add ${_VS_WL} --add ${_VS_CLANG} --includeRecommended --quiet --norestart"
+}
+
+@test 'vs_requires: --yes names only the missing id when it skips, on one line' {
+	local stub vs win f
+	stub="$(_winget_stub 0)"
+	vs="$(_vs_noisy_stubs "${_VS_WL}")"
+	win="$(_win_exit_stub 0)"
+	f="$(_vs_toml2)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		install-deps.sh --yes -s winget "${f}"
+	assert_failure
+	assert_line --regexp "^install-deps: Microsoft.VisualStudio.BuildTools is present without ${_VS_CLANG}: skipped: needs admin"
+}
+
+@test 'vs_requires: every id installed is named on one line, comma-joined' {
+	local stub vs win f
+	stub="$(_winget_stub 0)"
+	vs="$(_vs_noisy_stubs "${_VS_WL} ${_VS_CLANG}")"
+	win="$(_win_exit_stub 0)"
+	f="$(_vs_toml2)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		install-deps.sh -s winget "${f}"
+	assert_success
+	assert_line "install-deps: Microsoft.VisualStudio.BuildTools already installed (with ${_VS_WL}, ${_VS_CLANG})"
+}
+
+@test 'vs_requires: the installer output goes to a log file, not the console' {
+	local stub vs win f log
+	stub="$(_winget_stub 0)"
+	vs="$(_vs_noisy_stubs "${_VS_WL}")"
+	win="$(_win_exit_stub 0)"
+	f="$(_vs_toml2)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		JB_WIN_ELEVATED=1 install-deps.sh -s winget "${f}"
+	assert_success
+	# Neither stream carries it: `run` merges stderr into the output.
+	refute_output --partial "VS-NOISE"
+	assert_output --partial "(setup.exe modify): done"
+	assert_line --regexp "^install-deps: Microsoft.VisualStudio.BuildTools \(setup.exe modify\): installer output: ${TMPDIR}/jb-vs-install\.[A-Za-z0-9]+$"
+	log="$(printf '%s\n' "${output}" | sed -n 's/.*: installer output: //p')"
+	run cat "${log}"
+	assert_line "Telemetry: VS-NOISE-OUT session started"
+	assert_line "System.OperationCanceledException: VS-NOISE-ERR The operation was canceled."
+}
+
+@test 'vs_requires: a failed verdict prints the tail of the installer log' {
+	local stub vs win f
+	stub="$(_winget_stub 0)"
+	vs="$(_vs_noisy_stubs "${_VS_WL}")"
+	win="$(_win_exit_stub 1 no)"
+	f="$(_vs_toml2)"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		JB_WIN_ELEVATED=1 install-deps.sh -s winget "${f}"
+	assert_failure
+	assert_output --partial "failed, exit code 1; vswhere finds no instance with ${_VS_WL}, ${_VS_CLANG}"
+	assert_line --regexp "^install-deps: the last 20 lines of ${TMPDIR}/jb-vs-install\."
+	assert_line "    Telemetry: VS-NOISE-OUT session started"
+	assert_line "    System.OperationCanceledException: VS-NOISE-ERR The operation was canceled."
+}
+
+@test 'vs_requires: without a TTY, a progress line names the activity and the time' {
+	local stub vs win f
+	stub="$(_winget_stub 0)"
+	vs="$(_vs_noisy_stubs "${_VS_WL}")"
+	win="$(_win_exit_stub 0)"
+	f="$(_vs_toml2)"
+	# A main log from an earlier run: older than this install, so ignored
+	# though its name sorts last.
+	printf 'BEGIN: Removing package %s from cache\n' "'Old.Package,version=1'" \
+		>"${JB_VS_TEMP}/dd_setup_29991231235959.log"
+	touch -t 200001010000 "${JB_VS_TEMP}/dd_setup_29991231235959.log"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		JB_WIN_ELEVATED=1 JB_VS_PROGRESS_EVERY=1 SETUP_SECS=3 \
+		install-deps.sh -s winget "${f}"
+	assert_success
+	assert_line --regexp "^    installing ${_VS_CLANG//./\\.} \.\.\. [0-9]+s$"
+	refute_output --partial "Old.Package"
+	# One line each, never rewritten in place: no carriage return.
+	refute_output --partial $'\r'
+}
+
+@test 'vs_requires: with no dd_setup log, the activity is read from the output' {
+	local stub vs win f
+	stub="$(_winget_stub 0)"
+	vs="$(_vs_noisy_stubs "${_VS_WL}")"
+	win="$(_win_exit_stub 0)"
+	f="$(_vs_toml2)"
+	# %TEMP% unknown: the stub's dd_setup log lands where nothing looks,
+	# so the line can come only from the installer's captured output.
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		JB_WIN_ELEVATED=1 JB_VS_PROGRESS_EVERY=1 SETUP_SECS=3 \
+		SETUP_SAYS='[1:2][x] BEGIN: Syncing DCAT product registration' \
+		JB_VS_TEMP="${BATS_TEST_TMPDIR}/nowhere" install-deps.sh -s winget "${f}"
+	assert_success
+	assert_line --regexp '^    syncing DCAT product registration \.\.\. [0-9]+s$'
+}
+
+@test 'vs_requires: the dry-run plan is unchanged, whatever is installed' {
+	local stub vs win f plan
+	stub="$(_winget_stub 0)"
+	win="$(_win_exit_stub 0)"
+	f="$(_vs_toml2)"
+	plan="  or, when Microsoft.VisualStudio.BuildTools is present without ${_VS_WL} ${_VS_CLANG}, already elevated, no prompt:"
+	vs="$(_vs_noisy_stubs "${_VS_WL}")"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		JB_WIN_ELEVATED=1 install-deps.sh -n -s winget "${f}"
+	assert_success
+	assert_line "${plan}"
+	local first="${output}"
+	vs="$(_vs_noisy_stubs "")"
+	run env JB_WINGET="${stub}" JB_VS_INSTALLER="${vs}" JB_WIN_EXIT="${win}" \
+		JB_WIN_ELEVATED=1 install-deps.sh -n -s winget "${f}"
+	assert_success
+	assert_equal "${output}" "${first}"
+	refute_output --partial "installer output"
 	assert [ ! -e "${VS_LOG}" ]
 }
 
