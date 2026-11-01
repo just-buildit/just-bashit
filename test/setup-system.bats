@@ -2243,7 +2243,9 @@ _crt() { printf 'jb-windows-root-%s.crt' "$(tr 'A-F' 'a-f' <<<"$1")"; }
 
 @test 'certs: a default run leaves the trust store alone' {
 	_certs_fixture
-	run setup-system.sh -x deps,tools,pwsh,claude
+	# folders left out too: on the Windows runner it is a default step that
+	# runs powershell.exe, which this fixture's call log would record (#204).
+	run setup-system.sh -x deps,folders,tools,pwsh,claude
 	assert_success
 	refute_output --partial "certs —"
 	run cat "${CALLS}"
@@ -2640,7 +2642,8 @@ _folders_stubs() {
 }
 
 @test 'folders: a default step, reported skipped off Windows' {
-	run setup-system.sh -n -x deps,tools,pwsh,claude
+	# Pinned: the Windows runner's own uname is MINGW.
+	JB_UNAME_S=Linux run setup-system.sh -n -x deps,tools,pwsh,claude
 	assert_success
 	assert_output --partial "folders —"
 	assert_output --partial "folders: skipped (not Windows)"
@@ -2649,7 +2652,7 @@ _folders_stubs() {
 @test 'folders: under WSL it points at the Windows side and touches nothing' {
 	echo "Linux version 5.15.0-microsoft-standard-WSL2" >"${JB_PROC_VERSION}"
 	_folders_stubs 'result: ok (local)'
-	PATH="${FOLDERS_PATH}" run setup-system.sh -s folders
+	JB_UNAME_S=Linux PATH="${FOLDERS_PATH}" run setup-system.sh -s folders
 	assert_success
 	assert_output --partial "folders: skipped (WSL: run it from Windows)"
 	refute [ -e "${BATS_TEST_TMPDIR}/powershell.log" ]
