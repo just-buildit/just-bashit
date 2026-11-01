@@ -18,17 +18,18 @@ ______________________________________________________________________
 
 ## Steps
 
-| Step     | What it does                                                                                                                                                                                                                                                                                                                                                                                          |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `deps`   | Installs a baseline toolchain — C compiler, `make`, `cmake`, `pkg-config`, `git`, `curl`, ssh — then the packages of any `bootstrap.toml` in the current directory, both via [`install-deps`](install-deps.md).                                                                                                                                                                                       |
-| `certs`  | **Opt-in, WSL only**. Installs Windows' trusted root certificates into the distro trust store beside its Mozilla bundle, one file per root, and removes any Windows no longer trusts. See below.                                                                                                                                                                                                      |
-| `shell`  | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                                                                                                                                                                                                                                                                 |
-| `ssh`    | Tightens permissions across `~/.ssh` — repairing a directory copied from Windows, FAT, a zip or git — then creates an ed25519 key named after this host if there is no key at all. Prints the public key.                                                                                                                                                                                             |
-| `sshd`   | **Windows only** (WSL or native MSYS2 / Git Bash): a default step on native Windows, opt-in from WSL. Runs Windows' own OpenSSH server as a boot-time service — key-only, keys from `github.com/<user>.keys`, `pwsh.exe` as the login shell — so the machine answers ssh even when WSL is down. On native Windows it also starts the ssh-agent service at boot and adds the box key to it. See below. |
-| `git`    | Sets global git defaults that are not already set, and an unset `user.name` / `user.email` from the environment or a prompt.                                                                                                                                                                                                                                                                          |
-| `tools`  | Installs `uv` if missing, through [`install-uv`](libraries/pkg.md#install-uv): winget on Windows, which installs the native build on ARM64 (#171). Installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.                                                                                                                                                     |
-| `pwsh`   | Installs PowerShell 7 and the PSScriptAnalyzer module, so `.ps1` files can be linted on this machine. Linux and macOS only — see below.                                                                                                                                                                                                                                                               |
-| `claude` | Installs Claude Code if the `claude` command is missing: Anthropic's `install.sh`, or on native Windows winget, else `install.ps1` ([below](#claude-code-on-native-windows)).                                                                                                                                                                                                                         |
+| Step      | What it does                                                                                                                                                                                                                                                                                                                                                                                          |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deps`    | Installs a baseline toolchain — C compiler, `make`, `cmake`, `pkg-config`, `git`, `curl`, ssh — then the packages of any `bootstrap.toml` in the current directory, both via [`install-deps`](install-deps.md).                                                                                                                                                                                       |
+| `certs`   | **Opt-in, WSL only**. Installs Windows' trusted root certificates into the distro trust store beside its Mozilla bundle, one file per root, and removes any Windows no longer trusts. See below.                                                                                                                                                                                                      |
+| `folders` | **Native Windows**. Moves Documents, Desktop, Pictures, Music and Videos back from OneDrive's folder redirection to the local profile, and points Windows there — as the user, no UAC. Online-only files stay on OneDrive. Elsewhere it reports skipped. See [below](#the-folders-step-native-windows).                                                                                               |
+| `shell`   | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                                                                                                                                                                                                                                                                 |
+| `ssh`     | Tightens permissions across `~/.ssh` — repairing a directory copied from Windows, FAT, a zip or git — then creates an ed25519 key named after this host if there is no key at all. Prints the public key.                                                                                                                                                                                             |
+| `sshd`    | **Windows only** (WSL or native MSYS2 / Git Bash): a default step on native Windows, opt-in from WSL. Runs Windows' own OpenSSH server as a boot-time service — key-only, keys from `github.com/<user>.keys`, `pwsh.exe` as the login shell — so the machine answers ssh even when WSL is down. On native Windows it also starts the ssh-agent service at boot and adds the box key to it. See below. |
+| `git`     | Sets global git defaults that are not already set, and an unset `user.name` / `user.email` from the environment or a prompt.                                                                                                                                                                                                                                                                          |
+| `tools`   | Installs `uv` if missing, through [`install-uv`](libraries/pkg.md#install-uv): winget on Windows, which installs the native build on ARM64 (#171). Installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.                                                                                                                                                     |
+| `pwsh`    | Installs PowerShell 7 and the PSScriptAnalyzer module, so `.ps1` files can be linted on this machine. Linux and macOS only — see below.                                                                                                                                                                                                                                                               |
+| `claude`  | Installs Claude Code if the `claude` command is missing: Anthropic's `install.sh`, or on native Windows winget, else `install.ps1` ([below](#claude-code-on-native-windows)).                                                                                                                                                                                                                         |
 
 On native Windows the `deps` baseline is CMake, Git, PowerShell 7, the
 GitHub CLI (`gh`: the [sshd step](#the-sshd-step) authorizes the keys of the
@@ -123,6 +124,62 @@ of these rows matches, and when `powershell.exe` cannot be found.
 On WSL the bash profile also sets `SSL_CERT_FILE` to the system bundle when it
 is unset, so a tool that ships its own bundle, such as `uv`, sees these roots
 too. Off WSL it leaves `SSL_CERT_FILE` alone.
+
+______________________________________________________________________
+
+## The folders step (native Windows)
+
+OneDrive's *Known Folder Move* points Documents, Desktop, Pictures, Music and
+Videos at the OneDrive folder, and uninstalling OneDrive does not point them
+back. Documents is where PowerShell keeps `$PROFILE`, so a box left that way
+can end up with a profile that is an online-only placeholder nothing can read
+(#202). The `folders` step undoes the redirect, and is on by default:
+
+```bash
+jbx setup-system -s folders -n   # which folders are on OneDrive, and what would move
+jbx setup-system -x folders      # everything else, folders left alone
+```
+
+The work is `windows-folders.ps1`, run in Windows PowerShell as you. It
+writes only `HKCU`, so it needs no UAC prompt. For each of `Personal`
+(Documents), `Desktop`, `My Pictures`, `My Music` and `My Video` under
+`HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders`
+whose path is inside a OneDrive folder, it:
+
+1. creates `%USERPROFILE%\<Folder>`;
+1. moves the files there with `robocopy /E /MOVE`, **excluding online-only
+    files** (`/XA:O`, and by name any marked recall-on-access). Opening a
+    cloud-only file would download it, so none is opened. A file whose name the
+    local folder already has is not moved either, so neither copy is
+    overwritten;
+1. sets the value, and any other value in the key that names the same folder
+    (Documents has a second one, `{F42EE2D3-…}`), to `%USERPROFILE%\<Folder>`
+    as `REG_EXPAND_SZ`;
+1. reports per folder how many files moved, how many online-only files stayed
+    on OneDrive (download them from onedrive.com), and how many could not move;
+1. when Documents moved and [`get-jb.ps1`](getting-started.md) installed jbx
+    for PowerShell, writes the jbx block into the restored Documents' profiles
+    with get-jb.ps1's own writer.
+
+Sign out and back in afterwards so every app sees the new paths; restarting
+Explorer is enough for Explorer. A folder that is already local is reported
+`ok (local)`, so a re-run changes nothing.
+
+**When OneDrive would put the redirect back**, nothing is moved and OneDrive
+is not uninstalled; that is your call. This is the case when OneDrive is
+running, or a Known Folder Move policy (`KFMSilentOptIn` or `KFMBlockOptOut`
+under `HKLM:\SOFTWARE\Policies\Microsoft\OneDrive`) is set. The step says so
+and fixes PowerShell anyway. The jbx block goes in the **local** Documents'
+profiles, and each `$PROFILE` Windows still reads from OneDrive gets a stub in
+the block's place that dot-sources its local twin. Your own lines in that
+profile are kept. A profile that cannot be read, such as an online-only
+placeholder, is never written: it is named in the summary instead. Quit
+OneDrive (or stop its folder backup) and clear the policy, then
+`jbx setup-system -s folders` moves the folders.
+
+With `JB_PS_PROFILE` set (you named your own profile), the step moves the
+folders but leaves every profile alone. From WSL the step reports skipped:
+run it from Windows, through `jbx` in PowerShell or from Git Bash.
 
 ______________________________________________________________________
 

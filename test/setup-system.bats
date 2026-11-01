@@ -35,6 +35,10 @@ setup() {
 	# Nor Windows' own OpenSSH client (#190): on a native Windows runner the
 	# agent step would otherwise ask the machine's real ssh-agent service.
 	export JB_WIN_OPENSSH="${BATS_TEST_TMPDIR}/no-openssh"
+	# Nor the user's real known folders (#204): on the Windows runner the
+	# folders step is a default one, and reads this key -- a scratch one
+	# that does not exist, so it finds nothing redirected and moves nothing.
+	export JB_KNOWN_FOLDERS_KEY='HKCU:\Software\just-bashit-test\setup-system-bats-absent'
 	# Not on native Windows (MSYS2, Cygwin): there the suite runs ON the real
 	# Windows, its cmd.exe is the machine's own and on PATH by design, and
 	# the tests that drive it already account for that.
@@ -217,6 +221,7 @@ _write_deps_toml() {
 	run setup-system.sh -n
 	assert_success
 	assert_output --partial "deps —"
+	assert_output --partial "folders —"
 	assert_output --partial "shell —"
 	assert_output --partial "ssh —"
 	assert_output --partial "git —"
@@ -2017,16 +2022,16 @@ _default_steps() {
 @test 'sshd is a default step on native Windows' {
 	_native_stubs
 	run _default_steps
-	assert_output "deps,shell,ssh,sshd,git,tools,pwsh,claude"
+	assert_output "deps,folders,shell,ssh,sshd,git,tools,pwsh,claude"
 }
 
 @test 'sshd stays opt-in on Linux and from WSL' {
 	_sshd_stubs
 	run _default_steps
-	assert_output "deps,shell,ssh,git,tools,pwsh,claude"
+	assert_output "deps,folders,shell,ssh,git,tools,pwsh,claude"
 	echo "Linux version 6.8.0-generic" >"${JB_PROC_VERSION}"
 	run _default_steps
-	assert_output "deps,shell,ssh,git,tools,pwsh,claude"
+	assert_output "deps,folders,shell,ssh,git,tools,pwsh,claude"
 }
 
 @test 'sshd: native Windows asks the elevated run for the ssh-agent service too' {
@@ -2238,7 +2243,9 @@ _crt() { printf 'jb-windows-root-%s.crt' "$(tr 'A-F' 'a-f' <<<"$1")"; }
 
 @test 'certs: a default run leaves the trust store alone' {
 	_certs_fixture
-	run setup-system.sh -x deps,tools,pwsh,claude
+	# folders left out too: on the Windows runner it is a default step that
+	# runs powershell.exe, which this fixture's call log would record (#204).
+	run setup-system.sh -x deps,folders,tools,pwsh,claude
 	assert_success
 	refute_output --partial "certs —"
 	run cat "${CALLS}"
@@ -2599,4 +2606,114 @@ _claude_ps_stub() {
 	assert_success
 	assert_output --partial "install.ps1, exit 3"
 	assert_output --partial "claude:  failed"
+}
+
+# ---------------------------------------------------------------------------
+# folders (#204): Documents and the other known folders back from OneDrive.
+# A default step, which only native Windows acts on; the work is
+# windows-folders.ps1's (test/windows-folders.bats). Here: the wiring --
+# which platforms run it, the opt-out, what reaches Windows PowerShell, and
+# the result line relayed into the summary. powershell is a stub that
+# records its argv and prints what the script would.
+# ---------------------------------------------------------------------------
+_folders_stubs() {
+	# $@: the lines the stub prints, one argument each.
+	mkdir -p "${BATS_TEST_TMPDIR}/fbin"
+	printf '%s\n' "$@" >"${BATS_TEST_TMPDIR}/ps-out"
+	if ! command -v cygpath >/dev/null 2>&1; then
+		printf '#!/bin/sh\nprintf "%%s\\n" "$2"\n' >"${BATS_TEST_TMPDIR}/fbin/cygpath"
+		cp "${BATS_TEST_TMPDIR}/fbin/cygpath" "${BATS_TEST_TMPDIR}/fbin/wslpath"
+		chmod +x "${BATS_TEST_TMPDIR}/fbin/cygpath" "${BATS_TEST_TMPDIR}/fbin/wslpath"
+	fi
+	cat >"${BATS_TEST_TMPDIR}/fbin/powershell" <<-EOF
+		#!/usr/bin/env bash
+		echo "\$*" >>'${BATS_TEST_TMPDIR}/powershell.log'
+		while [ \$# -gt 0 ]; do
+			[ "\$1" = -File ] && f="\$2"
+			shift
+		done
+		command -v cygpath >/dev/null 2>&1 && f="\$(cygpath -u "\${f}")"
+		# The script dot-sources get-jb.ps1 from its own directory.
+		[ -r "\${f%/*}/get-jb.ps1" ] && echo "beside: get-jb.ps1"
+		cat '${BATS_TEST_TMPDIR}/ps-out'
+	EOF
+	chmod +x "${BATS_TEST_TMPDIR}/fbin/powershell"
+	FOLDERS_PATH="${BATS_TEST_TMPDIR}/fbin:${PATH}"
+}
+
+@test 'folders: a default step, reported skipped off Windows' {
+	# Pinned: the Windows runner's own uname is MINGW.
+	JB_UNAME_S=Linux run setup-system.sh -n -x deps,tools,pwsh,claude
+	assert_success
+	assert_output --partial "folders —"
+	assert_output --partial "folders: skipped (not Windows)"
+}
+
+@test 'folders: under WSL it points at the Windows side and touches nothing' {
+	echo "Linux version 5.15.0-microsoft-standard-WSL2" >"${JB_PROC_VERSION}"
+	_folders_stubs 'result: ok (local)'
+	JB_UNAME_S=Linux PATH="${FOLDERS_PATH}" run setup-system.sh -s folders
+	assert_success
+	assert_output --partial "folders: skipped (WSL: run it from Windows)"
+	refute [ -e "${BATS_TEST_TMPDIR}/powershell.log" ]
+}
+
+@test 'folders: on native Windows it runs windows-folders.ps1 beside get-jb.ps1 and relays its result' {
+	_folders_stubs 'Documents: moved 3 files to C:\Users\me\Documents' \
+		'result: ok (restored Documents; sign out to finish)'
+	JB_UNAME_S=MINGW64_NT-10.0-26100 PATH="${FOLDERS_PATH}" \
+		run setup-system.sh -s folders
+	assert_success
+	assert_line "    beside: get-jb.ps1"
+	assert_line '    Documents: moved 3 files to C:\Users\me\Documents'
+	assert_line "    folders: ok (restored Documents; sign out to finish)"
+	run cat "${BATS_TEST_TMPDIR}/powershell.log"
+	assert_output --regexp '^-NoProfile -NonInteractive -ExecutionPolicy Bypass -File .*windows-folders\.ps1$'
+}
+
+@test 'folders: a dry run passes -DryRun' {
+	_folders_stubs 'result: ok (would restore Documents) (dry run)'
+	JB_UNAME_S=MINGW64_NT-10.0-26100 PATH="${FOLDERS_PATH}" \
+		run setup-system.sh -n -s folders
+	assert_success
+	assert_output --partial "folders: ok (would restore Documents) (dry run)"
+	run cat "${BATS_TEST_TMPDIR}/powershell.log"
+	assert_output --regexp 'windows-folders\.ps1 -DryRun$'
+}
+
+@test 'folders: a run that ends with no result line is a failure' {
+	_folders_stubs 'something broke'
+	JB_UNAME_S=MINGW64_NT-10.0-26100 PATH="${FOLDERS_PATH}" \
+		run setup-system.sh -s folders
+	assert_success
+	assert_output --partial "    something broke"
+	assert_output --partial "folders: failed (windows-folders.ps1 gave no result; see above)"
+}
+
+@test 'folders: default on native Windows, and -x folders leaves it out' {
+	_folders_stubs 'result: ok (local)'
+	JB_UNAME_S=MINGW64_NT-10.0-26100 PATH="${FOLDERS_PATH}" \
+		run setup-system.sh -n -x deps,shell,ssh,sshd,git,tools,pwsh,claude
+	assert_success
+	assert_output --partial "folders: ok (local)"
+	rm -f "${BATS_TEST_TMPDIR}/powershell.log"
+	JB_UNAME_S=MINGW64_NT-10.0-26100 PATH="${FOLDERS_PATH}" \
+		run setup-system.sh -n -x folders,deps,ssh,sshd,git,tools,pwsh,claude
+	assert_success
+	refute_output --partial "folders —"
+	refute [ -e "${BATS_TEST_TMPDIR}/powershell.log" ]
+}
+
+# The real script through the step, Linux pwsh standing in for Windows
+# PowerShell: the key is the suite's absent scratch one, so nothing is
+# redirected.
+@test 'folders: the real windows-folders.ps1 runs through the step' {
+	command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed (setup-system -s pwsh)"
+	_folders_stubs ''
+	printf '#!/usr/bin/env bash\nexec pwsh "$@"\n' >"${BATS_TEST_TMPDIR}/fbin/powershell"
+	JB_UNAME_S=MINGW64_NT-10.0-26100 PATH="${FOLDERS_PATH}" \
+		run setup-system.sh -s folders
+	assert_success
+	assert_line "    Documents: ok (not redirected)"
+	assert_line "    folders: ok (local)"
 }
