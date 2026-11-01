@@ -4,6 +4,22 @@
 
 ### Added
 
+- **setup-system: a `folders` step moves the known folders back from
+    OneDrive, by default (#204).** On native Windows, Documents, Desktop,
+    Pictures, Music and Videos that OneDrive's Known Folder Move redirected
+    are moved to `%USERPROFILE%\<Folder>` with `robocopy /MOVE` and the
+    `User Shell Folders` values pointed there (`REG_EXPAND_SZ`, HKCU, no
+    UAC), by the new `windows-folders.ps1`. Online-only files are never
+    opened: they stay on OneDrive and are counted, as is any file whose name
+    the local folder already has. When Documents moves, get-jb.ps1's writer
+    puts the jbx block in the restored profile. While OneDrive runs or a
+    KFM policy (`KFMSilentOptIn` / `KFMBlockOptOut`) would redirect them
+    again, nothing moves and OneDrive stays installed; the jbx block goes in
+    the local profile and each redirected `$PROFILE` gets a stub loading it,
+    never over a profile it cannot read (#202). A folder already local is
+    `ok (local)`. Leave it out with `-x folders`; off native Windows it
+    reports skipped.
+
 - **Native Windows: sshd in the default run, the box key in the Windows
     ssh-agent service, and gh in the baseline (#190).** On native Windows
     (MSYS2 / Git Bash) a plain `setup-system` now runs the `sshd` step;
