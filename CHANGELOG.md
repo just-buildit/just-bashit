@@ -77,6 +77,22 @@
 
 ### Fixed
 
+- **get-jb.ps1 no longer dies on a profile it cannot read, and never
+    overwrites one (#202).** With OneDrive uninstalled, Documents can still
+    point at the OneDrive folder, and a `profile.ps1` there synced from
+    another machine is an online-only placeholder: reading it asks for
+    OneDrive, which is not running, and the uncaught "The cloud provider is
+    not running" stopped the whole install. Such a profile is now left
+    exactly as it is -- its content may exist only in the cloud -- and named
+    on one line with the cause and the fix: recover it from onedrive.com if
+    wanted, then delete the placeholder (or reinstall OneDrive), and re-run.
+    The placeholder is recognised by its attributes (RecallOnDataAccess,
+    Offline), read without opening the file, or by the error itself; any
+    other read failure gets a generic line. The other profile, the driver
+    and this session's `jbx` are still set up, and the run then fails naming
+    every profile it skipped. `JB_PS_PROFILE` now takes several paths,
+    separated like `PATH`.
+
 - **From PowerShell, `jbx setup-system -s sshd,git` runs both steps
     (#196).** PowerShell parses an unquoted `sshd,git` as an array, and the
     profile function get-jb.ps1 writes turned each argument into a string

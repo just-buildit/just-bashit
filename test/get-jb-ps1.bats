@@ -83,6 +83,40 @@ _posix_only() {
 	assert_output --partial "Refusing to guess"
 }
 
+# A profile jb cannot read is never written (#202): a OneDrive online-only
+# file whose provider is gone holds content that may live only in the cloud.
+# No runner can make a real placeholder, so Read-JbProfile -- the one read --
+# is replaced by one that fails the way the cloud read does: an IOException
+# carrying ERROR_CLOUD_FILE_PROVIDER_NOT_RUNNING (0x8007016A).
+_unreadable() {
+	printf 'keep me\n' >"${BATS_TEST_TMPDIR}/a.ps1"
+	run _ps "function Read-JbProfile { throw (New-Object IO.IOException('$1', $2)) }
+		\$s = Write-JbProfileAll -Path '${TMP}/a.ps1', '${TMP}/b.ps1' -Body @('x')
+		\"skipped=\$s\""
+}
+
+@test 'get-jb.ps1: an unreadable OneDrive profile is left alone, the other written' {
+	_unreadable 'The cloud provider is not running.' -2147024534
+	assert_success
+	assert_output --partial "skipped ${TMP}/a.ps1 -- it is an online-only OneDrive file and OneDrive is not running or is uninstalled"
+	assert_output --partial "recover it from onedrive.com"
+	assert_line "skipped=${TMP}/a.ps1"
+	run cat "${BATS_TEST_TMPDIR}/a.ps1"
+	assert_output "keep me"
+	run grep -c '^# >>> just-bashit get-jb.ps1 >>>' "${BATS_TEST_TMPDIR}/b.ps1"
+	assert_output "1"
+}
+
+@test 'get-jb.ps1: any other read failure is named generically, file untouched' {
+	_unreadable 'boom' -2147024864
+	assert_success
+	assert_output --partial "skipped ${TMP}/a.ps1 -- it could not be read (boom)"
+	refute_output --partial "OneDrive"
+	run cat "${BATS_TEST_TMPDIR}/a.ps1"
+	assert_output "keep me"
+	[ -s "${BATS_TEST_TMPDIR}/b.ps1" ]
+}
+
 @test 'get-jb.ps1: the generated block parses and defines jbx and just-runit' {
 	run _ps '$b = Get-JbProfileBlock -Bash "C:\Program Files\Git\bin\bash.exe" -Driver "C:\it''s\jbx-ps.sh"; . ([scriptblock]::Create($b -join "`n")); (Get-Command jbx, just-runit | % CommandType) -join ","'
 	assert_success
@@ -226,6 +260,30 @@ _iex() {
 	assert_success
 	assert_output --partial "stub v0"
 	assert_output --partial "[new][session] n=2"
+}
+
+# The whole install with one profile locked against reading (FileShare.None,
+# an IOException at the read, as the cloud read raises): the other profile
+# and this session's jbx are still set up, and the run then fails naming the
+# one it skipped (#202).
+@test 'get-jb.ps1: an unreadable profile fails the run last, after the rest' {
+	_posix_only
+	_e2e_env
+	printf 'keep me\n' >"${E2E_HOME}/locked.ps1"
+	E2E_CODE='$f = [IO.File]::Open("'"${E2E_HOME}"'/locked.ps1", "Open", "ReadWrite", "None")
+		try { '"$(_iex)"' } catch { "THREW: $_" } finally { $f.Dispose() }
+		jbx after; "rc=$LASTEXITCODE"'
+	run _e2e JB_BASH="${BASH_BIN}" JB_PS_PROFILE="${E2E_HOME}/locked.ps1:${E2E_HOME}/profile.ps1"
+	assert_success
+	assert_output --partial "skipped ${E2E_HOME}/locked.ps1 -- it could not be read"
+	assert_output --partial "ok  jbx function in ${E2E_HOME}/profile.ps1"
+	assert_output --partial "THREW: get-jb.ps1: jbx works in this session, but its function was NOT added to ${E2E_HOME}/locked.ps1"
+	assert_output --partial "[after] n=1"
+	assert_line "rc=0"
+	run cat "${E2E_HOME}/locked.ps1"
+	assert_output "keep me"
+	run grep -c '^# >>> just-bashit get-jb.ps1 >>>$' "${E2E_HOME}/profile.ps1"
+	assert_output "1"
 }
 
 @test 'get-jb.ps1: no uv means winget installs astral-sh.uv with the shared flags' {
