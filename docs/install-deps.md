@@ -547,6 +547,31 @@ A shell sees only an exit code's low byte (3010 arrives as 194), so both
 installs run through PowerShell's `Start-Process`, which reports the whole
 code.
 
+What either install prints is short. The "present without" line names only
+the ids the probe finds missing, each probed alone, though every id is
+passed to `--add`. The VS Installer's own console output -- about 150 lines
+of telemetry and harmless `OperationCanceledException` traces -- goes to a
+log file under the temp directory instead, and its path is printed; the
+last 20 lines are printed only when the verdict is a failure. While the
+installer runs, a progress line shows the elapsed time and its latest
+activity:
+
+```text
+install-deps: Microsoft.VisualStudio.BuildTools is present without Microsoft.VisualStudio.Component.VC.Llvm.Clang; modifying C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools, already elevated, no prompt
+install-deps: Microsoft.VisualStudio.BuildTools (setup.exe modify): installer output: /tmp/jb-vs-install.Xa81Qz
+    installing Microsoft.VisualStudio.VC.Llvm.Clang ... 3m12s
+install-deps: Microsoft.VisualStudio.BuildTools (setup.exe modify): done, reboot required (exit 3010)
+```
+
+On a terminal that line is rewritten in place every second; without one, a
+line is printed every 30 seconds (`JB_VS_PROGRESS_EVERY` changes it). The
+activity is the last package step -- downloading, verifying, installing,
+caching or removing -- that the VS Installer wrote to its main log,
+`%TEMP%\dd_setup_<timestamp>.log`, or failing that, to its captured output.
+That log carries no percentage, so none is shown. When neither can be read
+(an admin ssh channel that logs in as another user writes to that user's
+`%TEMP%`), the line shows the elapsed time alone.
+
 !!! warning "winget ignores `http_proxy`"
 
     It fetches through WinHTTP and takes the **system** proxy. Its own

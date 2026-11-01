@@ -90,6 +90,22 @@
     are adjacent there), matched nothing in the run loop and ended in
     `no steps selected`. It is now `unknown step 'sshd git'`.
 
+- **A Visual Studio install prints one readable line per step, keeps the
+    installer's log out of the console, and shows progress (#195).** The
+    "present without" message named every `vs_requires` id and broke into
+    one line per id (install-deps' newline-first `IFS` split `$*`); it now
+    probes each id alone and names only the missing ones, joined with
+    `, ` -- likewise the skipped, already-installed and verdict messages.
+    Every id is still passed to `--add`, since the verdict probes them all
+    together. The VS Installer's console output (about 150 lines of
+    telemetry and harmless `OperationCanceledException` traces) goes to a
+    log file under the temp directory, whose path is printed, and its last
+    20 lines are printed only when the verdict fails. While `setup.exe   modify` or the winget install runs, a progress line shows the elapsed
+    time and the installer's latest activity, read from its own
+    `%TEMP%\dd_setup_<timestamp>.log` (e.g. `installing   Microsoft.VisualStudio.VC.Llvm.Clang ... 3m12s`): rewritten in place on
+    a terminal, one line every 30 s otherwise. The log carries no
+    percentage, so none is shown.
+
 - **setup-system's `claude` step installs Claude Code on native Windows
     (#189).** It ran Anthropic's `install.sh` everywhere, which refuses a
     MINGW/MSYS/CYGWIN `uname` ("Windows is not supported by this script"),
