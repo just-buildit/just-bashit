@@ -83,7 +83,18 @@ bash is still what runs it — but as a runtime you never open:
 The block goes in the `CurrentUserAllHosts` profile of **both** editions —
 `Documents\WindowsPowerShell\profile.ps1` and `Documents\PowerShell\profile.ps1`
 — since they read different files and `setup-system` installs PowerShell 7 on a
-machine that has only 5.1. `JB_PS_PROFILE` names one file to use instead.
+machine that has only 5.1. `JB_PS_PROFILE` names the file to use instead, or
+several separated like `PATH` (`;` on Windows).
+
+A profile the installer cannot read is never written, since its content may
+exist nowhere else. The usual case: OneDrive was uninstalled, Documents still
+points at the OneDrive folder, and `profile.ps1` there is an online-only file
+synced from another machine, which cannot be read without OneDrive. The
+installer names it with the fix, still writes the other profile and defines
+`jbx` in the current session, then fails naming each profile it skipped. To
+fix: recover the file from onedrive.com if you want its content, then delete
+the placeholder (or reinstall OneDrive so it downloads), and re-run the
+one-liner.
 
 The functions forward arguments, piped input and the exit code (`$LASTEXITCODE`).
 Arguments travel in the environment to a small driver,

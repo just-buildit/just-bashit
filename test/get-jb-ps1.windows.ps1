@@ -16,6 +16,9 @@
 
       - jbx runs a library function, and its exit status reaches
         $LASTEXITCODE, zero and non-zero;
+      - a profile it cannot read (held open with FileShare.None) is left
+        as it was, the other is written, jbx still loads, and the run
+        fails naming the skipped one (#202);
       - a new session that loads the profile has jbx;
       - with HOME pointed at a stub jbx, every argument arrives as typed
         (spaces, `*`, quotes, empty) and no JB_PS_ variable outlives a call.
@@ -60,6 +63,29 @@ $ErrorActionPreference = 'Continue'
 jbx no-such-command-get-jb-ps1 2>&1 | Out-Null
 $ErrorActionPreference = 'Stop'
 Assert-That ($LASTEXITCODE -ne 0) "an unresolvable jbx call exits non-zero (got $LASTEXITCODE)"
+
+# A profile that cannot be read is never written, and does not stop the
+# rest (#202). A real OneDrive placeholder cannot be made here; a file held
+# open with FileShare.None fails the same read with an IOException.
+$locked = Join-Path $work 'locked.ps1'
+$other = Join-Path $work 'other.ps1'
+Set-Content -LiteralPath $locked -Value 'keep me'
+$savedProfile = $env:JB_PS_PROFILE
+$env:JB_PS_PROFILE = $locked + [IO.Path]::PathSeparator + $other
+Remove-Item Function:\jbx
+$threw = ''
+$hold = [IO.File]::Open($locked, 'Open', 'ReadWrite', 'None')
+try {
+    # Not redirected: 5.1 makes a redirected native stderr line an error.
+    try { Get-Content -Raw -LiteralPath $script | Invoke-Expression } catch { $threw = "$_" }
+} finally {
+    $hold.Dispose()
+    $env:JB_PS_PROFILE = $savedProfile
+}
+Assert-That ($threw -like "*NOT added to $locked*") "an unreadable profile fails the run, naming it (got '$threw')"
+Assert-That ((Get-Content -Raw -LiteralPath $locked).Trim() -eq 'keep me') 'the unreadable profile is left exactly as it was'
+Assert-That ((Get-Content -Raw -LiteralPath $other) -match '# >>> just-bashit get-jb.ps1 >>>') 'the other profile is still written'
+Assert-That ([bool](Get-Command jbx -CommandType Function -ErrorAction SilentlyContinue)) 'jbx is still defined in this session'
 
 $exe = (Get-Process -Id $PID).Path
 $fresh = & $exe -NoProfile -ExecutionPolicy Bypass -Command ". '$env:JB_PS_PROFILE'; jbx just-bashit:datetime iso-8601-basic; exit `$LASTEXITCODE"
