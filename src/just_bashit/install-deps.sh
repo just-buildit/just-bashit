@@ -638,10 +638,12 @@ _vs_activity() {
 	local -a _src=()
 	if [ -n "${_temp}" ]; then
 		# The glob is sorted, and the name is a timestamp, so prepending
-		# each puts the newest first.
+		# each puts the newest first. "MARK is not newer", not "the log is
+		# newer": macOS's bash 3.2 compares whole seconds, so a log opened
+		# in the second the install started is not -nt its MARK (CI, #195).
 		for _f in "${_temp}"/dd_setup_*.log; do
 			[[ ${_f##*/} =~ ^dd_setup_[0-9]+\.log$ ]] || continue
-			[ "${_f}" -nt "${_mark}" ] && _src=("${_f}" ${_src[@]+"${_src[@]}"})
+			[ ! "${_mark}" -nt "${_f}" ] && _src=("${_f}" ${_src[@]+"${_src[@]}"})
 		done
 	fi
 	for _f in ${_src[@]+"${_src[@]}"} "${_log}"; do
