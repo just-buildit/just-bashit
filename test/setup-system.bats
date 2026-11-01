@@ -2022,16 +2022,16 @@ _default_steps() {
 @test 'sshd is a default step on native Windows' {
 	_native_stubs
 	run _default_steps
-	assert_output "deps,shell,ssh,sshd,git,tools,pwsh,claude"
+	assert_output "deps,folders,shell,ssh,sshd,git,tools,pwsh,claude"
 }
 
 @test 'sshd stays opt-in on Linux and from WSL' {
 	_sshd_stubs
 	run _default_steps
-	assert_output "deps,shell,ssh,git,tools,pwsh,claude"
+	assert_output "deps,folders,shell,ssh,git,tools,pwsh,claude"
 	echo "Linux version 6.8.0-generic" >"${JB_PROC_VERSION}"
 	run _default_steps
-	assert_output "deps,shell,ssh,git,tools,pwsh,claude"
+	assert_output "deps,folders,shell,ssh,git,tools,pwsh,claude"
 }
 
 @test 'sshd: native Windows asks the elevated run for the ssh-agent service too' {
