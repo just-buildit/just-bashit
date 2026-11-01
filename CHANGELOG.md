@@ -77,6 +77,19 @@
 
 ### Fixed
 
+- **From PowerShell, `jbx setup-system -s sshd,git` runs both steps
+    (#196).** PowerShell parses an unquoted `sshd,git` as an array, and the
+    profile function get-jb.ps1 writes turned each argument into a string
+    with `[string]`, which joins an array with a space: bash got
+    `sshd git`. The function now joins an array argument with commas, in
+    Windows PowerShell 5.1 and PowerShell 7. A profile written before this
+    keeps the old block until the one-liner is re-run, which rewrites it in
+    place. And setup-system's step validation now compares each step in
+    `-s`, `-x` and `bootstrap.toml`'s `steps` with the known steps exactly:
+    it matched against a space-joined list, so `sshd git` passed (the two
+    are adjacent there), matched nothing in the run loop and ended in
+    `no steps selected`. It is now `unknown step 'sshd git'`.
+
 - **setup-system's `claude` step installs Claude Code on native Windows
     (#189).** It ran Anthropic's `install.sh` everywhere, which refuses a
     MINGW/MSYS/CYGWIN `uname` ("Windows is not supported by this script"),

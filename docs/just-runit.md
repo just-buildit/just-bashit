@@ -91,7 +91,10 @@ Arguments travel in the environment to a small driver,
 MSYS runtime would glob (`*`) and re-quote (`'`, `"`): each one arrives as
 typed, empty ones included. Two things are PowerShell's own and happen before
 jbx sees anything: a bare `--` is consumed by PowerShell, and an unquoted
-`$name` is expanded by it.
+`$name` is expanded by it. An unquoted `a,b` is a PowerShell array, which
+the functions pass on as one argument `a,b`, so `jbx setup-system -s sshd,git`
+means what it does in bash. A profile written before that fix passed
+`sshd git`: re-run the one-liner to rewrite the block.
 
 The functions also export `JB_CALLER=pwsh` for the call. `setup-system` reads
 it, so it ends by telling you to open a new PowerShell window when an install

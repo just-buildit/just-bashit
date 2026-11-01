@@ -160,6 +160,18 @@ _iex() {
 	assert_line "0"
 }
 
+# PowerShell parses an unquoted a,b as an array, and [string] joins an array
+# with a space: `jbx -r setup-system -s sshd,git` reached bash as
+# 'sshd git' (#196). Every comma list jbx takes means a,b.
+@test 'get-jb.ps1: jbx forwards an unquoted a,b as one argument a,b' {
+	_posix_only
+	_e2e_env
+	E2E_CODE="$(_iex)"'jbx -s sshd,git -x a,b,c "q,r" one; exit $LASTEXITCODE'
+	run _e2e JB_BASH="${BASH_BIN}"
+	assert_success
+	assert_output --partial '[-s][sshd,git][-x][a,b,c][q,r][one] n=6'
+}
+
 @test 'get-jb.ps1: jbx returns its exit code and passes stdin when piped' {
 	_posix_only
 	_e2e_env
