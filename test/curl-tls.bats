@@ -21,16 +21,21 @@ bats_require_minimum_version 1.5.0
 # curl-calls.awk tokenises every shipped bash file and reports each place
 # curl is RUN -- curl, or a path ending in /curl, as a command name: at a
 # command's start, in a one-line function body, after VAR=value words, after
-# a wrapper and its options (env, sudo, nice, timeout, stdbuf, xargs,
-# coproc, _run, exec, command...), inside $(...)/<(...) anywhere including an
-# unquoted heredoc body, and as the head of an argv array (`A=(curl -x)`).
+# a wrapper and its options (env, sudo, nice, timeout, time -p, stdbuf,
+# xargs, coproc, _run, exec, command...), after redirections written first
+# (`2>/dev/null curl`, `> out curl`), inside $(...)/<(...) anywhere including
+# an unquoted heredoc body, and as the head of an argv array (`A=(curl -x)`).
 # What it cannot resolve fails closed, as a DYNAMIC finding: a command named
 # by an expansion that mentions curl (`$CURL`, "${CURL:-curl}",
-# "$(command -v curl)"), a variable assigned curl's name or path, and eval
-# text naming curl. NOT seen: a command word that is an expansion NOT
-# naming curl ("${cmd[@]}" of an array built elsewhere), curl reached
-# through a function or alias of another name, a quoted heredoc body (it
-# runs nothing), and anything not written in a shipped bash file;
+# "$(command -v curl)"), a variable assigned curl's name or path, bare or
+# through local/declare/typeset/export/readonly, curl in a `for ... in`
+# word list, and eval text naming curl. A known false positive: a variable
+# that only HOLDS the name, never run (`pkg=curl` for a package lookup), is
+# reported too; pass the name inline or as a quoted argument instead
+# (`get-pkg-version apt curl`). NOT seen: a command word that is an
+# expansion NOT naming curl ("${cmd[@]}" of an array built elsewhere), curl
+# reached through a function or alias of another name, a quoted heredoc
+# body (it runs nothing), and anything not written in a shipped bash file;
 # get-jb.ps1 is read by its own test below.
 # ---------------------------------------------------------------------------
 
@@ -169,6 +174,19 @@ _fake_curl() {
 		"$(command -v curl)" -sS https://dynamic.path
 		sudo apt-get install curl
 		why="${why:-curl exit ${rc}}"
+		local c=curl
+		declare -r d=curl
+		export E=/usr/bin/curl
+		typeset t=curl
+		readonly R=curl
+		local plain other=2
+		for t in curl wget; do "$t" -sS https://for.list; done
+		2>/dev/null curl -sS https://redirection.first
+		> out curl -sS https://redirection.apart
+		time -p curl -sS https://time.p
+		read -r C <<< word
+		read -r C <<<word
+		curl -sS https://after.here.strings
 	SH
 	run --separate-stderr _calls "${BATS_TEST_TMPDIR}/shapes.sh"
 	assert_success
@@ -196,7 +214,17 @@ ${f}:42:DYNAMIC \${CURL:-curl}
 ${f}:43:DYNAMIC eval curl -sS https://eval
 ${f}:44:DYNAMIC CURL=curl
 ${f}:45:DYNAMIC c=\$(?curl?)
-${f}:46:DYNAMIC \$(?curl?)"
+${f}:46:DYNAMIC \$(?curl?)
+${f}:49:DYNAMIC c=curl
+${f}:50:DYNAMIC d=curl
+${f}:51:DYNAMIC E=/usr/bin/curl
+${f}:52:DYNAMIC t=curl
+${f}:53:DYNAMIC R=curl
+${f}:55:DYNAMIC for ... in curl
+${f}:56:curl -sS https://redirection.first
+${f}:57:curl -sS https://redirection.apart
+${f}:58:curl -sS https://time.p
+${f}:61:curl -sS https://after.here.strings"
 }
 
 @test 'curl-calls.awk reports a file it lost its place in' {
