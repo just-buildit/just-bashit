@@ -28,30 +28,47 @@
 
 function reset_frame() {
 	cmdpos[d] = 1
-	incurl[d] = 0
+	incurl[d] = 0   # 1: in a curl call, 2: in an eval
 	args[d] = ""
 	cline[d] = 0
 	wrap[d] = ""
+	prevopt[d] = 0
 	arr[d] = 0
 	arrcurl[d] = 0
+	mention[d] = 0
+	invoked[d] = 0
+}
+
+function finding(where, what) {
+	print label ":" where ":DYNAMIC " what
 }
 
 function finish(case_close) {
-	if (incurl[d] && !(case_close && args[d] == "")) {
+	if (incurl[d] == 1 && !(case_close && args[d] == "")) {
 		print label ":" cline[d] ":curl" args[d]
+		invoked[d] = 1
 	}
+	if (incurl[d] == 2 && args[d] ~ /curl/)
+		finding(cline[d], "eval" args[d])
 	incurl[d] = 0
 	args[d] = ""
 	wrap[d] = ""
+	prevopt[d] = 0
 }
 
 function is_assign(w) {
 	return w ~ /^[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?\+?=/
 }
 
+# curl by name or by path: curl, /usr/bin/curl, ${dir}/curl.
+function is_curl(w) {
+	return w ~ /(^|\/)curl$/
+}
+
 # A complete word at the current frame: decide whether it is a command name.
-function word(w, quoted) {
+function word(w, quoted,    v) {
 	lastword = w
+	if (is_curl(w)) mention[d] = 1
 	if (arr[d]) {
 		if (arrcurl[d]) {
 			# The array's second element decides: an option makes it an argv.
@@ -68,7 +85,7 @@ function word(w, quoted) {
 			args[d] = args[d] " " w
 			return
 		}
-		if (arr[d] == 1 && w == "curl" && !quoted) {
+		if (arr[d] == 1 && is_curl(w)) {
 			arrcurl[d] = 1
 			arrline[d] = lno
 		}
@@ -79,42 +96,62 @@ function word(w, quoted) {
 		args[d] = args[d] " " w
 		return
 	}
-	if (wrap[d] == "env") {
-		if (w == "-u" || w == "--unset") {
-			wrap[d] = "env-u"
-			return
-		}
-		if (w ~ /^-/ || is_assign(w)) return
-		wrap[d] = ""
-		cmdpos[d] = 1
-	} else if (wrap[d] == "env-u") {
-		wrap[d] = "env"
-		return
-	} else if (wrap[d] == "timeout") {
-		if (w ~ /^-/) return
+	if (wrap[d] == "function") {   # `function NAME`: the body follows
 		wrap[d] = ""
 		cmdpos[d] = 1
 		return
-	} else if (wrap[d] == "command") {
-		wrap[d] = ""
-		if (w ~ /^-[vV]/) {
+	}
+	if (wrap[d] == "command") {
+		wrap[d] = "run"
+		if (w ~ /^-[vV]/) {   # `command -v curl` asks, it does not run
+			wrap[d] = ""
 			cmdpos[d] = 0
 			return
 		}
+	}
+	if (wrap[d] == "run") {
+		# A wrapper's options, their values, durations and VAR=value words
+		# come before the command it runs: `nice -n 5 curl`, `sudo -E
+		# curl`, `env -u X A=b curl`, `timeout 5 curl`, `xargs -I {} curl`.
+		# A word after an option is taken as its value, unless it is curl.
+		if (w ~ /^-/) { prevopt[d] = 1; return }
+		if (is_assign(w)) { prevopt[d] = 0; return }
+		if (w ~ /^[0-9.]+[smhd]?$/) { prevopt[d] = 0; return }
+		if (prevopt[d] && !is_curl(w)) { prevopt[d] = 0; return }
+		wrap[d] = ""
+		prevopt[d] = 0
 		cmdpos[d] = 1
 	}
 	if (!cmdpos[d]) return
-	if (!quoted && is_assign(w)) return
+	if (is_assign(w)) {
+		# `CURL=curl`, `c=/usr/bin/curl`, `c="$(command -v curl)"`: a name
+		# for curl that a later "$c" would run, which no scan can follow.
+		v = w
+		sub(/^[^=]*=/, "", v)
+		if (is_curl(v) || v ~ /\?curl\?/) finding(wline, w)
+		return
+	}
 	if (!quoted && w ~ /^(if|then|do|else|elif|while|until|time|!|\{)$/) return
-	if (!quoted && w ~ /^(_run|exec|builtin|nohup|sudo|_priv|nice)$/) return
-	if (!quoted && w == "env") { wrap[d] = "env"; return }
-	if (!quoted && w == "timeout") { wrap[d] = "timeout"; return }
+	if (!quoted && w ~ /^(_run|exec|builtin|nohup|sudo|doas|_priv|nice|ionice|env|timeout|stdbuf|xargs|coproc|setsid)$/) {
+		wrap[d] = "run"
+		prevopt[d] = 0
+		return
+	}
 	if (!quoted && w == "command") { wrap[d] = "command"; return }
+	if (!quoted && w == "function") { wrap[d] = "function"; return }
 	cmdpos[d] = 0
-	if (w == "curl") {
+	if (is_curl(w)) {
 		incurl[d] = 1
 		args[d] = ""
 		cline[d] = wline
+	} else if (w == "eval") {
+		incurl[d] = 2
+		args[d] = ""
+		cline[d] = wline
+	} else if (w ~ /\$/ && (w ~ /[Cc][Uu][Rr][Ll]/)) {
+		# A command named by an expansion that mentions curl: `$CURL`,
+		# "${CURL:-curl}", "$(command -v curl)". Fails closed.
+		finding(wline, w)
 	}
 }
 
@@ -149,10 +186,13 @@ function push(kind) {
 	if (kind == "sub") enter("n")
 }
 
-# Close the innermost frame; a substitution's text joins the word it sits in.
-function pop(k) {
+# Close the innermost frame; a substitution's text joins the word it sits
+# in, as $(...) -- or as $(?curl?) when curl was named in it and not run,
+# so a word built from it is a name for curl (`"$(command -v curl)" URL`).
+function pop(    k, named) {
 	finish(0)
 	k = fkind[d]
+	named = mention[d] && !invoked[d]
 	tok = stok[d]
 	tokq = stokq[d]
 	havetok = shave[d]
@@ -160,7 +200,7 @@ function pop(k) {
 	d--
 	if (k == "sub") {
 		leave()
-		addc("$(...)")
+		addc(named ? "$(?curl?)" : "$(...)")
 	}
 	return k
 }
@@ -169,7 +209,7 @@ BEGIN {
 	d = 0
 	reset_frame()
 	msd = 0
-	ms[0] = "n"   # n: normal, s: '...', q: "...", b: ${...}
+	ms[0] = "n"   # n: normal, s: '...', q: "...", b: ${...}, h: heredoc body
 	mode = "n"
 	hd = ""
 	hdpend = ""
@@ -203,12 +243,20 @@ FNR == 1 {
 {
 	lno = FNR
 	line = $0
-	# Inside a heredoc body: skip to the terminator.
+	# A heredoc body. A quoted tag (<<'EOF') expands nothing: skipped. An
+	# unquoted one expands $(...) when it runs, so it is scanned as text in
+	# which only ${...} and $(...) mean anything (mode h).
 	if (hd != "") {
 		t = line
 		sub(/^\t+/, "", t)
-		if (t == hd) hd = ""
-		next
+		if (t == hd && (hdq || (mode == "h" && d == hdd))) {
+			if (!hdq) leave()
+			hd = ""
+			tok = ""
+			havetok = 0
+			next
+		}
+		if (hdq) next
 	}
 	n = length(line)
 	i = 1
@@ -221,7 +269,7 @@ FNR == 1 {
 			i++
 			continue
 		}
-		if (mode == "q" || mode == "b") {
+		if (mode == "q" || mode == "b" || mode == "h") {
 			if (c == "\\") {
 				addc(substr(line, i + 1, 1))
 				i += 2
@@ -278,7 +326,13 @@ FNR == 1 {
 		if (c == ")") {
 			flush()
 			if (d > 0) {
-				if (pop() != "sub") { tok = ""; havetok = 0 }
+				if (pop() != "sub") {
+					tok = ""
+					havetok = 0
+					# After `( ... )` or a function's `()`, a command can
+					# follow: the body of `f() { curl ...; }`.
+					cmdpos[d] = 1
+				}
 				i++
 				continue
 			}
@@ -292,6 +346,7 @@ FNR == 1 {
 			rest = substr(line, i + 2)
 			if (match(rest, /^-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?/)) {
 				t = substr(rest, RSTART, RLENGTH)
+				hdpq = (t ~ /['"]/)
 				gsub(/^-?[ \t]*|['"]/, "", t)
 				hdpend = t
 				i += 2 + RLENGTH
@@ -326,7 +381,13 @@ FNR == 1 {
 			cmdpos[d] = 1
 			wrap[d] = ""
 		}
-		if (hdpend != "") { hd = hdpend; hdpend = "" }
+		if (hdpend != "") {
+			hd = hdpend
+			hdq = hdpq
+			hdd = d
+			hdpend = ""
+			if (!hdq) enter("h")
+		}
 	} else if (mode != "n") {
 		addc("\n")
 	}
