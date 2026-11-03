@@ -109,7 +109,10 @@ _bin_without() {
 # unreachable host does, exit N with curl's message on stderr, whatever else
 # is in DIR. A `--head -w ...` probe prints 200 or 404 by the same lookup.
 # A call with no URL (just-runit's probe for --retry-all-errors) succeeds and
-# does nothing. Every URL asked for is appended to ${JB_FIXTURES_LOG}.
+# does nothing. `curl -V` prints ${JB_CURL_BANNER}, an OpenSSL curl's first
+# line by default: a Schannel one there is how a test is Git for Windows'
+# curl to _curl_tls_init (test/curl-tls.bats). Every URL asked for is
+# appended to ${JB_FIXTURES_LOG}.
 #
 # just-runit fetches only https:// -- it refuses http:// and file:// -- so a
 # local server cannot stand in for the network; replacing curl is the seam
@@ -133,6 +136,10 @@ _serve_fixtures() {
 					dest="${2}"
 					shift 2
 					continue
+					;;
+				-V | --version)
+					printf '%s\n' "${JB_CURL_BANNER:-curl 8.0.0 (x86_64-pc-linux-gnu) libcurl/8.0.0 OpenSSL/3.0.0}"
+					exit 0
 					;;
 				--fail) fail=1 ;;
 				--head) head=1 ;;

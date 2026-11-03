@@ -36,9 +36,10 @@ _sha_of() {
 	fi
 }
 
-# Every logged call that fetched something, i.e. not the --help probe.
+# Every logged call that fetched something, i.e. not the --help probe or
+# _curl_tls_init's `curl -V`.
 _fetch_calls() {
-	grep -v -- '--help' "${CURL_LOG}"
+	grep -v -e '--help' -e '^-V$' "${CURL_LOG}"
 }
 
 @test '--no-verify passes --insecure to curl, and warns' {
