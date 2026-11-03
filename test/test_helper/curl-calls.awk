@@ -33,6 +33,7 @@ function reset_frame() {
 	cline[d] = 0
 	wrap[d] = ""
 	prevopt[d] = 0
+	skipnext[d] = 0
 	arr[d] = 0
 	arrcurl[d] = 0
 	mention[d] = 0
@@ -54,6 +55,7 @@ function finish(case_close) {
 	args[d] = ""
 	wrap[d] = ""
 	prevopt[d] = 0
+	skipnext[d] = 0
 }
 
 function is_assign(w) {
@@ -63,6 +65,14 @@ function is_assign(w) {
 # curl by name or by path: curl, /usr/bin/curl, ${dir}/curl.
 function is_curl(w) {
 	return w ~ /(^|\/)curl$/
+}
+
+# `CURL=curl`, `c=/usr/bin/curl`, `c="$(command -v curl)"`: a name for curl
+# that a later "$c" would run, which no scan can follow. Fails closed.
+function assign_check(w,    v) {
+	v = w
+	sub(/^[^=]*=/, "", v)
+	if (is_curl(v) || v ~ /\?curl\?/) finding(wline, w)
 }
 
 # A complete word at the current frame: decide whether it is a command name.
@@ -96,6 +106,18 @@ function word(w, quoted,    v) {
 		args[d] = args[d] " " w
 		return
 	}
+	if (wrap[d] == "decl") {
+		# `local c=curl`, `declare -r d=curl`, `export E=curl`: the same
+		# assignment check as a bare one; a name without a value is not one.
+		if (w !~ /^-/ && is_assign(w)) assign_check(w)
+		return
+	}
+	if (wrap[d] == "for") {
+		# `for t in curl; do "$t" ...`: curl in the word list is a name for
+		# it that the loop body runs. Fails closed.
+		if (is_curl(w)) finding(wline, "for ... in " w)
+		return
+	}
 	if (wrap[d] == "function") {   # `function NAME`: the body follows
 		wrap[d] = ""
 		cmdpos[d] = 1
@@ -123,16 +145,26 @@ function word(w, quoted,    v) {
 		cmdpos[d] = 1
 	}
 	if (!cmdpos[d]) return
-	if (is_assign(w)) {
-		# `CURL=curl`, `c=/usr/bin/curl`, `c="$(command -v curl)"`: a name
-		# for curl that a later "$c" would run, which no scan can follow.
-		v = w
-		sub(/^[^=]*=/, "", v)
-		if (is_curl(v) || v ~ /\?curl\?/) finding(wline, w)
+	if (skipnext[d]) {   # the target of a redirection written apart: `> out`
+		skipnext[d] = 0
 		return
 	}
-	if (!quoted && w ~ /^(if|then|do|else|elif|while|until|time|!|\{)$/) return
-	if (!quoted && w ~ /^(_run|exec|builtin|nohup|sudo|doas|_priv|nice|ionice|env|timeout|stdbuf|xargs|coproc|setsid)$/) {
+	if (!quoted && w ~ /^[0-9]*(<>|<|>>|>|&>|>&)/) {
+		# A redirection before the command: `2>/dev/null curl`, `> out curl`.
+		if (w ~ /^[0-9]*(<>|<|>>|>|&>|>&)$/) skipnext[d] = 1
+		return
+	}
+	if (is_assign(w)) {
+		assign_check(w)
+		return
+	}
+	if (!quoted && w ~ /^(if|then|do|else|elif|while|until|!|\{)$/) return
+	if (!quoted && w ~ /^(local|declare|typeset|export|readonly)$/) {
+		wrap[d] = "decl"
+		return
+	}
+	if (!quoted && w == "for") { wrap[d] = "for"; return }
+	if (!quoted && w ~ /^(_run|exec|builtin|nohup|sudo|doas|_priv|nice|ionice|env|timeout|time|stdbuf|xargs|coproc|setsid)$/) {
 		wrap[d] = "run"
 		prevopt[d] = 0
 		return
@@ -341,7 +373,12 @@ FNR == 1 {
 			i++
 			continue
 		}
-		if (c2 == "<<" && substr(line, i, 3) != "<<<") {
+		if (substr(line, i, 3) == "<<<") {   # a here-string, not a heredoc
+			addc("<<<")
+			i += 3
+			continue
+		}
+		if (c2 == "<<") {
 			flush()
 			rest = substr(line, i + 2)
 			if (match(rest, /^-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?/)) {
