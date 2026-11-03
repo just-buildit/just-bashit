@@ -18,8 +18,20 @@ bats_require_minimum_version 1.5.0
 # (get-jb.ps1, a one-line equivalent).
 #
 # These tests hold that without a list of call sites: test_helper/
-# curl-calls.awk finds every curl INVOCATION in the shipped source by
-# tokenising it, so a new bare `curl -sSL URL` anywhere fails here.
+# curl-calls.awk tokenises every shipped bash file and reports each place
+# curl is RUN -- curl, or a path ending in /curl, as a command name: at a
+# command's start, in a one-line function body, after VAR=value words, after
+# a wrapper and its options (env, sudo, nice, timeout, stdbuf, xargs,
+# coproc, _run, exec, command...), inside $(...)/<(...) anywhere including an
+# unquoted heredoc body, and as the head of an argv array (`A=(curl -x)`).
+# What it cannot resolve fails closed, as a DYNAMIC finding: a command named
+# by an expansion that mentions curl (`$CURL`, "${CURL:-curl}",
+# "$(command -v curl)"), a variable assigned curl's name or path, and eval
+# text naming curl. NOT seen: a command word that is an expansion NOT
+# naming curl ("${cmd[@]}" of an array built elsewhere), curl reached
+# through a function or alias of another name, a quoted heredoc body (it
+# runs nothing), and anything not written in a shipped bash file;
+# get-jb.ps1 is read by its own test below.
 # ---------------------------------------------------------------------------
 
 SRC="${PROJECT_ROOT}/src/just_bashit"
@@ -134,6 +146,29 @@ _fake_curl() {
 		s='multi line
 		curl -sSL https://in.a.string'
 		curl -V 2>/dev/null
+		_bare_fetch() { curl -fsSL https://one.liner; }
+		function kw_fn { curl -fsSL https://keyword.fn; }
+		nice -n 5 curl -sS https://nice
+		sudo -E curl -sS https://sudo
+		stdbuf -oL curl -sS https://stdbuf
+		xargs -I {} curl -sS {}
+		coproc curl -sS https://coproc
+		/usr/bin/curl -sS https://by.path
+		"${dir}/curl" -sS https://by.var.path
+		cat <<-EOF
+		  $(curl -sS https://unquoted.heredoc)
+		EOF
+		cat <<-'EOF'
+		  $(curl -sS https://quoted.heredoc.runs.nothing)
+		EOF
+		$CURL -sS https://dynamic
+		"${CURL:-curl}" -sS https://dynamic.default
+		eval "curl -sS https://eval"
+		CURL=curl
+		c="$(command -v curl)"
+		"$(command -v curl)" -sS https://dynamic.path
+		sudo apt-get install curl
+		why="${why:-curl exit ${rc}}"
 	SH
 	run --separate-stderr _calls "${BATS_TEST_TMPDIR}/shapes.sh"
 	assert_success
@@ -145,7 +180,23 @@ ${f}:7:curl -sSL \${a}
 ${f}:8:curl -sSL \${b}
 ${f}:9:curl -K - \${c}
 ${f}:10:curl --max-time \${REM}
-${f}:25:curl -V 2>/dev/null"
+${f}:25:curl -V 2>/dev/null
+${f}:26:curl -fsSL https://one.liner
+${f}:27:curl -fsSL https://keyword.fn
+${f}:28:curl -sS https://nice
+${f}:29:curl -sS https://sudo
+${f}:30:curl -sS https://stdbuf
+${f}:31:curl -sS {}
+${f}:32:curl -sS https://coproc
+${f}:33:curl -sS https://by.path
+${f}:34:curl -sS https://by.var.path
+${f}:36:curl -sS https://unquoted.heredoc
+${f}:41:DYNAMIC \$CURL
+${f}:42:DYNAMIC \${CURL:-curl}
+${f}:43:DYNAMIC eval curl -sS https://eval
+${f}:44:DYNAMIC CURL=curl
+${f}:45:DYNAMIC c=\$(?curl?)
+${f}:46:DYNAMIC \$(?curl?)"
 }
 
 @test 'curl-calls.awk reports a file it lost its place in' {
@@ -165,6 +216,8 @@ ${f}:25:curl -V 2>/dev/null"
 	while IFS= read -r c; do
 		[[ -n ${c} ]] || continue
 		[[ ${c} == *:EOF:UNBALANCED* ]] && bad+="${c}"$'\n' && continue
+		# A call the scan cannot resolve is refused, not trusted.
+		[[ ${c} == *:DYNAMIC\ * ]] && bad+="${c}"$'\n' && continue
 		_is_probe "${c#*:*:}" && continue
 		n=$((n + 1))
 		[[ ${c} == *'${_CURL_TLS[@]'* ]] || bad+="${c}"$'\n'
@@ -186,16 +239,45 @@ ${calls}"
 	users="$(_calls "${files[@]}" | grep -F '${_CURL_TLS[@]' | cut -d: -f1 | sort -u)"
 	[[ -n ${users} ]] || fail "no file uses _CURL_TLS"
 	while IFS= read -r f; do
-		# Each file runs the decision before its calls...
-		grep -qE '^[[:space:]]+_curl_tls_init$' "${f}" ||
-			bad+="${f##*/}: never calls _curl_tls_init"$'\n'
-		# ...from pkg.sh, sourced, or from its own copy, byte for byte.
+		# The decision, from pkg.sh, sourced, or from the file's own copy,
+		# byte for byte.
 		if [[ ${f} != */pkg.sh ]] &&
 			! grep -qE '^source "\$\{[A-Z_]+\}/pkg\.sh"$' "${f}"; then
 			[[ "$(_fn_body "${f}")" == "${canon}" ]] ||
 				bad+="${f##*/}: _curl_tls_init differs from pkg.sh's"$'\n'
 		fi
 	done <<<"${users}"
+	[[ -z ${bad} ]] || fail "${bad}"
+}
+
+# _init_before FILE LINE -- does the function holding LINE (or the top-level
+# stretch, after the last function to close) call _curl_tls_init before it?
+# Functions here open at column 0 (`name() {`) and close on a `}` there.
+_init_before() {
+	local l=$(($2 - 1)) text
+	while ((l > 0)); do
+		text="$(sed -n "${l}p" "${1}")"
+		[[ ${text} =~ ^[[:space:]]+_curl_tls_init$ ]] && return 0
+		[[ ${text} == '}' || ${text} =~ ^[A-Za-z_][A-Za-z0-9_-]*\(\)\ \{ ]] && return 1
+		l=$((l - 1))
+	done
+	return 1
+}
+
+# Per call, not per file: a new function that expands _CURL_TLS without
+# running the decision first would send nothing on Schannel, silently.
+@test 'every curl call runs _curl_tls_init first, in its own function' {
+	local -a files
+	mapfile -t files < <(_shipped_bash)
+	local c file line bad="" n=0
+	while IFS= read -r c; do
+		[[ ${c} == *'${_CURL_TLS[@]'* ]] || continue
+		file="${c%%:*}" line="${c#*:}" line="${line%%:*}"
+		n=$((n + 1))
+		_init_before "${file}" "${line}" ||
+			bad+="${file##*/}:${line}: no _curl_tls_init before it in its function"$'\n'
+	done < <(_calls "${files[@]}")
+	[[ ${n} -ge 8 ]] || fail "found only ${n} calls using _CURL_TLS"
 	[[ -z ${bad} ]] || fail "${bad}"
 }
 
@@ -233,7 +315,9 @@ _decide() {
 	body="$(_fn_body "${1}")"
 	[[ -n ${body} ]] || fail "no _curl_tls_init in ${1}"
 	_fake_curl "${2}"
-	bash -c 'set -euo pipefail; IFS=$'"'"'\n\t'"'"'
+	# Without BASH_ENV: kcov's names BASH_SOURCE in a PS4 that `set -u`
+	# then expands at this child's top level (test/runit-list.bats says more).
+	env -u BASH_ENV bash -c 'set -euo pipefail; IFS=$'"'"'\n\t'"'"'
 		eval "$1"
 		_curl_tls_init
 		_curl_tls_init
@@ -258,7 +342,7 @@ _decide() {
 		assert_output "[] asked=1"
 	done
 	# No curl at all: nothing, and no failure under set -e.
-	run env PATH="$(_bin_without curl)" bash -c 'set -euo pipefail
+	run env -u BASH_ENV PATH="$(_bin_without curl)" bash -c 'set -euo pipefail
 		eval "$1"; _curl_tls_init; printf "[%s]\n" "${_CURL_TLS[@]+"${_CURL_TLS[@]}"}"' \
 		_ "$(_fn_body "${SRC}/pkg.sh")"
 	assert_success
