@@ -120,3 +120,8 @@ install-uv -n    # print the command it would run, and run nothing
 
 `JB_NO_VERIFY=1` adds `--insecure` to the `install.sh` download. This is
 how `jbx --no-verify` reaches it.
+
+On a Schannel curl (Git for Windows) the download also passes
+`--ssl-revoke-best-effort`, as every just-bashit curl call does: a revocation
+server that cannot be reached is not a failed install, and a revoked
+certificate is still refused.

@@ -27,6 +27,9 @@ _fake_net() {
 			echo '#!/usr/bin/env bash'
 			printf 'tool=%q answer=%q\n' "${tool}" "${answer}"
 			cat <<-'EOF'
+				# `curl -V` is _curl_tls_init asking which TLS backend
+				# this is, not a probe of a site: answered, never logged.
+				[[ ${tool} == curl && ${1-} == -V ]] && exit 0
 				echo "${tool} $*" >>"${CALLS}"
 				case "${answer}" in
 				up) echo "HTTP/2 200" >&2 ;;

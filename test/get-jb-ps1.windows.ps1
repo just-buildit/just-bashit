@@ -53,6 +53,23 @@ Get-Content -Raw -LiteralPath $script | Invoke-Expression
 Assert-That ([bool](Get-Command jbx -CommandType Function -ErrorAction SilentlyContinue)) 'iex defined the jbx function'
 Assert-That (-not (Get-Command Install-JustBashit -ErrorAction SilentlyContinue)) 'iex left no helper behind'
 
+# The Schannel check get-jb.ps1 runs before its curl, taken from its own
+# line, against Git for Windows' real curl: it must name Schannel there, so
+# the check must choose --ssl-revoke-best-effort, and that curl must accept
+# the flag on a real https fetch. The bats suite drives the same line with a
+# fake curl; only here is the curl real.
+$gitBash = if ($env:JB_BASH) { $env:JB_BASH } else { Join-Path $env:ProgramFiles 'Git\bin\bash.exe' }
+$fetchLine = (Select-String -LiteralPath $script -SimpleMatch 'o=--ssl-revoke-best-effort' |
+        Select-Object -First 1).Line
+Assert-That ($fetchLine -match "-c '(.*?)\. <\(curl") "get-jb.ps1 runs a Schannel check before its curl (got '$fetchLine')"
+$check = $Matches[1]
+$probe = & $gitBash -l -c ($check + 'echo $o; read -r v < <(curl -V); echo $v; ' +
+    'curl -fsS $o -o /dev/null https://just-buildit.github.io/get-jb.sh && echo FETCHED')
+Write-Information "    Git for Windows curl: $($probe[1])"
+Assert-That ($probe[1] -match 'Schannel') "Git for Windows' curl is Schannel (got '$($probe[1])')"
+Assert-That ($probe[0] -eq '--ssl-revoke-best-effort') "the check chooses --ssl-revoke-best-effort on it (got '$($probe[0])')"
+Assert-That ($probe[2] -eq 'FETCHED') "that curl fetches over https with the flag (got '$($probe -join ' | ')')"
+
 $out = jbx just-bashit:datetime iso-8601-basic
 Assert-That ($LASTEXITCODE -eq 0) "jbx just-bashit:datetime exits 0 (got $LASTEXITCODE)"
 Assert-That ("$out" -match '^\d{8}T\d{6}Z$') "jbx just-bashit:datetime prints a timestamp (got '$out')"
