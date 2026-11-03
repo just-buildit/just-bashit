@@ -631,7 +631,8 @@ function Install-JustBashit {
     # --ssl-revoke-best-effort: a revoked certificate is still refused. A
     # one-line copy of pkg.sh's _curl_tls_init, the canonical decision; no
     # library exists yet, and test/curl-tls.bats holds this line to it. Still
-    # no double quote on the line, and no glob character: [[ =~ ]], not *.
+    # no double quote on the line. The whole line is one quoted argument, so
+    # MSYS globs nothing in it, `[[` included; =~ keeps out a `*` anyway.
     $urlWasSet = Test-Path Env:JB_GET_JB_URL
     if (-not $urlWasSet) { $env:JB_GET_JB_URL = $JbDefaultUrl }
     try {

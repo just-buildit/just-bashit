@@ -2,7 +2,8 @@
 
 Source: `src/just_bashit/network.sh`
 
-Network connectivity testing. Depends on `format.sh` and `environment.sh`.
+Network connectivity testing. Depends on `format.sh`, `environment.sh` and
+`pkg.sh` (for the TLS options every curl call passes).
 
 ______________________________________________________________________
 
