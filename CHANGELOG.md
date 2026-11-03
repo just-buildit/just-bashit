@@ -97,7 +97,8 @@
     Git for Windows' curl is built on Schannel, which refuses the whole
     connection when the CA's OCSP/CRL endpoints cannot be reached (a VPN,
     proxy or firewall): `irm https://just-buildit.github.io/get-jb.ps1 | iex`
-    fetched the script and then died at its first curl with `curl: (35)   schannel: ... CRYPT_E_NO_REVOCATION_CHECK`. Every curl call just-bashit
+    fetched the script and then died at its first curl with
+    `curl: (35) schannel: ... CRYPT_E_NO_REVOCATION_CHECK`. Every curl call just-bashit
     ships -- get-jb.ps1, get-jb.sh, jbx, setup-system, `install-uv`,
     `test-internet-access` -- now passes `--ssl-revoke-best-effort` when
     `curl -V` names Schannel, and nothing on any other curl. A certificate
