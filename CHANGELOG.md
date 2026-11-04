@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-03
+
 ### Added
 
 - **setup-system: a `folders` step moves the known folders back from
