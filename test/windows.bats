@@ -63,9 +63,14 @@ _channel_stubs() {
 		*COMPUTERNAME*) printf 'TESTHOST\r\n' ;;
 		esac
 	STUB
-	# FAR_NAME / FAR_HIGH / FAR_RC are what the far end answers.
+	# FAR_NAME / FAR_HIGH / FAR_RC are what the far end answers; a host in
+	# FAR_DOWN (space-separated) does not answer at all. Every destination
+	# tried is logged, in order.
 	cat >"${BATS_TEST_TMPDIR}/bin/ssh" <<-'STUB'
 		#!/bin/bash
+		dest="${*: -2:1}"
+		printf '%s\n' "${dest}" >>"${BATS_TEST_TMPDIR}/ssh.tried"
+		[[ " ${FAR_DOWN:-} " != *" ${dest#*@} "* ]] || exit 255
 		[ "${FAR_RC:-0}" -eq 0 ] || exit "${FAR_RC}"
 		printf '%s\r\n%s\r\n' "${FAR_NAME:-TESTHOST}" "${FAR_HIGH:-True}"
 	STUB
@@ -97,6 +102,90 @@ _channel_stubs() {
 	_channel_stubs
 	FAR_RC=255 run win-admin-channel
 	assert_failure
+}
+
+# #218: with no JB_WIN_HOST, the gateway first, then this machine's Windows
+# tailnet address. On yoga-x2p the gateway timed out (its WSL rule pinned to
+# a stale adapter) while the tailnet address answered, elevated.
+_route_stubs() {
+	_channel_stubs
+	unset JB_WIN_HOST
+	# Only these stand-ins: no real C: drive, and none of Windows' own
+	# directories, which WSL interop appends to PATH (a real tailscale.exe).
+	export JB_PROC_MOUNTS=/dev/null
+	PATH="$(tr ':' '\n' <<<"${PATH}" | grep -v '^/mnt/' | paste -sd:)"
+	export PATH
+	cat >"${BATS_TEST_TMPDIR}/bin/ip" <<-'STUB'
+		#!/bin/bash
+		printf 'default via 172.19.112.1 dev eth0 proto kernel\n'
+	STUB
+	cat >"${BATS_TEST_TMPDIR}/bin/tailscale.exe" <<-'STUB'
+		#!/bin/bash
+		printf '%s\n' "$*" >>"${BATS_TEST_TMPDIR}/ts.args"
+		[ -z "${TS_DOWN:-}" ] || { echo 'failed to connect to local Tailscale service' >&2; exit 1; }
+		printf '100.116.74.22\r\n'
+	STUB
+	chmod +x "${BATS_TEST_TMPDIR}"/bin/*
+}
+
+# As the callers run it: setup-system and install-deps are `set -euo
+# pipefail`, under which a refused host fails its pipeline.
+_strict() {
+	bash -c 'set -euo pipefail; source "$1"; win-admin-channel' _ \
+		"${PROJECT_ROOT}/src/just_bashit/windows.sh"
+}
+
+@test 'win-admin-channel: a gateway that does not answer falls back to the tailnet address' {
+	_route_stubs
+	FAR_DOWN=172.19.112.1 run _strict
+	assert_success
+	assert_output "tester@100.116.74.22"
+	run cat "${BATS_TEST_TMPDIR}/ssh.tried"
+	assert_output $'tester@172.19.112.1\ntester@100.116.74.22'
+}
+
+@test 'win-admin-channel: an answering gateway is used, and tried first' {
+	_route_stubs
+	run win-admin-channel
+	assert_success
+	assert_output "tester@172.19.112.1"
+	run cat "${BATS_TEST_TMPDIR}/ssh.tried"
+	assert_output "tester@172.19.112.1"
+}
+
+@test 'win-admin-channel: a tailnet address that is another machine is not a channel' {
+	_route_stubs
+	FAR_DOWN=172.19.112.1 FAR_NAME=SOMEONE-ELSE run win-admin-channel
+	assert_failure
+	assert_output ""
+}
+
+@test 'win-admin-channel: no Tailscale on Windows leaves the gateway alone' {
+	_route_stubs
+	rm "${BATS_TEST_TMPDIR}/bin/tailscale.exe"
+	FAR_DOWN=172.19.112.1 run _strict
+	assert_failure
+	assert_output ""
+	run cat "${BATS_TEST_TMPDIR}/ssh.tried"
+	assert_output "tester@172.19.112.1"
+}
+
+@test 'win-admin-channel: a Tailscale that is not running adds no host' {
+	_route_stubs
+	TS_DOWN=1 FAR_DOWN=172.19.112.1 run _strict
+	assert_failure
+	assert_output ""
+	run cat "${BATS_TEST_TMPDIR}/ssh.tried"
+	assert_output "tester@172.19.112.1"
+}
+
+@test 'win-admin-channel: JB_WIN_HOST is the one host tried' {
+	_route_stubs
+	JB_WIN_HOST=192.0.2.1 FAR_DOWN=192.0.2.1 run win-admin-channel
+	assert_failure
+	run cat "${BATS_TEST_TMPDIR}/ssh.tried"
+	assert_output "tester@192.0.2.1"
+	assert [ ! -e "${BATS_TEST_TMPDIR}/ts.args" ]
 }
 
 # The elevation check is ONE expression (#184): what win-elevated asks this
