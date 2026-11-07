@@ -129,10 +129,17 @@ _route_stubs() {
 }
 
 # As the callers run it: setup-system and install-deps are `set -euo
-# pipefail`, under which a refused host fails its pipeline.
+# pipefail` SCRIPTS, under which a refused host fails its pipeline. A script
+# file, not `bash -c`: kcov's trace prompt reads BASH_SOURCE, which `-c`
+# leaves unset, so `set -u` aborted on the coverage run's own tracing.
 _strict() {
-	bash -c 'set -euo pipefail; source "$1"; win-admin-channel' _ \
-		"${PROJECT_ROOT}/src/just_bashit/windows.sh"
+	cat >"${BATS_TEST_TMPDIR}/strict.sh" <<-'EOF'
+		set -euo pipefail
+		# shellcheck source=/dev/null
+		source "$1"
+		win-admin-channel
+	EOF
+	bash "${BATS_TEST_TMPDIR}/strict.sh" "${PROJECT_ROOT}/src/just_bashit/windows.sh"
 }
 
 @test 'win-admin-channel: a gateway that does not answer falls back to the tailnet address' {
