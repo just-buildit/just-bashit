@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-07
+
 ### Added
 
 - **setup-system sshd: the GitHub key list is kept in sync, and the WSL
