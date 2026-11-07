@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- **setup-system sshd: the GitHub key list is kept in sync, and the WSL
+    distro is kept running (#215).** The "mirror" of `github.com/<user>.keys`
+    was a one-time copy, so a machine registered later was refused by every
+    box set up before it (measured 2026-11-07: three boxes refused
+    zen-x2elite-x's key, which GitHub listed). A SYSTEM task,
+    `\just-bashit\jb-sshd-key-refresh`, now re-reads it at startup and every
+    4 h (`windows-sshd.ps1 -RefreshKeys`). A failed or empty fetch changes
+    nothing. When the user has a WSL distro, `\just-bashit\jb-wsl-keepalive`
+    runs `wsl.exe --exec /bin/sleep infinity` as that user from boot (S4U, no
+    logon needed) and every 5 minutes if it died, so `tailscaled` and any
+    service in the distro, such as a CI runner, stay up.
+
 ## [0.12.0] - 2026-11-03
 
 ### Added

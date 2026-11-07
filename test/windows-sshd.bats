@@ -106,17 +106,21 @@ _wsl_stubs() {
 		    \$global:rules[\$Name] = \$true; \$global:calls.Add("new \$Name if=\$(\$InterfaceAlias -join ';') port=\$LocalPort") }
 		function icacls.exe { \$global:LASTEXITCODE = 0 }
 		function New-ScheduledTaskAction { param(\$Execute, \$Argument) [pscustomobject]@{ Execute = \$Execute; Argument = \$Argument } }
-		function New-ScheduledTaskTrigger { param([switch]\$AtStartup) [pscustomobject]@{ Kind = 'startup' } }
+		function New-ScheduledTaskTrigger { param([switch]\$AtStartup, [switch]\$AtLogOn, \$User, [switch]\$Once, \$At, \$RepetitionInterval)
+		    if (\$AtStartup) { [pscustomobject]@{ Kind = 'startup' } }
+		    elseif (\$AtLogOn) { [pscustomobject]@{ Kind = "logon:\$User" } }
+		    else { [pscustomobject]@{ Kind = "every:\$(\$RepetitionInterval.TotalMinutes)m" } } }
 		function Get-CimClass { param(\$ClassName, \$Namespace) \$ClassName }
 		function New-CimInstance { param([switch]\$ClientOnly, \$CimClass) [pscustomobject]@{ Kind = \$CimClass; Subscription = \$null; Enabled = \$false } }
-		function New-ScheduledTaskPrincipal { param(\$UserId, \$LogonType, \$RunLevel) [pscustomobject]@{ UserId = \$UserId; RunLevel = \$RunLevel } }
-		function New-ScheduledTaskSettingsSet { [pscustomobject]@{} }
+		function New-ScheduledTaskPrincipal { param(\$UserId, \$LogonType, \$RunLevel) [pscustomobject]@{ UserId = \$UserId; LogonType = \$LogonType; RunLevel = \$RunLevel } }
+		function New-ScheduledTaskSettingsSet { param([switch]\$AllowStartIfOnBatteries, [switch]\$DontStopIfGoingOnBatteries, [switch]\$StartWhenAvailable, \$ExecutionTimeLimit, \$MultipleInstances)
+		    [pscustomobject]@{ Limit = \$ExecutionTimeLimit; Multiple = \$MultipleInstances } }
 		function New-TimeSpan { param(\$Minutes) }
 		# The real cmdlet refuses an existing name without -Force; so does this.
 		function Register-ScheduledTask { param(\$TaskName, \$TaskPath, \$Action, \$Trigger, \$Principal, \$Settings, [switch]\$Force)
 		    \$key = "\$TaskPath\$TaskName"
 		    if (\$global:tasks.ContainsKey(\$key) -and -not \$Force) { throw "task \$key already exists" }
-		    \$global:tasks[\$key] = [pscustomobject]@{ Action = \$Action; Trigger = \$Trigger; Principal = \$Principal } }
+		    \$global:tasks[\$key] = [pscustomobject]@{ Action = \$Action; Trigger = \$Trigger; Principal = \$Principal; Settings = \$Settings } }
 		Set-Content -LiteralPath (Join-Path \$env:ProgramData 'src.ps1') -Value '# the script'
 	EOF
 }
@@ -341,4 +345,111 @@ _agent_stubs() {
 		($ifs | ForEach-Object { $_.Clauses[0].Item1.Extent.Text }) -join "|"'
 	assert_success
 	assert_output '$SshAgent'
+}
+
+# ---------------------------------------------------------------------------
+# The key-refresh task (#215): the GitHub key list re-mirrored at startup and
+# every few hours, so a machine registered later is let in with no visit. A
+# fetch that fails or is empty must leave the file alone -- written, it would
+# lock every machine out of a key-only box.
+# ---------------------------------------------------------------------------
+_refresh_stubs() {
+	cat <<-'EOF2'
+		$global:writes = @()
+		function Write-AuthorizedKey { param($User, $Keys) $global:writes += "$User<-$($Keys -join ';')"; 'C:\keys' }
+	EOF2
+}
+
+@test 'windows-sshd: a failed key fetch leaves the key file untouched' {
+	run _ps "$(_refresh_stubs)"'
+		function Invoke-RestMethod { throw "no route to github.com" }
+		Invoke-KeyRefresh -GitHubUser u -User matt; "writes=$($global:writes.Count)"'
+	assert_success
+	assert_line --partial "unchanged: fetch failed (no route to github.com)"
+	assert_line "writes=0"
+}
+
+@test 'windows-sshd: an empty or HTML key list leaves the key file untouched' {
+	run _ps "$(_refresh_stubs)"'
+		function Invoke-RestMethod { "<html>rate limited</html>" }
+		Invoke-KeyRefresh -GitHubUser u -User matt; "writes=$($global:writes.Count)"'
+	assert_success
+	assert_line "unchanged: no keys at https://github.com/u.keys"
+	assert_line "writes=0"
+}
+
+@test 'windows-sshd: a good key list is written for the user' {
+	run _ps "$(_refresh_stubs)"'
+		function Invoke-RestMethod { "ssh-ed25519 AAAAa`nssh-ed25519 AAAAb`n" }
+		Invoke-KeyRefresh -GitHubUser u -User matt; $global:writes -join "|"'
+	assert_success
+	assert_line "refreshed: 2 key(s) from https://github.com/u.keys into C:\keys"
+	assert_line "matt<-ssh-ed25519 AAAAa;ssh-ed25519 AAAAb"
+}
+
+@test 'windows-sshd: the key-refresh task runs the protected copy as SYSTEM, at startup and every 4 h' {
+	run _psw 'Register-KeyRefreshTask -Source (Join-Path $env:ProgramData "src.ps1") -GitHubUser u -User matt
+		Register-KeyRefreshTask -Source (Join-Path $env:ProgramData "src.ps1") -GitHubUser u -User matt
+		$t = $global:tasks["\just-bashit\jb-sshd-key-refresh"]
+		"tasks=$($global:tasks.Count)"
+		"user=$($t.Principal.UserId) level=$($t.Principal.RunLevel)"
+		"args=$($t.Action.Argument)"
+		"triggers=$(($t.Trigger | % { $_.Kind }) -join ",")"
+		"multiple=$($t.Settings.Multiple)"'
+	assert_success
+	assert_line "tasks=1"
+	assert_line "user=S-1-5-18 level=Highest"
+	assert_line --regexp '^args=.*-File ".*just-bashit.windows-sshd\.ps1" -RefreshKeys -GitHubUser u -User matt$'
+	assert_line "triggers=startup,every:240m"
+	assert_line "multiple=IgnoreNew"
+}
+
+# ---------------------------------------------------------------------------
+# The WSL keep-alive: one wsl.exe client, as the user, from boot.
+# ---------------------------------------------------------------------------
+@test 'windows-sshd: the keep-alive runs as the user with no logon, forever, one at a time' {
+	run _psw '$env:COMPUTERNAME = "BOX"
+		Register-WslKeepAliveTask -User matt
+		Register-WslKeepAliveTask -User matt
+		$t = $global:tasks["\just-bashit\jb-wsl-keepalive"]
+		"tasks=$($global:tasks.Count)"
+		"user=$($t.Principal.UserId) logon=$($t.Principal.LogonType) level=$($t.Principal.RunLevel)"
+		"exe=$(Split-Path -Leaf $t.Action.Execute) args=$($t.Action.Argument)"
+		"triggers=$(($t.Trigger | % { $_.Kind }) -join ",")"
+		"limit=$($t.Settings.Limit) multiple=$($t.Settings.Multiple)"'
+	assert_success
+	assert_line "tasks=1"
+	assert_line "user=BOX\matt logon=S4U level=Limited"
+	assert_line "exe=wsl.exe args=--exec /bin/sleep infinity"
+	assert_line "triggers=startup,logon:BOX\matt,every:5m"
+	assert_line "limit=00:00:00 multiple=IgnoreNew"
+}
+
+@test 'windows-sshd: a distro list in UTF-16 is read as distros; none is no keep-alive' {
+	tmp="${BATS_TEST_TMPDIR}"
+	run _ps "\$env:SystemRoot = '${tmp}'; New-Item -ItemType Directory -Force (Join-Path '${tmp}' System32) | Out-Null
+		New-Item -ItemType File -Force (Join-Path '${tmp}' System32/wsl.exe) | Out-Null"'
+		function wsl.exe { $global:LASTEXITCODE = 0; $global:out }
+		Set-Alias -Name (Join-Path $env:SystemRoot "System32/wsl.exe") -Value wsl.exe
+		$global:out = @("U`0b`0u`0n`0t`0u`0", "")
+		"one=$(Test-WslDistro)"
+		$global:out = @("", " ")
+		"none=$(Test-WslDistro)"'
+	assert_success
+	assert_line "one=True"
+	assert_line "none=False"
+}
+
+# The main body's wiring, read from the parse tree as above: the refresh task
+# only with a GitHub source (a -KeysFile has nothing to re-read), the
+# keep-alive only when the user has a distro.
+@test 'windows-sshd: the main body registers each task under its own condition' {
+	run _ps "\$ast = [System.Management.Automation.Language.Parser]::ParseFile('${PS1_FILE}', [ref]\$null, [ref]\$null)"'
+		$ifs = $ast.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.IfStatementAst] }
+		foreach ($n in "Register-KeyRefreshTask", "Register-WslKeepAliveTask") {
+		    $hit = @($ifs | Where-Object { $_.Clauses[0].Item2.Extent.Text -match $n })
+		    "$n when $($hit[0].Clauses[0].Item1.Extent.Text) count=$($hit.Count)" }'
+	assert_success
+	assert_line 'Register-KeyRefreshTask when $GitHubUser count=1'
+	assert_line 'Register-WslKeepAliveTask when Test-WslDistro count=1'
 }
