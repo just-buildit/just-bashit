@@ -91,6 +91,7 @@ _wsl_stubs() {
 		\$env:SystemRoot = '${tmp}'
 		\$global:calls = [System.Collections.Generic.List[string]]::new()
 		\$global:rules = @{}
+		\$global:remote = @{}
 		\$global:tasks = @{}
 		\$global:adapters = @(
 		    [pscustomobject]@{ Name = 'Wi-Fi'; InterfaceGuid = '{49CABE1F-3F4D-470F-A3BA-55AA87376ACD}' },
@@ -100,6 +101,9 @@ _wsl_stubs() {
 		    [pscustomobject]@{ Name = 'Tailscale'; InterfaceGuid = '{66666666-7777-8888-9999-000000000000}' })
 		function Get-NetAdapter { param([switch]\$IncludeHidden) \$global:adapters }
 		function Get-NetFirewallRule { param(\$Name) if (\$global:rules.ContainsKey(\$Name)) { [pscustomobject]@{ Name = \$Name } } }
+		# A rule's addresses: \$global:remote[name] when a test set one, else Any.
+		function Get-NetFirewallAddressFilter { param([Parameter(ValueFromPipeline)]\$Rule)
+		    process { [pscustomobject]@{ RemoteAddress = \$(if (\$global:remote.ContainsKey(\$Rule.Name)) { \$global:remote[\$Rule.Name] } else { 'Any' }) } } }
 		function Set-NetFirewallRule { param(\$Name, \$Enabled, \$Profile, \$InterfaceAlias, \$RemoteAddress)
 		    \$global:calls.Add("set \$Name if=\$(\$InterfaceAlias -join ';') ra=\$(\$RemoteAddress -join ';')") }
 		function New-NetFirewallRule { param(\$Name, \$DisplayName, \$Direction, \$Protocol, \$LocalPort, \$Action, \$Profile, \$InterfaceAlias)
@@ -138,6 +142,58 @@ _psw() { _ps "$(_wsl_stubs); $1"; }
 		Sync-WslSshdRule | Out-Null; $global:calls -join "|"'
 	assert_success
 	assert_output "set jb-sshd-wsl if=vEthernet (WSL (Hyper-V firewall)) ra="
+}
+
+# #219: a re-run that does not name the addresses keeps the rule's own. The
+# box this was measured on had a tailnet-only rule, a Public Wi-Fi profile,
+# and a re-run that set it to Any.
+@test 'windows-sshd: a re-run with no -RemoteAddress keeps a tailnet-only rule' {
+	run _psw '$global:rules["OpenSSH-Server-In-TCP"] = $true
+		$global:remote["OpenSSH-Server-In-TCP"] = @("100.64.0.0/255.192.0.0", "fd7a:115c:a1e0::/48")
+		Sync-SshdPortRule; $global:calls -join "|"'
+	assert_success
+	assert_line "  kept  firewall: port 22 from 100.64.0.0/255.192.0.0, fd7a:115c:a1e0::/48 (--sshd-allow to change it)"
+	assert_line "set OpenSSH-Server-In-TCP if= ra="
+}
+
+@test 'windows-sshd: -RemoteAddress narrows the rule' {
+	run _psw '$global:rules["OpenSSH-Server-In-TCP"] = $true
+		Sync-SshdPortRule -RemoteAddress "100.64.0.0/10", "fd7a:115c:a1e0::/48"; $global:calls -join "|"'
+	assert_success
+	assert_line "  ok    firewall: port 22 from 100.64.0.0/10, fd7a:115c:a1e0::/48"
+	assert_line "set OpenSSH-Server-In-TCP if= ra=100.64.0.0/10;fd7a:115c:a1e0::/48"
+}
+
+@test 'windows-sshd: widening a narrowed rule takes -RemoteAddress Any, by name' {
+	run _psw '$global:rules["OpenSSH-Server-In-TCP"] = $true
+		$global:remote["OpenSSH-Server-In-TCP"] = @("100.64.0.0/255.192.0.0")
+		Sync-SshdPortRule -RemoteAddress Any; $global:calls -join "|"'
+	assert_success
+	assert_line "  ok    firewall: port 22 from Any"
+	assert_line "set OpenSSH-Server-In-TCP if= ra=Any"
+}
+
+@test 'windows-sshd: a missing rule is created, admitting any address' {
+	run _psw 'Sync-SshdPortRule; $global:calls -join "|"'
+	assert_success
+	assert_line "  kept  firewall: port 22 from Any (--sshd-allow to change it)"
+	assert_line "new OpenSSH-Server-In-TCP if= port=22|set OpenSSH-Server-In-TCP if= ra="
+}
+
+# Read from the parse tree: the param has no default, so an omitted
+# --sshd-allow reaches Sync-SshdPortRule as nothing, not as Any.
+@test 'windows-sshd: -RemoteAddress has no default, and the main body passes it through' {
+	run _ps "\$ast = [System.Management.Automation.Language.Parser]::ParseFile('${PS1_FILE}', [ref]\$null, [ref]\$null)"'
+		$p = $ast.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq "RemoteAddress" }
+		"default=[$($p.DefaultValue)]"
+		$calls = @($ast.EndBlock.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq "Sync-SshdPortRule" }, $true))
+		"calls=$($calls.Count) $($calls[0].Extent.Text)"
+		$raw = @($ast.EndBlock.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq "Set-NetFirewallRule" -and $n.Extent.Text -match "OpenSSH" }, $true))
+		"raw=$($raw.Count)"'
+	assert_success
+	assert_line "default=[]"
+	assert_line 'calls=1 Sync-SshdPortRule -RemoteAddress $RemoteAddress'
+	assert_line "raw=0"
 }
 
 @test 'windows-sshd: with no WSL adapter the rule is left alone' {

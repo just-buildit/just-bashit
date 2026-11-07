@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **setup-system sshd: a re-run no longer widens a narrowed port-22 rule
+    (#219).** Without `--sshd-allow`, the rule was set to admit any address,
+    so re-running the step to pick up a newer step's tasks opened a
+    tailnet-only rule to every address (measured 2026-11-07, on a box whose
+    Wi-Fi profile was Public). An existing rule now keeps the addresses it
+    admits; a new one admits any, as before; `--sshd-allow any` widens it by
+    name.
+
 ## [0.13.0] - 2026-11-07
 
 ### Added
