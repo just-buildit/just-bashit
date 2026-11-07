@@ -12,6 +12,17 @@
     admits; a new one admits any, as before; `--sshd-allow any` widens it by
     name.
 
+- **win-admin-channel: falls back to this machine's Windows tailnet address
+    when the WSL gateway does not answer (#218).** The gateway is admitted by
+    `jb-sshd-wsl`, a rule pinned to WSL's adapter. On a box set up before the
+    task that re-pins it existed, the first reboot stranded the rule, and
+    `setup-system -s sshd` -- the step that registers that task -- reported
+    "needs admin" though `ssh <box>-win` reached the same Windows, elevated
+    (measured on yoga-x2p, 2026-11-07). The tailnet address
+    (`tailscale.exe ip -4`) is tried next, with the same computer-name and
+    elevation check; `JB_WIN_HOST` still names the only host tried.
+    `win-exe` now also looks in `Program Files\Tailscale`.
+
 ## [0.13.0] - 2026-11-07
 
 ### Added

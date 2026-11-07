@@ -32,6 +32,7 @@ Looked up in this order:
 | `<C:>/Windows/System32`                        | `cmd.exe`, `icacls.exe`, `whoami.exe`… |
 | `<C:>/Windows/System32/WindowsPowerShell/v1.0` | `powershell.exe` (Windows PowerShell)  |
 | `<C:>/Program Files/PowerShell/7`              | `pwsh.exe` (PowerShell 7)              |
+| `<C:>/Program Files/Tailscale`                 | `tailscale.exe`                        |
 
 `<C:>` is wherever the mount table says the `C:` drive is mounted, not an
 assumed `/mnt/c`: `[automount] root` in `/etc/wsl.conf` moves it.
@@ -56,10 +57,15 @@ if dest="$(win-admin-channel)"; then
 fi
 ```
 
-The host is WSL's default gateway (NAT networking; `JB_WIN_HOST` overrides
-it). It is trusted only after one round trip proves the far end's
-`%COMPUTERNAME%` is this machine's and the session is elevated, so a gateway
-that is some other box is never mistaken for the host. `WIN_SSH_OPTS` carries
+The host is WSL's default gateway (NAT networking), then, when that does not
+answer, this machine's Windows tailnet address (`tailscale.exe ip -4`);
+`JB_WIN_HOST` names the one host to try instead. The gateway comes in through
+`jb-sshd-wsl`, a rule pinned to WSL's adapter: on a box set up before the task
+that re-pins it, the first reboot strands it, and the tailnet route is how the
+sshd step still reaches Windows to repair it (#218). Each host is trusted only
+after one round trip proves the far end's `%COMPUTERNAME%` is this machine's
+and the session is elevated, so an address that is some other box is never
+mistaken for the host. `WIN_SSH_OPTS` carries
 batch mode, a connect timeout, and the key named after this host
 (`~/.ssh/<hostname>`) when it exists. The channel exists once
 `setup-system -s sshd` has run once: it adds the firewall rule that admits
