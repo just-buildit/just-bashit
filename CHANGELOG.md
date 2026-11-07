@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-11-07
+
 ### Fixed
 
 - **setup-system sshd: a re-run no longer widens a narrowed port-22 rule
