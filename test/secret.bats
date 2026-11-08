@@ -202,7 +202,7 @@ _roundtrip() {
 
 @test 'gpg: set from stdin, then get gives back the same bytes' {
 	_need gpg
-	_conf_both
+	_conf "gpg $(_fpr 1)"
 	_roundtrip gpg
 }
 
@@ -452,7 +452,7 @@ _roundtrip() {
 # A real pseudo-terminal, by script(1) -- no environment hook.
 @test 'get refuses to print to a terminal, and --show allows it' {
 	_need gpg script
-	_conf_both
+	_conf "gpg $(_fpr 1)"
 	just-runit secret set A --backend gpg <<<"${VALUE}"
 	run _tty just-runit secret get A
 	assert_failure
