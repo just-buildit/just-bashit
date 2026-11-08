@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`just-runit secret`: store, get and use secrets encrypted with gpg or
+    age (#229).** `set`, `get`, `run`, `list`, `rm`, `migrate` and `rekey`,
+    one implementation over both backends; the file's extension
+    (`NAME.gpg`, `NAME.age`) says which. No value is ever an argument:
+    it goes in on stdin and out on a pipe, `run` hands it to CMD alone,
+    `get` refuses a terminal without `--show`, and `migrate` and `rekey`
+    replace a file only once the new copy decrypts to the same bytes. `setup-system -s deps`
+    now installs gpg and age.
+
 ### Fixed
 
 - **setup-system's ssh step keeps a Mac's key name and reaches GitHub

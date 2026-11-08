@@ -2868,7 +2868,7 @@ _mac_stubs() {
 	refute_output --partial "Homebrew not installed"
 	assert_output --partial "deps:    ok"
 	# Found off PATH, so it was put on this run's PATH for install-deps.
-	run grep -x 'brew install cmake pkg-config' "${MAC}/calls"
+	run grep -x 'brew install cmake pkg-config gnupg age' "${MAC}/calls"
 	assert_success
 }
 
@@ -2892,7 +2892,7 @@ _mac_stubs() {
 	assert_output --partial "deps:    ok"
 	run cat "${MAC}/calls"
 	assert_line 'installer NONINTERACTIVE=1'
-	assert_line 'brew install cmake pkg-config'
+	assert_line 'brew install cmake pkg-config gnupg age'
 }
 
 @test 'macos deps: a failed Homebrew install fails the step, and installs nothing' {

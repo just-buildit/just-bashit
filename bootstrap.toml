@@ -30,17 +30,69 @@ source = "just-bashit:setup-system"
 # silently never ran. msys2 is left out; the .bats skip an absent shell.
 # fish is deliberately not: it cannot source POSIX sh, and a fish-default
 # distro (CachyOS) is left for bash before jbx is ever run.
+#
+# gpg, age and script(1) are for test/secret.bats (#229): it runs every
+# `just-runit secret` command against both backends with throwaway keys,
+# and gets a real terminal from script. Under CI a missing one FAILS those
+# tests rather than skipping them, so a leg cannot lose one in silence.
+# script is util-linux's everywhere but macOS, which ships its own; the
+# package that carries it differs per manager. MSYS2 has no msys age, so
+# its native ucrt64 build is the one installed.
 [dev.apt]
-packages = ["ca-certificates", "make", "git", "bats", "curl", "openssh-client", "zsh"]
+packages = [
+    "ca-certificates",
+    "make",
+    "git",
+    "bats",
+    "curl",
+    "openssh-client",
+    "zsh",
+    "gnupg",
+    "age",
+    "bsdextrautils",
+]
 
 [dev.pacman]
-packages = ["git", "make", "diffutils", "bats", "curl", "openssh", "zsh"]
+packages = [
+    "git",
+    "make",
+    "diffutils",
+    "bats",
+    "curl",
+    "openssh",
+    "zsh",
+    "gnupg",
+    "age",
+    "util-linux",
+]
 
 [dev.dnf]
-packages = ["git", "make", "diffutils", "bats", "curl", "openssh-clients", "zsh"]
+packages = [
+    "git",
+    "make",
+    "diffutils",
+    "bats",
+    "curl",
+    "openssh-clients",
+    "zsh",
+    "gnupg2",
+    "age",
+    "util-linux-script",
+]
 
 [dev.zypper]
-packages = ["git", "make", "diffutils", "bats", "curl", "openssh", "zsh"]
+packages = [
+    "git",
+    "make",
+    "diffutils",
+    "bats",
+    "curl",
+    "openssh",
+    "zsh",
+    "gpg2",
+    "age",
+    "util-linux",
+]
 
 [dev.apk]
 packages = [
@@ -53,11 +105,23 @@ packages = [
     "diffutils",
     "openssh-keygen",
     "zsh",
+    "gnupg",
+    "age",
+    "util-linux-misc",
 ]
 
 # macOS ships ssh-keygen in the base system, so brew has nothing to add.
 [dev.brew]
-packages = ["bash", "coreutils", "diffutils", "bats-core"]
+packages = ["bash", "coreutils", "diffutils", "bats-core", "gnupg", "age"]
 
 [dev.msys2]
-packages = ["git", "make", "diffutils", "curl", "openssh"]
+packages = [
+    "git",
+    "make",
+    "diffutils",
+    "curl",
+    "openssh",
+    "gnupg",
+    "mingw-w64-ucrt-x86_64-age",
+    "util-linux",
+]

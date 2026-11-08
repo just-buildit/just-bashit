@@ -185,6 +185,13 @@ endef
 # which is the difference between a gate and a decoration.
 COVERAGE_MIN = 60
 
+# The `just-runit secret` code is deliberately invisible to kcov. kcov
+# measures a bash script by tracing it (xtrace), and `just-runit secret`
+# turns xtrace off before it handles any value, since a trace prints every
+# value it touches (#229). That code is covered by test/secret.bats, not by
+# this report. There is no exception for kcov: a switch that kept tracing
+# on would be one any environment could set.
+#
 # kcov creates its own output directory but not the parent, and says so as
 # three cascading errors ("Can't write helper", "Can't start/attach", "Can't
 # open directory") that name everything except the missing mkdir. The old

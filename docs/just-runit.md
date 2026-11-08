@@ -460,7 +460,7 @@ The installer creates two names in `~/.local/bin`:
 The difference is deliberate. `just-runit` accepts the subcommands below and
 falls through to the SPEC runner when the first argument is not one of them;
 `jbx` never treats an argument as a subcommand. So a script genuinely named
-`install` or `cache` is always reachable as `jbx install` — no SPEC is
+`install`, `cache` or `secret` is always reachable as `jbx install` — no SPEC is
 shadowed by a keyword.
 
 !!! note "`jb` and `just-buildit` are not runner names"
@@ -502,6 +502,86 @@ just-runit cache clear jbs       # remove the just-bashit co-fetch bundle only
 just-runit cache clear <url>     # remove the entry for one specific URL
 just-runit cache -h              # show cache subcommand help
 ```
+
+### `just-runit secret`
+
+Stores a secret encrypted with **gpg or age** and hands it to one command, so
+a token no longer sits in a plaintext file or a shell profile that exports it
+to every process.
+
+```bash
+printf '%s' "$TOKEN" | just-runit secret set GH_TOKEN   # or type it at the prompt
+just-runit secret run GH_TOKEN=GITHUB_TOKEN -- gh auth status
+just-runit secret get GH_TOKEN | wl-copy
+just-runit secret list
+```
+
+| command                              | does                                                                                                                                |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `set NAME [--backend gpg\|age]`      | encrypts stdin, or what you type at a no-echo prompt on a terminal; never an argument; an empty value is refused and stores nothing |
+| `get NAME [--show]`                  | writes the value to stdout; refuses a terminal unless `--show`                                                                      |
+| `run NAME[=VAR]... -- CMD [ARGS...]` | execs CMD with each secret in its environment, as VAR (default NAME)                                                                |
+| `list`                               | names and backends, never values                                                                                                    |
+| `rm NAME...`                         | deletes                                                                                                                             |
+| `migrate NAME --to gpg\|age`         | re-encrypts with the other backend                                                                                                  |
+| `rekey [NAME...]`                    | re-encrypts to the recipients the config names now (default: every secret)                                                          |
+
+**The store** is `${XDG_DATA_HOME:-~/.local/share}/jb/secrets/`, directory
+mode 700, one `NAME.gpg` or `NAME.age` per secret at mode 600. The extension
+*is* the backend: every command but `set` reads it off the file, so a store
+holding both kinds works whatever the default is. `set` on a secret already
+stored keeps its backend unless `--backend` says otherwise.
+
+**The config** is `${XDG_CONFIG_HOME:-~/.config}/jb/secrets/recipients`, one
+`KEY VALUE` per line, `#` starting a comment line:
+
+```text
+gpg 0123456789ABCDEF0123456789ABCDEF01234567  # a full gpg fingerprint
+age age1qyqszqgpqyqszqgp...     # an age recipient
+age ~/.ssh/id_ed25519.pub       # a recipients file: age reads ssh keys too
+identity ~/.config/jb/age.key   # what age decrypts with (age-keygen's output,
+                                #   or an ssh private key)
+default_backend age
+```
+
+A `gpg` line is a full 40-hex fingerprint (`gpg --fingerprint KEY`): a
+short key id is refused, since short ids collide. An `age` value is a
+recipient or an **absolute** path (`~/` counts); a bare word that is
+neither is refused, and a relative path is never looked up, so a file
+planted in the directory you run from cannot choose the key.
+
+**The recipients file must be mode 600**, and yours; its directory
+(`~/.config/jb/secrets`) must be yours and not writable by group or world
+(700); an `identity` file must not be readable by them. Each refusal is one
+`error:` line naming the `chmod` that fixes it. An editor running under
+umask 002 -- the default for a login on Debian and Fedora -- creates the
+recipients file as 664, which is refused: `chmod 600` it once. A symlinked
+file (a stow-style dotfile) is judged by the file it points to. Windows
+(MSYS2, Git Bash) has no Unix modes, so these checks are skipped there.
+
+With no `gpg` line, gpg encrypts to your own key. With no `default_backend`,
+`set` uses gpg when you have a gpg secret key, else age. An unknown key is an
+error, not a skipped line, so a typo cannot leave a recipient out.
+
+**What it guarantees:**
+
+- No secret value is ever an argument -- not of `just-runit`, gpg or age. It
+    goes in on stdin and comes out on a pipe.
+- `migrate` and `rekey` replace a file only once the new copy decrypts to
+    the same bytes; any failure leaves the original as it was.
+- Shell tracing (`SHELLOPTS=xtrace`, a `BASH_ENV` that runs `set -x`) is
+    turned off before any value is handled, so no trace shows one.
+- `run` refuses a VAR that changes how CMD runs: `PATH`, `LD_*`, `DYLD_*`,
+    `BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS`, `IFS`, `PS4`,
+    `BASH_XTRACEFD`.
+- `run` decrypts every secret before it exports any, then execs CMD: CMD is
+    the only process given them, not gpg, age, or the shell you ran it from.
+    Trailing newlines are dropped, as `$(...)` drops them.
+- A missing tool, a missing key and no recipients are each one `error:` line
+    naming what to install or configure, never a gpg or age dump, and no
+    error message carries a value.
+
+`setup-system -s deps` installs gpg and age.
 
 ### `just-runit version`
 
