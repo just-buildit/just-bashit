@@ -2862,6 +2862,23 @@ _mac_stubs() {
 	assert_output --partial "${root}/opt/homebrew|${HOME}/.local/bin:${root}/opt/homebrew/bin:${root}/opt/homebrew/sbin:"
 }
 
+# The Homebrew installer lists its bin in /etc/paths.d, which path_helper
+# appends behind /usr/bin; found on a fresh Mac, where Apple's git won.
+@test 'installed profile moves a Homebrew already on PATH ahead of /usr/bin' {
+	setup-system.sh -s shell >/dev/null
+	local root="${BATS_TEST_TMPDIR}/brewroot" hb
+	hb="${root}/opt/homebrew/bin"
+	mkdir -p "${hb}"
+	printf '#!/bin/sh\n' >"${hb}/brew"
+	chmod +x "${hb}/brew"
+	run env JB_BREW_ROOT="${root}" PATH="/usr/bin:/bin:${hb}:/usr/sbin:${hb}" sh -c \
+		". '${HOME}/.config/just-bashit/profile.sh'; echo \"\${PATH}\""
+	assert_success
+	assert_output --partial "${hb}:/usr/bin:/bin:/usr/sbin"
+	# Moved, not duplicated.
+	[[ $(grep -o "${hb}" <<<"${output}" | wc -l) -eq 1 ]]
+}
+
 @test 'installed profile sources under zsh' {
 	command -v zsh >/dev/null 2>&1 || skip "zsh not installed"
 	setup-system.sh -s shell >/dev/null

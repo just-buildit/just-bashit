@@ -56,6 +56,30 @@ _jb_path_prepend() {
 }
 
 # ---------------------------------------------------------------------------
+# _jb_path_front DIR — put DIR first on PATH, moving it there if PATH already
+# has it further back.
+#
+# For Homebrew: its installer also lists /opt/homebrew/bin in
+# /etc/paths.d, and macOS's path_helper APPENDS what that holds, behind
+# /usr/bin. _jb_path_prepend would find it present and leave it there, so
+# Apple's git and python3 would win over Homebrew's.
+# ---------------------------------------------------------------------------
+_jb_path_front() {
+	[ -d "$1" ] || return 0
+	_jb_p=":${PATH}:"
+	while :; do
+		case "${_jb_p}" in
+		*":$1:"*) _jb_p="${_jb_p%%":$1:"*}:${_jb_p#*":$1:"}" ;;
+		*) break ;;
+		esac
+	done
+	_jb_p="${_jb_p#:}"
+	_jb_p="${_jb_p%:}"
+	PATH="$1${_jb_p:+:${_jb_p}}"
+	unset _jb_p
+}
+
+# ---------------------------------------------------------------------------
 # XDG base directories.
 #
 # Exported rather than assumed: plenty of tools read them, few default them,
@@ -73,7 +97,8 @@ export XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME
 # ~/.local/bin is where pip --user, uv tool, pipx and the Claude Code
 # installer land binaries; it is on PATH by default on almost nothing.
 #
-# Homebrew (macOS) goes first, so the user's own directories still win: its
+# Homebrew (macOS) goes first, so the user's own directories still win, and
+# ahead of /usr/bin even when /etc/paths.d already listed it last: its
 # installer puts brew under /opt/homebrew on Apple silicon and /usr/local on
 # Intel, and leaves adding it to PATH to the user. HOMEBREW_PREFIX is
 # exported as brew's own `shellenv` does, for the tools and formulae that
@@ -86,8 +111,8 @@ if [ "${JB_PATH:-1}" = 1 ]; then
 		if [ -x "${_jb_hb}/bin/brew" ]; then
 			HOMEBREW_PREFIX="${_jb_hb}"
 			export HOMEBREW_PREFIX
-			_jb_path_prepend "${_jb_hb}/sbin"
-			_jb_path_prepend "${_jb_hb}/bin"
+			_jb_path_front "${_jb_hb}/sbin"
+			_jb_path_front "${_jb_hb}/bin"
 			break
 		fi
 	done
