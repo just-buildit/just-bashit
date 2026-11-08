@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **setup-system's ssh step keeps a Mac's key name and reaches GitHub
+    (#225).** A Mac with no `HostName` takes its name from the network, so
+    the box key's name and ssh's `%l` drifted apart. The step now sets
+    `HostName` to the lowercased `LocalHostName` when it is unset, before
+    naming the key. It also points `github.com` at the key in
+    `~/.ssh/config`, since zsh never loads keys into the agent the way
+    `bashrc.sh` does.
+
 ## [0.14.0] - 2026-11-08
 
 ### Added

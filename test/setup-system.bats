@@ -2815,6 +2815,19 @@ _mac_stubs() {
 		[[ \${MAC_RL_STUCK:-0} == 1 ]] || touch "${MAC}/rl-on"
 	EOF
 	printf '#!/bin/bash\necho "sshd $*" >>"%s/calls"\nexit "${MAC_SSHD_RC:-0}"\n' "${MAC}" >"${MAC}/bin/sshd"
+	# scutil: HostName is unset unless MAC_HOSTNAME says otherwise, as on a
+	# fresh Mac; LocalHostName is the Bonjour name from the Computer Name.
+	cat >"${MAC}/bin/scutil" <<-EOF
+		#!/bin/bash
+		case "\$1 \$2" in
+		"--get HostName")
+			[[ -n \${MAC_HOSTNAME:-} ]] || { echo "HostName: not set"; exit 1; }
+			echo "\${MAC_HOSTNAME}" ;;
+		"--get LocalHostName") echo Matthews-Mac-mini ;;
+		"--set HostName") echo "scutil \$*" >>"${MAC}/calls" ;;
+		*) exit 1 ;;
+		esac
+	EOF
 	chmod +x "${MAC}/bin"/*
 	# Real keys: the step adds only what ssh-keygen reads as one.
 	ssh-keygen -q -t ed25519 -N '' -C one -f "${MAC}/k1"
@@ -3100,4 +3113,101 @@ _mac_stubs() {
 	assert_output --partial "sshd:    ok (dry run)"
 	refute [ -e "${HOME}/.ssh/authorized_keys" ]
 	refute [ -e "${MAC}/calls" ]
+}
+
+# #225: a Mac with no HostName takes its name from the network, so the box
+# key and ssh's %l stopped agreeing. The ssh step pins it first.
+@test 'macos ssh: an unset HostName is pinned to LocalHostName, lowercased' {
+	command -v ssh-keygen >/dev/null 2>&1 || skip "ssh-keygen not installed"
+	_mac_stubs
+	run env HOSTNAME=mac-mini.lan setup-system.sh -y -s ssh
+	assert_success
+	grep -qx "sudo scutil --set HostName matthews-mac-mini" "${MAC}/calls"
+	[[ -r "${HOME}/.ssh/matthews-mac-mini.pub" ]]
+	[[ ! -e "${HOME}/.ssh/mac-mini" ]]
+}
+
+@test 'macos ssh: a HostName already set is kept and names the key' {
+	_mac_stubs
+	export MAC_HOSTNAME=studio.example.org
+	run setup-system.sh -n -s ssh
+	assert_success
+	assert_output --partial "generating ed25519 key ${HOME}/.ssh/studio"
+	# A real run with that key present: nothing is re-pinned.
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub" \
+		"${HOME}/.ssh/studio" "${HOME}/.ssh/studio.pub"
+	run setup-system.sh -s ssh
+	assert_success
+	grep -qxF "    IdentityFile \"${HOME}/.ssh/studio\"" "${HOME}/.ssh/config"
+	run grep -q 'scutil --set' "${MAC}/calls"
+	assert_failure
+}
+
+# zsh never reads bashrc.sh, so the box key reached no agent and git over ssh
+# failed on the Mac. ~/.ssh/config names it for github.com instead.
+@test 'macos ssh: github.com is pointed at the box key, once' {
+	command -v ssh-keygen >/dev/null 2>&1 || skip "ssh-keygen not installed"
+	_mac_stubs
+	mkdir -p "${HOME}/.ssh"
+	printf 'Host box\n    User me\n' >"${HOME}/.ssh/config"
+	local cfg="${HOME}/.ssh/config"
+	run setup-system.sh -y -s ssh
+	assert_success
+	grep -qxF "    IdentityFile \"${HOME}/.ssh/matthews-mac-mini\"" "${cfg}"
+	run setup-system.sh -y -s ssh
+	assert_success
+	assert_equal "$(grep -c '^Host github.com$' "${cfg}")" 1
+	grep -qxF "    IdentityFile \"${HOME}/.ssh/matthews-mac-mini\"" "${cfg}"
+	grep -qx 'Host box' "${cfg}"
+	assert_equal "$(stat -c %a "${cfg}" 2>/dev/null || stat -f %Lp "${cfg}")" 600
+}
+
+@test 'macos ssh: an existing key is the one github.com is pointed at' {
+	_mac_stubs
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
+	run setup-system.sh -s ssh
+	assert_success
+	grep -qxF "    IdentityFile \"${HOME}/.ssh/id_ed25519\"" "${HOME}/.ssh/config"
+	# The box key arriving later replaces the line in place.
+	touch "${HOME}/.ssh/matthews-mac-mini" "${HOME}/.ssh/matthews-mac-mini.pub"
+	run setup-system.sh -s ssh
+	assert_success
+	grep -qxF "    IdentityFile \"${HOME}/.ssh/matthews-mac-mini\"" "${HOME}/.ssh/config"
+	run grep -q id_ed25519 "${HOME}/.ssh/config"
+	assert_failure
+}
+
+@test 'macos ssh: a Host github.com the user wrote is left alone' {
+	_mac_stubs
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
+	printf 'Host gitlab.com github.com\n    IdentityFile ~/.ssh/mine\n' >"${HOME}/.ssh/config"
+	local before
+	before="$(cat "${HOME}/.ssh/config")"
+	run setup-system.sh -s ssh
+	assert_success
+	assert_output --partial "already has a Host github.com entry"
+	assert_equal "$(cat "${HOME}/.ssh/config")" "${before}"
+}
+
+@test 'macos ssh: a dry run pins nothing and writes no config' {
+	_mac_stubs
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
+	run setup-system.sh -n -s ssh
+	assert_success
+	assert_output --partial "scutil --set HostName matthews-mac-mini"
+	[[ ! -e "${HOME}/.ssh/config" ]]
+	run grep -q 'scutil --set' "${MAC}/calls"
+	assert_failure
+}
+
+@test 'linux ssh: ~/.ssh/config is not touched' {
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
+	run setup-system.sh -s ssh
+	assert_success
+	[[ ! -e "${HOME}/.ssh/config" ]]
 }
