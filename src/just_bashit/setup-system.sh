@@ -2262,10 +2262,13 @@ step_tools() {
 # released this morning. Bump it here.
 # ---------------------------------------------------------------------------
 _PS_VER="7.6.6"
-_PWSH_DIR="/opt/microsoft/powershell/7"
+# JB_PWSH_DIR and JB_PWSH_LINK_OSX are the suite's, so a test can install
+# into a scratch directory.
+_PWSH_DIR="${JB_PWSH_DIR:-/opt/microsoft/powershell/7}"
 _PWSH_LINK="/usr/bin/pwsh"
-# macOS keeps /usr/bin read-only (System Integrity Protection).
-_PWSH_LINK_OSX="/usr/local/bin/pwsh"
+# macOS keeps /usr/bin read-only (System Integrity Protection), so the link
+# goes in /usr/local/bin -- which a non-login shell's PATH lacks there.
+_PWSH_LINK_OSX="${JB_PWSH_LINK_OSX:-/usr/local/bin/pwsh}"
 
 # The interpreter this step looks for and then drives. Named through a
 # variable so a test can point it at an interpreter that is not there, or at
@@ -2358,6 +2361,10 @@ _pwsh_install_tarball() {
 		_priv mkdir -p "${link%/*}" &&
 		_priv ln -sf "${_PWSH_DIR}/pwsh" "${link}"; then
 		_run rm -f "${tarball}"
+		# So the PSScriptAnalyzer install below finds it by name: over
+		# `ssh mac cmd` PATH is /usr/bin:/bin:/usr/sbin:/sbin, and the
+		# analyzer step said "pwsh: command not found" (Mac mini).
+		_path_add "${link%/*}"
 		return 0
 	fi
 	_warn "unpacking PowerShell failed"

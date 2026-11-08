@@ -1448,6 +1448,39 @@ _ps_ver() {
 	refute_output --partial "brew install"
 }
 
+# A real install on macOS: the link lands in a directory the run's PATH
+# lacks (/usr/local/bin, over ssh), and the analyzer install right after
+# must still find pwsh by name.
+@test 'pwsh step on macOS installs, then finds what it linked' {
+	local t="${BATS_TEST_TMPDIR}/pw" stubs="${BATS_TEST_TMPDIR}/pw/stubs"
+	mkdir -p "${t}/tree" "${stubs}" "${t}/linkdir"
+	cat >"${t}/tree/pwsh" <<-EOF
+		#!/bin/bash
+		case "\$*" in
+		*Get-Module*) exit 1 ;;
+		*Install-Module*) echo "installed analyzer" >>"${t}/calls" ;;
+		esac
+	EOF
+	chmod +x "${t}/tree/pwsh"
+	tar czf "${t}/pwsh.tar.gz" -C "${t}/tree" pwsh
+	cat >"${stubs}/curl" <<-EOF
+		#!/bin/bash
+		while [[ \$# -gt 0 ]]; do [[ \$1 == -o ]] && { cp "${t}/pwsh.tar.gz" "\$2"; shift; }; shift; done
+	EOF
+	printf '#!/bin/bash\nexec "$@"\n' >"${stubs}/sudo"
+	chmod +x "${stubs}"/*
+	# A name no machine has, so a pwsh already on this host (/usr/bin/pwsh
+	# on a dev box) cannot answer: the link's directory is the only way.
+	PATH="${stubs}:${PATH}" JB_UNAME_S=Darwin JB_UNAME_M=arm64 \
+		JB_PWSH=jb-test-pwsh JB_PWSH_DIR="${t}/install" \
+		JB_PWSH_LINK_OSX="${t}/linkdir/jb-test-pwsh" \
+		run setup-system.sh -s pwsh
+	assert_success
+	assert_output --partial "pwsh:    ok"
+	run cat "${t}/calls"
+	assert_output "installed analyzer"
+}
+
 @test 'pwsh step skips a platform it cannot provision' {
 	run env JB_PWSH=no-pwsh-here JB_UNAME_S=MINGW64_NT-10.0 \
 		JB_UNAME_M=x86_64 setup-system.sh -n -s pwsh
