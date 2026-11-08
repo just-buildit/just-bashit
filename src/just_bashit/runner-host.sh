@@ -34,6 +34,13 @@ PREFIX="${JB_RUNNER_PREFIX:-jb-job}"
 API="${JB_RUNNER_API:-https://api.github.com}"
 BOOT_TIMEOUT="${JB_RUNNER_BOOT_TIMEOUT:-300}"
 TART="${JB_RUNNER_TART:-tart}"
+# Every VM boots under Softnet with these blocked, so a job reaches the
+# internet and nothing private: not this Mac (the VM's gateway is in one of
+# these ranges, picked fresh each boot), not the LAN, not the tailnet
+# (100.64.0.0/10). Softnet already drops non-global IPv4 except the gateway;
+# this closes the gateway too. The VM's DNS is then public (see `image`).
+NET_BLOCK="${JB_RUNNER_NET_BLOCK:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10}"
+DNS="${JB_RUNNER_DNS:-1.1.1.1 8.8.8.8}"
 # This host's short name, in every VM and runner name: two hosts registering
 # `jb-job-<epoch>` with --replace would replace each other's runners.
 HOST_TAG="${JB_RUNNER_HOST_TAG:-$(hostname -s | tr '[:upper:]' '[:lower:]')}"
@@ -87,6 +94,8 @@ read -r -d '' HELP <<-'EOF' || true
 	  JB_RUNNER_IMAGE       the clean image's local name [jb-base]
 	  JB_RUNNER_VERSION     actions/runner version, with JB_RUNNER_SHA256
 	  JB_RUNNER_CPU / JB_RUNNER_MEMORY  per VM [4 / 8192 MB]
+	  JB_RUNNER_NET_BLOCK   CIDRs no VM may reach [RFC 1918, 100.64.0.0/10]
+	  JB_RUNNER_DNS         the image's DNS servers [1.1.1.1 8.8.8.8]
 	  JB_RUNNER_HOST_TAG    in every VM and runner name [hostname -s]
 	  JB_RUNNER_LOCK        held by run and image [~/.local/state/jb-runner.lock]
 	  JB_RUNNER_BREW        packages added to the image [jq]
@@ -176,6 +185,13 @@ _need_safe_labels() {
 _need_tart() {
 	command -v "${TART}" >/dev/null 2>&1 ||
 		_die "tart not found (https://github.com/cirruslabs/tart/releases)"
+	# Tart runs softnet from PATH, and it needs root to make the network:
+	# a setuid binary. Without it `tart run --net-softnet-block` fails, and
+	# a VM on Tart's default network reaches this Mac, the LAN and the
+	# tailnet. So refuse rather than fall back.
+	local sn
+	sn="$(command -v softnet 2>/dev/null)" && [[ -u ${sn} ]] ||
+		_die "softnet is not installed setuid (docs/runner-host.md, Network)"
 }
 
 # The PAT file must be this user's alone: mode 600 or 400, owned by us. A
@@ -276,7 +292,7 @@ _vm_delete() {
 # Boot headless and wait for the guest agent, which `tart exec` needs. The
 # Cirrus Labs images ship the agent; a vanilla image does not.
 _vm_boot() { # NAME
-	"${TART}" run --no-graphics "$1" >/dev/null 2>&1 &
+	"${TART}" run --no-graphics --net-softnet-block="${NET_BLOCK}" "$1" >/dev/null 2>&1 &
 	local waited=0
 	until "${TART}" exec "$1" /usr/bin/true >/dev/null 2>&1; do
 		((waited < BOOT_TIMEOUT)) || return 1
@@ -314,19 +330,25 @@ cmd_image() {
 	# shellcheck disable=SC2016  # expanded in the guest, not here
 	"${TART}" exec "${build}" /bin/bash -lc '
 		set -euo pipefail
+		# Public DNS first: the gateway, which would answer it, is blocked.
+		# Saved in the image, so every clone has it.
+		IFS=" " read -r -a dns <<<"$4"
+		svc="$(networksetup -listallnetworkservices | sed -n 2p)"
+		sudo -n networksetup -setdnsservers "$svc" "${dns[@]}"
 		rm -rf ~/actions-runner && mkdir ~/actions-runner && cd ~/actions-runner
 		curl -fsSL -o runner.tgz "$1"
 		printf "%s  runner.tgz\n" "$2" | shasum -a 256 -c -
 		tar xzf runner.tgz && rm runner.tgz
-		# The runner reads PATH from .path. Without it a job sees the
-		# daemon'"'"'s bare PATH, and tools a job installs to ~/.local/bin
-		# (uv from setup-uv, pipx) are not found.
-		printf "%s\n" "$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin" >.path
 		if [ -n "$3" ]; then
 			IFS=" " read -r -a pkgs <<<"$3"
 			brew install --quiet "${pkgs[@]}"
 		fi
-	' _ "${url}" "${RUNNER_SHA256}" "${BREW}" || {
+		# `tart stop` is a power-off: what is still in the page cache is
+		# lost. A build once saved an image holding half of runner.tgz and
+		# nothing unpacked. So flush, and check what the image must hold.
+		sync
+		test -x ~/actions-runner/config.sh
+	' _ "${url}" "${RUNNER_SHA256}" "${BREW}" "${DNS}" || {
 		_vm_delete "${build}"
 		_die "provisioning ${build} failed"
 	}
@@ -368,6 +390,10 @@ _one_job() {
 		cd ~/actions-runner
 		./config.sh --unattended --ephemeral --disableupdate --replace \
 			--url "$1" --name "$2" --labels "$3" --token "$t" >/dev/null
+		# The runner reads PATH from .path, which config.sh has just written
+		# from this shell. Put ~/.local/bin first, where tools a job
+		# installs land (pipx; uv when setup-uv puts it there).
+		printf "%s\n" "$HOME/.local/bin:$(cat .path)" >.path
 		exec ./run.sh
 	' _ "https://github.com/${ORG}" "${vm}" "${LABELS}" &
 	EXEC_PID=$!
@@ -442,7 +468,7 @@ cmd_run() {
 _plist_env() {
 	local k v
 	for k in ORG TOKEN_FILE BASE IMAGE RUNNER_VERSION RUNNER_SHA256 CPU MEMORY \
-		BREW LABELS PREFIX API BOOT_TIMEOUT TART HOST_TAG LOCK_DIR; do
+		BREW LABELS PREFIX API BOOT_TIMEOUT TART HOST_TAG LOCK_DIR NET_BLOCK; do
 		v="${!k}"
 		v="${v//&/&amp;}"
 		v="${v//</&lt;}"

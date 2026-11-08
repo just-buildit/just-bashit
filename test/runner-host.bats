@@ -98,6 +98,9 @@ setup() {
 		exit 0
 	EOF
 	printf '#!/bin/bash\nexit 0\n' >"${STUBS}/launchctl"
+	# Only its setuid bit is checked; tart, which would run it, is a stub.
+	printf '#!/bin/bash\nexit 0\n' >"${STUBS}/softnet"
+	chmod 4755 "${STUBS}/softnet"
 	chmod +x "${STUBS}/tart" "${STUBS}/curl" "${STUBS}/sudo" "${STUBS}/launchctl"
 	PATH="${STUBS}:${PATH}"
 }
@@ -298,4 +301,28 @@ setup() {
 	assert_success
 	run grep -c -E '^curl .*-X DELETE ' "${LOG}"
 	assert_output 1
+}
+
+@test 'run: every VM boots with the private ranges blocked' {
+	run runner-host.sh run --once
+	assert_success
+	# This Mac (the VM's gateway), the LAN and the tailnet.
+	run grep -E '^tart run --no-graphics --net-softnet-block=10\.0\.0\.0/8,172\.16\.0\.0/12,192\.168\.0\.0/16,100\.64\.0\.0/10 jb-job-' "${LOG}"
+	assert_success
+	run grep -E '^tart run' "${LOG}"
+	refute_output --partial 'jb-job- '
+	run grep -cE '^tart run ' "${LOG}"
+	assert_output 1
+}
+
+@test 'run and image: refuse without a setuid softnet' {
+	chmod 0755 "${STUBS}/softnet"
+	run runner-host.sh run --once
+	assert_failure
+	assert_output --partial 'softnet is not installed setuid'
+	run runner-host.sh image
+	assert_failure
+	assert_output --partial 'softnet is not installed setuid'
+	run grep -E '^tart (clone|run)' "${LOG}"
+	assert_failure
 }

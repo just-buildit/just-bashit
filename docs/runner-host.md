@@ -56,6 +56,37 @@ That gate treats a label shaped like a GitHub-hosted image name (`ubuntu-*`,
 label, after trimming spaces: a runner carrying `macos-latest` would take fork
 jobs.
 
+## Network
+
+A job can reach the internet and nothing private. Measured from inside a job
+VM on 2026-11-08 (Tart 2.41.1, Softnet 0.24.1):
+
+| Target                                             | Tart's default NAT | Softnet, as `run` boots it |
+| -------------------------------------------------- | ------------------ | -------------------------- |
+| This Mac, through the VM's gateway (ssh, rapportd) | reachable          | blocked                    |
+| This Mac's LAN address, the router                 | reachable          | blocked                    |
+| Tailnet nodes (100.64.0.0/10), ssh                 | reachable          | blocked                    |
+| The internet (github.com over HTTPS)               | reachable          | reachable                  |
+
+Tart's default network NATs the VM through this Mac, so a job could reach
+everything the Mac can. So every VM boots with `--net-softnet-block` over
+the RFC 1918 ranges and 100.64.0.0/10 (`JB_RUNNER_NET_BLOCK`). Softnet already
+drops other non-global IPv4. Blocking the private ranges also closes the
+gateway, which is this Mac and picks a fresh private subnet each boot. That
+gateway would otherwise answer DNS, so `image` sets the VM's resolvers to
+`JB_RUNNER_DNS` (1.1.1.1, 8.8.8.8). The host has no IPv6, and a VM gets no
+IPv6 route.
+
+Softnet needs root to create the VM's network, so it is installed setuid root.
+It drops privileges after setup. `run` and `image` refuse to start without
+it, rather than fall back to the open network. Install a release pinned by
+its SHA-256, from
+[cirruslabs/softnet](https://github.com/cirruslabs/softnet/releases):
+
+```bash
+sudo install -o root -g wheel -m 4755 softnet /usr/local/bin/softnet
+```
+
 ## Configuration
 
 Every setting is an environment variable. `--help` lists them all. `install`
@@ -69,7 +100,8 @@ two Macs registering to one org never replace each other's runners. `run` and
 the daemon's live VM, and `image` cannot replace the image under a clone. A
 lock left by a killed process is taken over.
 
-`image` writes the runner's `.path`, so jobs see `~/.local/bin` and Homebrew.
+Each job puts `~/.local/bin` first in the runner's `.path`, after `config.sh`
+writes it.
 Nothing else is baked in for CI: workflows install uv and Python with their
 usual setup actions, into the runner's tool cache.
 `JB_RUNNER_VERSION` and `JB_RUNNER_SHA256` pin actions/runner. Runners are
