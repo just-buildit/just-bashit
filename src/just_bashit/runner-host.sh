@@ -24,8 +24,8 @@ IMAGE="${JB_RUNNER_IMAGE:-jb-base}"
 # actions/runner. --disableupdate means GitHub stops sending jobs to a runner
 # more than 30 days behind the latest release, so re-pin and re-run `image`
 # at least that often.
-RUNNER_VERSION="${JB_RUNNER_VERSION:-2.338.1}"
-RUNNER_SHA256="${JB_RUNNER_SHA256:-52c3fb801b931fbd454979bae5ec3443ea3da2c4a1b4c44fa546fb630d61a0a9}"
+RUNNER_VERSION="${JB_RUNNER_VERSION:-2.338.2}"
+RUNNER_SHA256="${JB_RUNNER_SHA256:-25a065af409ffa317ab4d5a3b614dd15fc9c40f2172bc1b35a1b1258e919a388}"
 CPU="${JB_RUNNER_CPU:-4}"
 MEMORY="${JB_RUNNER_MEMORY:-8192}"
 BREW="${JB_RUNNER_BREW:-jq}"
@@ -34,6 +34,13 @@ PREFIX="${JB_RUNNER_PREFIX:-jb-job}"
 API="${JB_RUNNER_API:-https://api.github.com}"
 BOOT_TIMEOUT="${JB_RUNNER_BOOT_TIMEOUT:-300}"
 TART="${JB_RUNNER_TART:-tart}"
+# This host's short name, in every VM and runner name: two hosts registering
+# `jb-job-<epoch>` with --replace would replace each other's runners.
+HOST_TAG="${JB_RUNNER_HOST_TAG:-$(hostname -s | tr '[:upper:]' '[:lower:]')}"
+# Held by `run` and `image`, which must not overlap: a second `run` sweeps
+# the first one's live VM as stale, and `image` renames the image under a
+# clone in progress.
+LOCK_DIR="${JB_RUNNER_LOCK:-${HOME}/.local/state/jb-runner.lock}"
 
 DAEMON_LABEL="io.github.just-buildit.runner-host"
 DAEMON_PLIST="${JB_RUNNER_PLIST:-/Library/LaunchDaemons/${DAEMON_LABEL}.plist}"
@@ -80,10 +87,15 @@ read -r -d '' HELP <<-'EOF' || true
 	  JB_RUNNER_IMAGE       the clean image's local name [jb-base]
 	  JB_RUNNER_VERSION     actions/runner version, with JB_RUNNER_SHA256
 	  JB_RUNNER_CPU / JB_RUNNER_MEMORY  per VM [4 / 8192 MB]
+	  JB_RUNNER_HOST_TAG    in every VM and runner name [hostname -s]
+	  JB_RUNNER_LOCK        held by run and image [~/.local/state/jb-runner.lock]
 	  JB_RUNNER_BREW        packages added to the image [jq]
 	  JB_RUNNER_LABELS      runner labels [self-hosted,macOS,ARM64]; one
 	                        shaped like a GitHub-hosted image (ubuntu-*,
 	                        macos-*, windows-*) is refused
+
+	  install writes these, as given, into the LaunchDaemon. The token file
+	  must be mode 600 or 400 and owned by the user that runs this.
 
 	  The PAT never enters a VM. Only a registration token does, and it is
 	  passed on stdin, never on a command line the host's ps can see.
@@ -140,15 +152,25 @@ _need_macos() {
 # GitHub-hosted, so a runner carrying one would take a fork job that asked
 # for, say, macos-latest. GitHub matches labels case-insensitively, so this
 # does too.
+#
+# Each label is trimmed first, and LABELS is rewritten from the trimmed
+# list, so the label checked is the label registered: ' macos-latest' with
+# its space is still macos-latest to GitHub.
 _need_safe_labels() {
-	local label lower
+	local label lower out=''
 	local -a labels
 	IFS=, read -r -a labels <<<"${LABELS}"
 	for label in "${labels[@]}"; do
+		label="${label#"${label%%[![:space:]]*}"}"
+		label="${label%"${label##*[![:space:]]}"}"
+		[[ -n ${label} ]] || continue
 		lower="$(printf '%s' "${label}" | tr '[:upper:]' '[:lower:]')"
 		[[ ! ${lower} =~ ^(ubuntu|macos|windows)- ]] ||
 			_die "refusing label ${label}: it looks like a GitHub-hosted image"
+		out+="${out:+,}${label}"
 	done
+	[[ -n ${out} ]] || _die "no runner labels"
+	LABELS="${out}"
 }
 
 _need_tart() {
@@ -156,16 +178,70 @@ _need_tart() {
 		_die "tart not found (https://github.com/cirruslabs/tart/releases)"
 }
 
+# The PAT file must be this user's alone: mode 600 or 400, owned by us. A
+# 644 token is readable by every account on the Mac. GNU stat first (the
+# tests run on Linux), BSD stat otherwise.
+_need_token() {
+	[[ -r ${TOKEN_FILE} ]] || _die "no token at ${TOKEN_FILE}"
+	local mode owner
+	IFS=' ' read -r mode owner < <(stat -c '%a %U' "${TOKEN_FILE}" 2>/dev/null ||
+		stat -f '%Lp %Su' "${TOKEN_FILE}")
+	[[ ${owner} == "$(id -un)" ]] ||
+		_die "${TOKEN_FILE} is owned by ${owner}, not $(id -un)"
+	[[ ${mode} == 600 || ${mode} == 400 ]] ||
+		_die "${TOKEN_FILE} is mode ${mode}; run: chmod 600 ${TOKEN_FILE}"
+}
+
+# One process at a time takes LOCK_DIR. mkdir is atomic; the holder's pid is
+# kept inside, so a lock left by a killed process is taken over, not waited
+# on forever. Released on exit, which the signal traps reach too.
+_lock() {
+	mkdir -p "$(dirname "${LOCK_DIR}")"
+	if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
+		local holder
+		holder="$(cat "${LOCK_DIR}/pid" 2>/dev/null || true)"
+		if [[ -n ${holder} ]] && kill -0 "${holder}" 2>/dev/null; then
+			_die "another runner-host (pid ${holder}) holds ${LOCK_DIR}"
+		fi
+		rm -rf "${LOCK_DIR}"
+		mkdir "${LOCK_DIR}" || _die "could not take ${LOCK_DIR}"
+	fi
+	printf '%s\n' "$$" >"${LOCK_DIR}/pid"
+	trap '_unlock' EXIT
+}
+
+_unlock() {
+	[[ "$(cat "${LOCK_DIR}/pid" 2>/dev/null)" != "$$" ]] || rm -rf "${LOCK_DIR}"
+}
+
+# _curl_tls_init -- the TLS options every curl fetch passes, in _CURL_TLS:
+# --ssl-revoke-best-effort on a Schannel curl (Git for Windows). A COPY of
+# pkg.sh's, which is canonical and says why: the installed daemon is this
+# one file, with no pkg.sh beside it. test/curl-tls.bats holds this body
+# byte-identical to it.
+_curl_tls_init() {
+	local v=''
+	if [[ -n ${_CURL_TLS_SET-} ]]; then
+		return 0
+	fi
+	_CURL_TLS_SET=1
+	read -r v < <(curl -V 2>/dev/null) || :
+	if [[ ${v} =~ Schannel ]]; then
+		_CURL_TLS+=(--ssl-revoke-best-effort)
+	fi
+}
+
 # ── GitHub ──────────────────────────────────────────────────────────────────
 # The PAT goes to curl as a header on stdin (-H @-), never in argv: a
 # LaunchDaemon's command lines are visible to every user's ps.
 
 _api() { # METHOD PATH
-	[[ -r ${TOKEN_FILE} ]] || _die "no token at ${TOKEN_FILE}"
+	_need_token
+	_curl_tls_init
 	local pat
 	pat="$(<"${TOKEN_FILE}")"
 	printf 'Authorization: Bearer %s\n' "${pat}" |
-		curl -fsS -X "$1" -H @- \
+		curl -fsS "${_CURL_TLS[@]+"${_CURL_TLS[@]}"}" -X "$1" -H @- \
 			-H 'Accept: application/vnd.github+json' \
 			-H 'X-GitHub-Api-Version: 2022-11-28' \
 			"${API}$2"
@@ -214,6 +290,7 @@ _vm_boot() { # NAME
 cmd_image() {
 	_need_macos
 	_need_tart
+	[[ ${DRY_RUN} -eq 1 ]] || _lock
 	local build="${IMAGE}-build"
 	local url="https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-osx-arm64-${RUNNER_VERSION}.tar.gz"
 	_say "Building ${IMAGE} from ${BASE}"
@@ -241,6 +318,10 @@ cmd_image() {
 		curl -fsSL -o runner.tgz "$1"
 		printf "%s  runner.tgz\n" "$2" | shasum -a 256 -c -
 		tar xzf runner.tgz && rm runner.tgz
+		# The runner reads PATH from .path. Without it a job sees the
+		# daemon'"'"'s bare PATH, and tools a job installs to ~/.local/bin
+		# (uv from setup-uv, pipx) are not found.
+		printf "%s\n" "$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin" >.path
 		if [ -n "$3" ]; then
 			IFS=" " read -r -a pkgs <<<"$3"
 			brew install --quiet "${pkgs[@]}"
@@ -258,14 +339,18 @@ cmd_image() {
 # One job: a fresh VM, an ephemeral runner, deleted whatever happens.
 _one_job() {
 	local vm token
-	vm="${PREFIX}-$(date +%s)"
+	vm="${PREFIX}-${HOST_TAG}-$(date +%s)"
 	token="$(_registration_token)" || {
 		_log "could not mint a registration token"
 		return 1
 	}
 	_log "clone ${IMAGE} -> ${vm}"
-	"${TART}" clone "${IMAGE}" "${vm}" || return 1
+	# Set first: a clone killed halfway leaves a partial VM to delete.
 	CURRENT_VM="${vm}"
+	"${TART}" clone "${IMAGE}" "${vm}" || {
+		_cleanup
+		return 1
+	}
 	if ! _vm_boot "${vm}"; then
 		_log "${vm} did not come up within ${BOOT_TIMEOUT}s"
 		_cleanup
@@ -285,7 +370,9 @@ _one_job() {
 			--url "$1" --name "$2" --labels "$3" --token "$t" >/dev/null
 		exec ./run.sh
 	' _ "https://github.com/${ORG}" "${vm}" "${LABELS}" &
-	wait "$!" || rc=$?
+	EXEC_PID=$!
+	wait "${EXEC_PID}" || rc=$?
+	EXEC_PID=""
 	_log "${vm} finished (exit ${rc}); deleting"
 	_cleanup
 	return "${rc}"
@@ -293,7 +380,12 @@ _one_job() {
 
 # The VM the loop is on, so a signal can take it down with the loop.
 CURRENT_VM=""
+EXEC_PID=""
 _cleanup() {
+	# The `tart exec` the job runs in: deleting the VM ends it on a real
+	# host, but a stopped loop should not leave it to chance.
+	[[ -z ${EXEC_PID} ]] || kill "${EXEC_PID}" 2>/dev/null || true
+	EXEC_PID=""
 	[[ -n ${CURRENT_VM} ]] || return 0
 	local vm="${CURRENT_VM}"
 	CURRENT_VM=""
@@ -315,6 +407,8 @@ cmd_run() {
 		_say "would loop: mint token for ${ORG}; clone ${IMAGE}; boot; run one job; delete"
 		return 0
 	fi
+	_need_token
+	_lock
 	_vm_exists "${IMAGE}" || _die "no image ${IMAGE}; run: runner-host.sh image"
 	trap '_on_signal 143' TERM
 	trap '_on_signal 130' INT
@@ -343,6 +437,26 @@ cmd_run() {
 	done
 }
 
+# The effective configuration, so the daemon runs what `install` was run
+# with rather than the defaults. XML-escaped: a value is data, not markup.
+_plist_env() {
+	local k v
+	for k in ORG TOKEN_FILE BASE IMAGE RUNNER_VERSION RUNNER_SHA256 CPU MEMORY \
+		BREW LABELS PREFIX API BOOT_TIMEOUT TART HOST_TAG LOCK_DIR; do
+		v="${!k}"
+		v="${v//&/&amp;}"
+		v="${v//</&lt;}"
+		v="${v//>/&gt;}"
+		case "${k}" in
+		RUNNER_VERSION) k=VERSION ;;
+		RUNNER_SHA256) k=SHA256 ;;
+		LOCK_DIR) k=LOCK ;;
+		*) ;;
+		esac
+		printf '<key>JB_RUNNER_%s</key><string>%s</string>\n' "${k}" "${v}"
+	done
+}
+
 _plist() {
 	cat <<-EOF
 		<?xml version="1.0" encoding="UTF-8"?>
@@ -361,6 +475,7 @@ _plist() {
 			<dict>
 				<key>HOME</key><string>${HOME}</string>
 				<key>PATH</key><string>${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+				$(_plist_env)
 			</dict>
 			<key>RunAtLoad</key><true/>
 			<key>KeepAlive</key><true/>
@@ -373,9 +488,13 @@ _plist() {
 }
 
 cmd_install() {
+	# Under sudo, `id -un` is root and the daemon would run jobs as root.
+	# JB_RUNNER_EUID stands in for EUID in the tests, which cannot be root.
+	[[ ${JB_RUNNER_EUID:-${EUID}} -ne 0 ]] || _die "run install as the runner's user, not root; it calls sudo itself"
+	_need_safe_labels
 	_need_macos
 	_need_tart
-	[[ -r ${TOKEN_FILE} ]] || _die "no token at ${TOKEN_FILE}"
+	_need_token
 	local tmp
 	tmp="$(mktemp)"
 	_plist >"${tmp}"
@@ -397,6 +516,15 @@ cmd_uninstall() {
 		local vm
 		for vm in $("${TART}" list --format json | jq -r --arg p "${PREFIX}-" '.[] | select(.Name | startswith($p)) | .Name'); do
 			_run _vm_delete "${vm}"
+		done
+	fi
+	# And this host's runners GitHub still lists: a VM killed mid-job
+	# leaves one behind.
+	if [[ -r ${TOKEN_FILE} ]]; then
+		local name
+		for name in $(_api GET "/orgs/${ORG}/actions/runners?per_page=100" |
+			jq -r --arg p "${PREFIX}-${HOST_TAG}-" '.runners[] | select(.name | startswith($p)) | .name'); do
+			_run _deregister "${name}"
 		done
 	fi
 	_say "Removed ${DAEMON_LABEL}. ${IMAGE} is kept; delete it with: ${TART} delete ${IMAGE}"

@@ -36,7 +36,8 @@ usable, and stays within Apple's licence, which allows two macOS VMs per Mac.
 
 `run` needs a fine-grained personal access token. Its resource owner is the
 org, with the Organization permission **Self-hosted runners: Read and write**.
-Save it, mode 600, at `~/.config/jb-runner/token`.
+Save it, mode 600, at `~/.config/jb-runner/token`. `run` and `install` refuse
+a token file another account can read, or one owned by another user.
 
 The token never enters a VM. It reaches `curl` as a header on stdin, so no
 `ps` on the host can see it. Each VM gets only a short-lived registration
@@ -51,12 +52,26 @@ every workflow keeps fork PRs on GitHub-hosted runners
 Until then, the runner registers and sits idle.
 
 That gate treats a label shaped like a GitHub-hosted image name (`ubuntu-*`,
-`macos-*`, `windows-*`) as GitHub-hosted. So `run` refuses to register with
-such a label: a runner carrying `macos-latest` would take fork jobs.
+`macos-*`, `windows-*`) as GitHub-hosted. So `run` and `install` refuse such a
+label, after trimming spaces: a runner carrying `macos-latest` would take fork
+jobs.
 
 ## Configuration
 
-Every setting is an environment variable. `--help` lists them all.
+Every setting is an environment variable. `--help` lists them all. `install`
+writes the values it was run with into the LaunchDaemon, so the daemon runs
+the configuration you tested. Run `install` as the runner's user, not under
+`sudo`: it calls `sudo` itself, and refuses to run as root.
+
+VM and runner names carry the host's short name (`jb-job-<host>-<time>`), so
+two Macs registering to one org never replace each other's runners. `run` and
+`image` take a lock (`JB_RUNNER_LOCK`), so a manual `run --once` cannot sweep
+the daemon's live VM, and `image` cannot replace the image under a clone. A
+lock left by a killed process is taken over.
+
+`image` writes the runner's `.path`, so jobs see `~/.local/bin` and Homebrew.
+Nothing else is baked in for CI: workflows install uv and Python with their
+usual setup actions, into the runner's tool cache.
 `JB_RUNNER_VERSION` and `JB_RUNNER_SHA256` pin actions/runner. Runners are
 registered with `--disableupdate`, and GitHub stops sending jobs to a runner
 more than 30 days behind the latest release. So re-pin and re-run `image` at
