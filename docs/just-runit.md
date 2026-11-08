@@ -516,15 +516,15 @@ just-runit secret get GH_TOKEN | wl-copy
 just-runit secret list
 ```
 
-| command                              | does                                                                                  |
-| ------------------------------------ | ------------------------------------------------------------------------------------- |
-| `set NAME [--backend gpg\|age]`      | encrypts stdin, or what you type at a no-echo prompt on a terminal; never an argument |
-| `get NAME [--show]`                  | writes the value to stdout; refuses a terminal unless `--show`                        |
-| `run NAME[=VAR]... -- CMD [ARGS...]` | execs CMD with each secret in its environment, as VAR (default NAME)                  |
-| `list`                               | names and backends, never values                                                      |
-| `rm NAME...`                         | deletes                                                                               |
-| `migrate NAME --to gpg\|age`         | re-encrypts with the other backend                                                    |
-| `rekey [NAME...]`                    | re-encrypts to the recipients the config names now (default: every secret)            |
+| command                              | does                                                                                                                                |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `set NAME [--backend gpg\|age]`      | encrypts stdin, or what you type at a no-echo prompt on a terminal; never an argument; an empty value is refused and stores nothing |
+| `get NAME [--show]`                  | writes the value to stdout; refuses a terminal unless `--show`                                                                      |
+| `run NAME[=VAR]... -- CMD [ARGS...]` | execs CMD with each secret in its environment, as VAR (default NAME)                                                                |
+| `list`                               | names and backends, never values                                                                                                    |
+| `rm NAME...`                         | deletes                                                                                                                             |
+| `migrate NAME --to gpg\|age`         | re-encrypts with the other backend                                                                                                  |
+| `rekey [NAME...]`                    | re-encrypts to the recipients the config names now (default: every secret)                                                          |
 
 **The store** is `${XDG_DATA_HOME:-~/.local/share}/jb/secrets/`, directory
 mode 700, one `NAME.gpg` or `NAME.age` per secret at mode 600. The extension

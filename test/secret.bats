@@ -476,6 +476,33 @@ _roundtrip() {
 	assert_equal "$(just-runit secret get A)" "${VALUE}"
 }
 
+# Sabotage-proven (PR for #229): dropping the empty-stdin check turns this
+# red -- an empty value stored over the old one.
+@test 'set refuses an empty stdin, and keeps the secret already stored' {
+	_need age
+	_conf "age $(<"${KEYS}/age1.pub")" "identity ${KEYS}/age1"
+	run just-runit secret set NEW --backend age </dev/null
+	assert_failure
+	assert_output "just-runit secret: error: empty value for 'NEW'; nothing stored"
+	[[ ! -e ${STORE}/NEW.age ]] || fail 'an empty secret was stored'
+	just-runit secret set OLD --backend age <<<"${VALUE}"
+	cp "${STORE}/OLD.age" "${BATS_TEST_TMPDIR}/before"
+	run just-runit secret set OLD </dev/null
+	assert_failure
+	assert_output "just-runit secret: error: empty value for 'OLD'; nothing stored"
+	cmp "${STORE}/OLD.age" "${BATS_TEST_TMPDIR}/before"
+	assert_equal "$(just-runit secret get OLD)" "${VALUE}"
+}
+
+@test 'set keeps a value whose first byte is a newline or a NUL' {
+	_need age
+	_conf "age $(<"${KEYS}/age1.pub")" "identity ${KEYS}/age1"
+	printf '\nx' | just-runit secret set A --backend age
+	cmp <(just-runit secret get A) <(printf '\nx')
+	printf '\0y' | just-runit secret set B --backend age
+	cmp <(just-runit secret get B) <(printf '\0y')
+}
+
 @test 'set never takes the value as an argument' {
 	run just-runit secret set A "${VALUE}"
 	assert_failure

@@ -113,7 +113,8 @@ _SECRET_HELP="Usage: just-runit secret <command> [ARGS...]
 Commands:
   set NAME [--backend gpg|age]
                  Encrypt the value on stdin, or typed at a no-echo prompt
-                 on a terminal. Never from an argument.
+                 on a terminal. Never from an argument. An empty value
+                 is refused, and an existing secret is left as it was.
   get NAME [--show]
                  Write the value to stdout. Refuses a terminal unless --show.
   run NAME[=VAR]... -- CMD [ARGS...]
@@ -384,12 +385,28 @@ _secret_set() {
 	if [[ -t 0 ]]; then
 		IFS= read -r -s -p "${name}: " value
 		echo >&2
-		[[ -n ${value} ]] || _secret_err "empty value; nothing stored"
+		[[ -n ${value} ]] || _secret_err "empty value for '${name}'; nothing stored"
 		# printf is a builtin: the value goes into the pipe without ever
 		# being an argv.
 		printf '%s' "${value}" | _secret_store "${name}" "${backend}"
 	else
-		_secret_store "${name}" "${backend}"
+		# Empty stdin is refused as an empty prompt is, before anything is
+		# written, so a stored secret survives a mistaken `</dev/null`. One
+		# byte is read to tell; it goes back in front of the rest. A NUL
+		# first byte reads as "" with status 0, so the status, not the
+		# byte, says whether stdin was empty.
+		local first="" rc=0
+		IFS= read -r -d '' -n 1 first || rc=$?
+		[[ ${rc} -eq 0 || -n ${first} ]] ||
+			_secret_err "empty value for '${name}'; nothing stored"
+		{
+			if [[ ${rc} -eq 0 && -z ${first} ]]; then
+				printf '\0'
+			else
+				printf '%s' "${first}"
+			fi
+			cat
+		} | _secret_store "${name}" "${backend}"
 	fi
 	echo "stored ${name} (${backend})" >&2
 }
