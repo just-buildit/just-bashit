@@ -32,6 +32,7 @@ jbx    = "just_bashit._launcher:jbx"
 jb-inspect = "just_bashit._launcher:jb_inspect"
 jb-setup-system = "just_bashit._launcher:jb_setup_system"
 jb-ssh-to-windows = "just_bashit._launcher:jb_ssh_to_windows"
+jb-runner-host = "just_bashit._launcher:jb_runner_host"
 
 [project.urls]
 Homepage      = "https://just-buildit.github.io/just-bashit/"

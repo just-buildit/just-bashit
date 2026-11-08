@@ -29,3 +29,7 @@ def jb_setup_system() -> None:
 
 def jb_ssh_to_windows() -> None:
     _exec("ssh-to-windows.sh")
+
+
+def jb_runner_host() -> None:
+    _exec("runner-host.sh")

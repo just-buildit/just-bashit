@@ -19,6 +19,7 @@ nav = [
     {"install-deps" = "install-deps.md"},
     {"setup-system" = "setup-system.md"},
     {"ssh-to-windows" = "ssh-to-windows.md"},
+    {"runner-host" = "runner-host.md"},
     {"inspect" = "inspect.md"},
   ]},
   {"Libraries" = [
