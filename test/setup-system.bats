@@ -3170,7 +3170,11 @@ _mac_stubs() {
 	assert_equal "$(grep -c '^Host github.com$' "${cfg}")" 1
 	grep -qxF "    IdentityFile \"${HOME}/.ssh/matthews-mac-mini\"" "${cfg}"
 	grep -qx 'Host box' "${cfg}"
-	assert_equal "$(stat -c %a "${cfg}" 2>/dev/null || stat -f %Lp "${cfg}")" 600
+	# MSYS has no Unix modes to read back.
+	case "${OSTYPE:-}" in
+	msys* | cygwin*) ;;
+	*) assert_equal "$(stat -c %a "${cfg}" 2>/dev/null || stat -f %Lp "${cfg}")" 600 ;;
+	esac
 }
 
 @test 'macos ssh: an existing key is the one github.com is pointed at' {
@@ -3234,6 +3238,10 @@ _mac_stubs() {
 
 # A dotfile manager's link stays a link: mv would put a plain file there.
 @test 'macos ssh: a symlinked ~/.ssh/config is left alone' {
+	case "${OSTYPE:-}" in
+	msys* | cygwin*) skip "MSYS ln -s copies the file: no symlink to keep" ;;
+	*) ;;
+	esac
 	_mac_stubs
 	mkdir -p "${HOME}/.ssh" "${HOME}/dotfiles"
 	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
