@@ -72,8 +72,26 @@ export XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME
 #
 # ~/.local/bin is where pip --user, uv tool, pipx and the Claude Code
 # installer land binaries; it is on PATH by default on almost nothing.
+#
+# Homebrew (macOS) goes first, so the user's own directories still win: its
+# installer puts brew under /opt/homebrew on Apple silicon and /usr/local on
+# Intel, and leaves adding it to PATH to the user. HOMEBREW_PREFIX is
+# exported as brew's own `shellenv` does, for the tools and formulae that
+# read it. The prefixes are written out rather than held in a variable: zsh
+# sources this file from ~/.zprofile, and does not word-split one.
+# JB_BREW_ROOT is the test suite's, as in setup-system.
 # ---------------------------------------------------------------------------
 if [ "${JB_PATH:-1}" = 1 ]; then
+	for _jb_hb in "${JB_BREW_ROOT:-}/opt/homebrew" "${JB_BREW_ROOT:-}/usr/local"; do
+		if [ -x "${_jb_hb}/bin/brew" ]; then
+			HOMEBREW_PREFIX="${_jb_hb}"
+			export HOMEBREW_PREFIX
+			_jb_path_prepend "${_jb_hb}/sbin"
+			_jb_path_prepend "${_jb_hb}/bin"
+			break
+		fi
+	done
+	unset _jb_hb
 	_jb_path_prepend "${HOME}/bin"
 	_jb_path_prepend "${HOME}/.local/bin"
 	_jb_path_prepend "${HOME}/.cargo/bin"

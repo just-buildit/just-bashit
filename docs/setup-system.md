@@ -18,18 +18,18 @@ ______________________________________________________________________
 
 ## Steps
 
-| Step      | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `deps`    | Installs a baseline toolchain — C compiler, `make`, `cmake`, `pkg-config`, `git`, `curl`, ssh — then the packages of any `bootstrap.toml` in the current directory, both via [`install-deps`](install-deps.md).                                                                                                                                                                                                                                                                   |
-| `certs`   | **Opt-in, WSL only**. Installs Windows' trusted root certificates into the distro trust store beside its Mozilla bundle, one file per root, and removes any Windows no longer trusts. See below.                                                                                                                                                                                                                                                                                  |
-| `folders` | **Native Windows**. Moves Documents, Desktop, Pictures, Music and Videos back from OneDrive's folder redirection to the local profile, and points Windows there — as the user, no UAC. Online-only files stay on OneDrive. Elsewhere it reports skipped. See [below](#the-folders-step-native-windows).                                                                                                                                                                           |
-| `shell`   | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile`.                                                                                                                                                                                                                                                                                                                                                             |
-| `ssh`     | Tightens permissions across `~/.ssh` — repairing a directory copied from Windows, FAT, a zip or git — then creates an ed25519 key named after this host if there is no key at all. Prints the public key.                                                                                                                                                                                                                                                                         |
-| `sshd`    | **Windows only** (WSL or native MSYS2 / Git Bash): a default step on native Windows, opt-in from WSL. Runs Windows' own OpenSSH server as a boot-time service — key-only, keys from `github.com/<user>.keys` and kept in sync with it, `pwsh.exe` as the login shell — so the machine answers ssh even when WSL is down, and keeps the user's WSL distro running from boot. On native Windows it also starts the ssh-agent service at boot and adds the box key to it. See below. |
-| `git`     | Sets global git defaults that are not already set, and an unset `user.name` / `user.email` from the environment or a prompt.                                                                                                                                                                                                                                                                                                                                                      |
-| `tools`   | Installs `uv` if missing, through [`install-uv`](libraries/pkg.md#install-uv): winget on Windows, which installs the native build on ARM64 (#171). Installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.                                                                                                                                                                                                                                 |
-| `pwsh`    | Installs PowerShell 7 and the PSScriptAnalyzer module, so `.ps1` files can be linted on this machine. Linux and macOS only — see below.                                                                                                                                                                                                                                                                                                                                           |
-| `claude`  | Installs Claude Code if the `claude` command is missing: Anthropic's `install.sh`, or on native Windows winget, else `install.ps1` ([below](#claude-code-on-native-windows)).                                                                                                                                                                                                                                                                                                     |
+| Step      | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deps`    | Installs a baseline toolchain — C compiler, `make`, `cmake`, `pkg-config`, `git`, `curl`, ssh — then the packages of any `bootstrap.toml` in the current directory, both via [`install-deps`](install-deps.md). On a Mac without Homebrew it installs Homebrew first, which brings the Xcode Command Line Tools (the compiler and `git`); its installer asks for your password once.                                                                                                                                                                                                                                                |
+| `certs`   | **Opt-in, WSL only**. Installs Windows' trusted root certificates into the distro trust store beside its Mozilla bundle, one file per root, and removes any Windows no longer trusts. See below.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `folders` | **Native Windows**. Moves Documents, Desktop, Pictures, Music and Videos back from OneDrive's folder redirection to the local profile, and points Windows there — as the user, no UAC. Online-only files stay on OneDrive. Elsewhere it reports skipped. See [below](#the-folders-step-native-windows).                                                                                                                                                                                                                                                                                                                             |
+| `shell`   | Installs the bash configuration to `~/.config/just-bashit/` and adds one source line to `~/.bashrc` and `~/.profile` (and `~/.zprofile` on macOS, whose login shell is zsh).                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `ssh`     | Tightens permissions across `~/.ssh` — repairing a directory copied from Windows, FAT, a zip or git — then creates an ed25519 key named after this host if there is no key at all. Prints the public key.                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `sshd`    | **macOS**, opt-in: turns on Remote Login, adds `github.com/<user>.keys` to `~/.ssh/authorized_keys` and turns password login off ([below](#on-macos)). **Windows** (WSL or native MSYS2 / Git Bash): a default step on native Windows, opt-in from WSL. Runs Windows' own OpenSSH server as a boot-time service — key-only, keys from `github.com/<user>.keys` and kept in sync with it, `pwsh.exe` as the login shell — so the machine answers ssh even when WSL is down, and keeps the user's WSL distro running from boot. On native Windows it also starts the ssh-agent service at boot and adds the box key to it. See below. |
+| `git`     | Sets global git defaults that are not already set, and an unset `user.name` / `user.email` from the environment or a prompt.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `tools`   | Installs `uv` if missing, through [`install-uv`](libraries/pkg.md#install-uv): winget on Windows, which installs the native build on ARM64 (#171). Installs pre-commit hooks when the current directory is a repo with `.pre-commit-config.yaml`.                                                                                                                                                                                                                                                                                                                                                                                   |
+| `pwsh`    | Installs PowerShell 7 and the PSScriptAnalyzer module, so `.ps1` files can be linted on this machine. Linux and macOS only — see below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `claude`  | Installs Claude Code if the `claude` command is missing: Anthropic's `install.sh`, or on native Windows winget, else `install.ps1` ([below](#claude-code-on-native-windows)).                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 On native Windows the `deps` baseline is CMake, Git, PowerShell 7, the
 GitHub CLI (`gh`: the [sshd step](#the-sshd-step) authorizes the keys of the
@@ -202,6 +202,13 @@ if [ -r "$HOME/.config/just-bashit/bashrc.sh" ]; then . "$HOME/.config/just-bash
 # appended to ~/.profile (and ~/.bash_profile, when that file exists)
 if [ -r "$HOME/.config/just-bashit/profile.sh" ]; then . "$HOME/.config/just-bashit/profile.sh"; fi
 ```
+
+zsh reads neither `~/.profile` nor `~/.bash_profile`, and it is the login
+shell on macOS, so there the `profile.sh` line also goes in `~/.zprofile`
+(elsewhere only when that file already exists). `profile.sh` is POSIX sh,
+which zsh sources as it is; `bashrc.sh` is bash's own and is not offered to
+zsh. `profile.sh` also puts Homebrew on PATH — `/opt/homebrew` on Apple
+silicon, `/usr/local` on Intel — behind your own `~/bin` and `~/.local/bin`.
 
 Uninstalling is deleting those lines. Re-running with a newer just-bashit
 replaces `bashrc.sh` and `profile.sh` in place, keeping the copy it replaced
@@ -544,9 +551,35 @@ only difference is whether a Windows path is translated with `wslpath` or
 is written to `run.ps1` beside the script and `powershell.exe` is handed
 only `-File launch.ps1` — so no `iconv` or `base64` is needed on either.
 
-`--github-user` defaults to the account `gh` is signed in to. On Linux or
-macOS the step reports `skipped`; enable the distro's own `sshd` unit
-instead.
+`--github-user` defaults to the account `gh` is signed in to. On Linux the
+step reports `skipped`; enable the distro's own `sshd` unit instead.
+
+### On macOS
+
+macOS's own OpenSSH server is **Remote Login**; launchd starts `sshd` for
+each connection, so there is no service to keep alive. `-s sshd` does three
+things, each left alone when it is already so:
+
+1. Adds `github.com/<user>.keys` to `~/.ssh/authorized_keys`, keeping any
+    key already there. Nothing re-reads them later; re-running the step is
+    the refresh.
+1. Turns Remote Login on (`sudo systemsetup -setremotelogin on`). macOS
+    allows that only from a terminal with Full Disk Access, so the step
+    reads the state back afterwards; if it is still off it says so, and the
+    switch is System Settings > General > Sharing > Remote Login.
+1. Turns password and keyboard-interactive login off, with
+    `/etc/ssh/sshd_config.d/050-just-bashit.conf` — named to sort before
+    macOS's own `100-macos.conf`, since `sshd` keeps the first value it reads.
+    Only when `authorized_keys` has a key, so it cannot lock you out; the
+    file is checked with `sshd -t` and removed again if `sshd` rejects it.
+    Deleting it turns passwords back on.
+
+```bash
+jbx setup-system -s sshd --github-user octocat
+```
+
+`--sshd-allow` has no macOS meaning — its firewall filters by application,
+not by address — and is reported and ignored.
 
 ### The ssh agent on native Windows
 

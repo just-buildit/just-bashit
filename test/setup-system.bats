@@ -2717,3 +2717,213 @@ _folders_stubs() {
 	assert_line "    Documents: ok (not redirected)"
 	assert_line "    folders: ok (local)"
 }
+
+# ---------------------------------------------------------------------------
+# macOS (#223): Homebrew, ~/.zprofile and Remote Login.
+# ---------------------------------------------------------------------------
+
+# _mac_stubs -- a Mac for setup-system to find. No brew on PATH (CI's macOS
+# runner has a real one, and the test is "a fresh Mac"), a scratch Homebrew
+# root, and stub sudo, launchctl, systemsetup and sshd that record their
+# calls. MAC_RL=on|off is Remote Login's state as launchctl reports it;
+# systemsetup turns it on unless MAC_RL_STUCK=1 (no Full Disk Access).
+_mac_stubs() {
+	MAC="${BATS_TEST_TMPDIR}/mac"
+	mkdir -p "${MAC}/bin" "${MAC}/brewroot" "${MAC}/sshd_config.d" "${MAC}/keys"
+	local dir kept=""
+	local IFS=:
+	for dir in ${PATH}; do
+		[[ -x ${dir}/brew ]] || kept="${kept:+${kept}:}${dir}"
+	done
+	IFS=$' \t\n'
+	export PATH="${MAC}/bin:${kept}"
+	export JB_UNAME_S=Darwin JB_UNAME_M=arm64 JB_BREW_ROOT="${MAC}/brewroot"
+	export JB_SSHD_CONFIG_D="${MAC}/sshd_config.d" JB_SSHD_BIN="${MAC}/bin/sshd"
+	export JB_GITHUB_KEYS_BASE="file://${MAC}/keys" MAC MAC_RL=on
+	printf '#!/bin/bash\necho "sudo $*" >>"%s/calls"\nexec "$@"\n' "${MAC}" >"${MAC}/bin/sudo"
+	cat >"${MAC}/bin/launchctl" <<-EOF
+		#!/bin/bash
+		state=\${MAC_RL}
+		[[ -e "${MAC}/rl-on" ]] && state=on
+		[[ \${state} == on ]] && v=enabled || v=disabled
+		printf 'disabled services = {\n\t"com.openssh.sshd" => %s\n}\n' "\${v}"
+	EOF
+	cat >"${MAC}/bin/systemsetup" <<-EOF
+		#!/bin/bash
+		echo "systemsetup \$*" >>"${MAC}/calls"
+		[[ \${MAC_RL_STUCK:-0} == 1 ]] || touch "${MAC}/rl-on"
+	EOF
+	printf '#!/bin/bash\necho "sshd $*" >>"%s/calls"\nexit "${MAC_SSHD_RC:-0}"\n' "${MAC}" >"${MAC}/bin/sshd"
+	chmod +x "${MAC}/bin"/*
+	printf 'ssh-ed25519 AAAAkeyone one\nssh-ed25519 AAAAkeytwo two\n' >"${MAC}/keys/octo.keys"
+	printf 'UsePAM yes\n' >"${MAC}/sshd_config.d/100-macos.conf"
+}
+
+@test 'macos deps: a Mac without Homebrew installs it before any brew install' {
+	_mac_stubs
+	run setup-system.sh -n -s deps
+	assert_success
+	assert_output --partial "Homebrew not installed"
+	assert_output --partial "Homebrew/install/HEAD/install.sh"
+	# The installer comes first: brew install with no brew is the bug.
+	local out="${output}"
+	[[ ${out%%Homebrew/install*} != *"brew install"* ]]
+}
+
+@test 'macos deps: a brew under a Homebrew prefix is used, not reinstalled' {
+	_mac_stubs
+	mkdir -p "${MAC}/brewroot/opt/homebrew/bin"
+	printf '#!/bin/bash\necho "brew $*" >>"%s/calls"\n' "${MAC}" \
+		>"${MAC}/brewroot/opt/homebrew/bin/brew"
+	chmod +x "${MAC}/brewroot/opt/homebrew/bin/brew"
+	run setup-system.sh -s deps
+	assert_success
+	refute_output --partial "Homebrew not installed"
+	assert_output --partial "deps:    ok"
+	# Found off PATH, so it was put on this run's PATH for install-deps.
+	run grep -x 'brew install cmake pkg-config' "${MAC}/calls"
+	assert_success
+}
+
+@test 'macos deps: a real run installs Homebrew, non-interactively under --yes' {
+	_mac_stubs
+	# curl stands in for the download: the "installer" it writes records
+	# NONINTERACTIVE and creates brew where the real one would be.
+	cat >"${MAC}/bin/curl" <<-EOF
+		#!/bin/bash
+		while [[ \$# -gt 0 ]]; do [[ \$1 == -o ]] && { out=\$2; shift; }; shift; done
+		cat >"\${out}" <<-'INNER'
+			echo "installer NONINTERACTIVE=\${NONINTERACTIVE:-}" >>"${MAC}/calls"
+			mkdir -p "${MAC}/brewroot/opt/homebrew/bin"
+			printf '#!/bin/bash\necho "brew \$*" >>"${MAC}/calls"\n' >"${MAC}/brewroot/opt/homebrew/bin/brew"
+			chmod +x "${MAC}/brewroot/opt/homebrew/bin/brew"
+		INNER
+	EOF
+	chmod +x "${MAC}/bin/curl"
+	run setup-system.sh -y -s deps
+	assert_success
+	assert_output --partial "deps:    ok"
+	run cat "${MAC}/calls"
+	assert_line 'installer NONINTERACTIVE=1'
+	assert_line 'brew install cmake pkg-config'
+}
+
+@test 'macos deps: a failed Homebrew install fails the step, and installs nothing' {
+	_mac_stubs
+	printf '#!/bin/bash\nexit 22\n' >"${MAC}/bin/curl"
+	chmod +x "${MAC}/bin/curl"
+	run setup-system.sh -y -s deps
+	assert_success
+	assert_output --partial "deps:    failed (no Homebrew)"
+	refute [ -e "${MAC}/calls" ]
+}
+
+@test 'shell step wires ~/.zprofile on macOS, where zsh is the login shell' {
+	_mac_stubs
+	run setup-system.sh -s shell
+	assert_success
+	run grep -qxF "${PF_LINE}" "${HOME}/.zprofile"
+	assert_success
+	# bash's own rc file is not offered to zsh.
+	run grep -qF "bashrc.sh" "${HOME}/.zprofile"
+	assert_failure
+}
+
+@test 'shell step leaves ~/.zprofile alone off macOS unless it exists' {
+	# Linux by name: the suite also runs on a macOS runner.
+	JB_UNAME_S=Linux run setup-system.sh -s shell
+	assert_success
+	assert [ ! -e "${HOME}/.zprofile" ]
+	touch "${HOME}/.zprofile"
+	JB_UNAME_S=Linux run setup-system.sh -s shell
+	assert_success
+	run grep -qxF "${PF_LINE}" "${HOME}/.zprofile"
+	assert_success
+}
+
+@test 'installed profile puts Homebrew on PATH, behind the user directories' {
+	setup-system.sh -s shell >/dev/null
+	local root="${BATS_TEST_TMPDIR}/brewroot"
+	mkdir -p "${root}/opt/homebrew/bin" "${root}/opt/homebrew/sbin" "${HOME}/.local/bin"
+	printf '#!/bin/sh\n' >"${root}/opt/homebrew/bin/brew"
+	chmod +x "${root}/opt/homebrew/bin/brew"
+	run env JB_BREW_ROOT="${root}" sh -c \
+		". '${HOME}/.config/just-bashit/profile.sh'; echo \"\${HOMEBREW_PREFIX}|\${PATH}\""
+	assert_success
+	assert_output --partial "${root}/opt/homebrew|${HOME}/.local/bin:${root}/opt/homebrew/bin:${root}/opt/homebrew/sbin:"
+}
+
+@test 'installed profile sources under zsh' {
+	command -v zsh >/dev/null 2>&1 || skip "zsh not installed"
+	setup-system.sh -s shell >/dev/null
+	local root="${BATS_TEST_TMPDIR}/brewroot"
+	mkdir -p "${root}/opt/homebrew/bin"
+	printf '#!/bin/sh\n' >"${root}/opt/homebrew/bin/brew"
+	chmod +x "${root}/opt/homebrew/bin/brew"
+	run env JB_BREW_ROOT="${root}" zsh -fc \
+		". '${HOME}/.config/just-bashit/profile.sh'; echo \"rc=\$? \${PATH}\""
+	assert_success
+	assert_output --partial "rc=0 ${root}/opt/homebrew/bin:"
+}
+
+@test 'macos sshd: keys, Remote Login and key-only, then a re-run changes nothing' {
+	_mac_stubs
+	MAC_RL=off run setup-system.sh -s sshd --github-user octo
+	assert_success
+	assert_output --partial "github.com/octo.keys: 2 added"
+	assert_output --partial "sshd:    ok (Remote Login, keys from github.com/octo.keys, key-only)"
+	run grep -c . "${HOME}/.ssh/authorized_keys"
+	assert_output 2
+	run cat "${MAC}/calls"
+	assert_line --partial "systemsetup -setremotelogin on"
+	assert_line --partial "sshd -t"
+	run cat "${MAC}/sshd_config.d/050-just-bashit.conf"
+	assert_line 'PasswordAuthentication no'
+	assert_line 'KbdInteractiveAuthentication no'
+	# Sorts before macOS's own drop-in: sshd keeps the first value it reads.
+	run ls "${MAC}/sshd_config.d"
+	assert_line --index 0 '050-just-bashit.conf'
+	run setup-system.sh -s sshd --github-user octo
+	assert_success
+	assert_output --partial "github.com/octo.keys: 0 added"
+	assert_output --partial "Remote Login already on"
+	assert_output --partial "password login already off"
+}
+
+@test 'macos sshd: no key to log in with leaves password login on' {
+	_mac_stubs
+	run setup-system.sh -s sshd
+	assert_success
+	assert_output --partial "password login left on"
+	refute [ -e "${MAC}/sshd_config.d/050-just-bashit.conf" ]
+}
+
+@test 'macos sshd: Remote Login that stays off is a failure naming the switch' {
+	_mac_stubs
+	MAC_RL=off MAC_RL_STUCK=1 run setup-system.sh -s sshd --github-user octo
+	assert_success
+	assert_output --partial "System Settings > General > Sharing > Remote Login"
+	assert_output --partial "sshd:    failed (Remote Login still off)"
+	refute [ -e "${MAC}/sshd_config.d/050-just-bashit.conf" ]
+}
+
+@test 'macos sshd: a drop-in sshd rejects is removed again' {
+	_mac_stubs
+	MAC_SSHD_RC=255 run setup-system.sh -s sshd --github-user octo
+	assert_success
+	assert_output --partial "sshd:    failed (sshd -t rejected the drop-in)"
+	refute [ -e "${MAC}/sshd_config.d/050-just-bashit.conf" ]
+}
+
+@test 'macos sshd: a dry run changes nothing and says --sshd-allow is Windows-only' {
+	_mac_stubs
+	MAC_RL=off run setup-system.sh -n -s sshd --github-user octo --sshd-allow 100.64.0.0/10
+	assert_success
+	assert_output --partial "--sshd-allow is Windows-only"
+	assert_output --partial "would add github.com/octo.keys"
+	assert_output --partial "would run: "
+	assert_output --partial "systemsetup -setremotelogin on"
+	assert_output --partial "sshd:    ok (dry run)"
+	refute [ -e "${HOME}/.ssh/authorized_keys" ]
+	refute [ -e "${MAC}/calls" ]
+}

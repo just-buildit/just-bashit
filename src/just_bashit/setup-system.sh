@@ -77,7 +77,10 @@ read -r -d '' HELP <<-'EOF' || true
 	          line to ~/.bashrc and ~/.profile. Your files stay yours.
 	  ssh     Ensure ~/.ssh permissions and an ed25519 key named after this
 	          host; print the public key to register with GitHub.
-	  sshd    Windows only (WSL or native MSYS2 / Git Bash): run Windows'
+	  sshd    On macOS (only when asked for, -s sshd): turn on Remote
+	          Login, add github.com/<user>.keys to ~/.ssh/authorized_keys
+	          and turn password login off, when a key is there to log in
+	          with. On Windows (WSL or native MSYS2 / Git Bash): run Windows'
 	          OpenSSH server as a boot-time service -- key-only, keys
 	          from github.com/<user>.keys (re-read every 4 h by a task),
 	          pwsh.exe as the login shell -- so the machine is reachable
@@ -117,7 +120,7 @@ read -r -d '' HELP <<-'EOF' || true
 	                             100.64.0.0/10,fd7a:115c:a1e0::/48 for a
 	                             Tailscale tailnet only, or any. Omitted,
 	                             an existing rule keeps its addresses and
-	                             a new one admits any.
+	                             a new one admits any. Windows only.
 	       --template [PATH]     Write the bashrc template to PATH (or stdout).
 	       --template-profile [PATH]
 	                             Write the profile template to PATH (or stdout).
@@ -642,6 +645,12 @@ step_deps() {
 		return 0
 	}
 
+	# macOS installs everything through brew, which a fresh Mac lacks.
+	if _on_macos && ! _brew_ensure; then
+		_result "deps:    failed (no Homebrew)"
+		return 0
+	fi
+
 	local baseline ok=1 done_list="baseline toolchain"
 	baseline="$(mktemp "${TMPDIR:-/tmp}/jb-baseline.XXXXXX")"
 	printf '%s\n' "${_BASELINE_TOML}" >"${baseline}"
@@ -696,6 +705,88 @@ _on_native_windows() {
 	MINGW* | MSYS* | CYGWIN*) return 0 ;;
 	*) return 1 ;;
 	esac
+}
+
+# _on_macos -- true on macOS. The deps step (Homebrew), the shell step
+# (~/.zprofile) and the sshd step (Remote Login) ask it.
+_on_macos() {
+	_pwsh_uname_init
+	[[ ${_UNAME_S} == Darwin ]]
+}
+
+# ---------------------------------------------------------------------------
+# Homebrew -- macOS's package manager, which a fresh Mac does not have.
+#
+# Its installer also installs the Xcode Command Line Tools (the compiler,
+# make, git), so it is the whole of a bare Mac's toolchain bootstrap. It
+# puts brew under /opt/homebrew on Apple silicon and /usr/local on Intel,
+# neither of which is on a fresh PATH; profile.sh adds whichever exists to
+# every later shell, and _brew_ensure adds it to this run.
+#
+# JB_BREW_ROOT is the suite's, as in profile.sh: it goes in front of both
+# prefixes, so a test can place a stub brew where the real one would be.
+# ---------------------------------------------------------------------------
+_BREW_INSTALL_SH="https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
+
+# _brew_find -- the brew this machine has, on PATH or under a prefix the
+# installer uses; printed, or return 1 when there is none.
+_brew_find() {
+	local p
+	if _have brew; then
+		command -v brew
+		return 0
+	fi
+	for p in "${JB_BREW_ROOT:-}/opt/homebrew" "${JB_BREW_ROOT:-}/usr/local"; do
+		if [[ -x "${p}/bin/brew" ]]; then
+			printf '%s\n' "${p}/bin/brew"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# _brew_ensure -- make sure brew exists and is on this run's PATH,
+# installing it when it does not exist. Returns 1 when it is still missing.
+# The installer needs sudo once, to create its prefix: at a terminal it asks
+# for the password; under --yes or with no terminal it runs
+# non-interactively, which then needs sudo without one. Run from a file,
+# not a pipe, because it reads its prompts from stdin.
+_brew_ensure() {
+	local brew script rc=0
+	if brew="$(_brew_find)"; then
+		_path_add "$(dirname "${brew}")"
+		return 0
+	fi
+	_info "Homebrew not installed -- installing it, with the Xcode Command Line Tools"
+	if [[ ${DRY_RUN} -eq 1 ]]; then
+		_info "would run: /bin/bash -c \"\$(curl -fsSL ${_BREW_INSTALL_SH})\""
+		return 0
+	fi
+	if ! _have curl; then
+		_warn "curl not installed -- cannot install Homebrew"
+		return 1
+	fi
+	_info "it asks for your password once, to create its directory"
+	_curl_tls_init
+	_curl_retry_opts_init
+	script="$(mktemp "${TMPDIR:-/tmp}/jb-brew-install.XXXXXX")"
+	if ! curl -fsSL "${_CURL_RETRY_OPTS[@]}" \
+		"${_CURL_TLS[@]+"${_CURL_TLS[@]}"}" -o "${script}" "${_BREW_INSTALL_SH}"; then
+		rm -f "${script}"
+		_warn "could not download ${_BREW_INSTALL_SH}"
+		return 1
+	fi
+	if [[ ${ASSUME_YES} -eq 1 ]]; then
+		NONINTERACTIVE=1 /bin/bash "${script}" || rc=$?
+	else
+		/bin/bash "${script}" || rc=$?
+	fi
+	rm -f "${script}"
+	if [[ ${rc} -ne 0 ]] || ! brew="$(_brew_find)"; then
+		_warn "the Homebrew installer failed (exit ${rc})"
+		return 1
+	fi
+	_path_add "$(dirname "${brew}")"
 }
 
 # ---------------------------------------------------------------------------
@@ -1017,6 +1108,14 @@ step_shell() {
 		"if [ -r \"${pf_path}\" ]; then . \"${pf_path}\"; fi"
 	if [[ -f "${HOME}/.bash_profile" ]]; then
 		_source_line "${HOME}/.bash_profile" \
+			"if [ -r \"${pf_path}\" ]; then . \"${pf_path}\"; fi"
+	fi
+	# zsh reads neither of those, and it is macOS's login shell: a Terminal
+	# window there would get none of profile.sh (PATH, Homebrew, XDG). The
+	# file is POSIX sh, so zsh sources it as it is. bashrc.sh is bash's own
+	# and is not offered to zsh. Elsewhere only when a ~/.zprofile exists.
+	if _on_macos || [[ -f "${HOME}/.zprofile" ]]; then
+		_source_line "${HOME}/.zprofile" \
 			"if [ -r \"${pf_path}\" ]; then . \"${pf_path}\"; fi"
 	fi
 
@@ -1596,6 +1695,11 @@ _sshd_failed() {
 }
 
 step_sshd() {
+	if _on_macos; then
+		_head "sshd — macOS Remote Login, key-only"
+		_sshd_macos
+		return 0
+	fi
 	_head "sshd — Windows OpenSSH server, started at boot"
 	_sshd_server
 	# Whatever became of the server: the agent service may already be
@@ -1603,6 +1707,150 @@ step_sshd() {
 	if _on_native_windows; then
 		_win_agent_key
 	fi
+}
+
+# ---------------------------------------------------------------------------
+# sshd on macOS -- Remote Login, which is macOS's own OpenSSH server.
+#
+# launchd starts sshd for each connection once Remote Login is on, so there
+# is no service to keep alive and a new sshd_config takes effect on the next
+# connection with no restart. Three things, each skipped when already so:
+#
+#   1. github.com/<user>.keys are added to ~/.ssh/authorized_keys (any key
+#      already there stays). Unlike Windows nothing re-reads them later;
+#      re-running this step is the refresh.
+#   2. Remote Login is turned on (systemsetup). Its state is read from
+#      launchd without sudo. macOS refuses the switch to a terminal without
+#      Full Disk Access, and systemsetup may still exit 0 then, so the state
+#      is read again afterwards rather than trusting the exit status.
+#   3. Password and keyboard-interactive login are turned off, by a drop-in
+#      in /etc/ssh/sshd_config.d. sshd keeps the FIRST value it reads for a
+#      setting, and macOS's own drop-in is 100-macos.conf, so this one is
+#      named to sort before it. Only with a key in authorized_keys: turning
+#      passwords off with no key to log in with locks the user out. The file
+#      is checked with `sshd -t` and removed again if sshd rejects it.
+#
+# --sshd-allow has no macOS meaning: its firewall filters by application,
+# not by address, so it is reported and otherwise ignored.
+#
+# JB_SSHD_CONFIG_D, JB_SSHD_BIN and JB_GITHUB_KEYS_BASE are the suite's: a
+# test writes the drop-in into a scratch directory, checks it with a stub
+# sshd and serves the keys itself.
+# ---------------------------------------------------------------------------
+_SSHD_MAC_DROPIN_NAME="050-just-bashit.conf"
+_SSHD_MAC_DROPIN="# just-bashit setup-system: key-only ssh login. Delete this file to undo.
+PasswordAuthentication no
+KbdInteractiveAuthentication no"
+
+# _macos_remote_login_on -- true when launchd has Remote Login enabled.
+_macos_remote_login_on() {
+	launchctl print-disabled system 2>/dev/null |
+		grep -qF '"com.openssh.sshd" => enabled'
+}
+
+# _sshd_macos_keys USER AK -- add github.com/USER.keys to AK. Prints the
+# number added; returns 1 when the keys could not be fetched.
+_sshd_macos_keys() {
+	local user="$1" ak="$2" keys line added=0
+	_curl_tls_init
+	_curl_retry_opts_init
+	keys="$(curl -fsSL "${_CURL_RETRY_OPTS[@]}" \
+		"${_CURL_TLS[@]+"${_CURL_TLS[@]}"}" \
+		"${JB_GITHUB_KEYS_BASE:-https://github.com}/${user}.keys")" || return 1
+	mkdir -p "${ak%/*}"
+	chmod 700 "${ak%/*}"
+	touch "${ak}"
+	chmod 600 "${ak}"
+	while IFS= read -r line; do
+		[[ -n ${line} ]] || continue
+		if ! grep -qxF "${line}" "${ak}"; then
+			printf '%s\n' "${line}" >>"${ak}"
+			added=$((added + 1))
+		fi
+	done <<<"${keys}"
+	printf '%s\n' "${added}"
+}
+
+_sshd_macos() {
+	local ak="${HOME}/.ssh/authorized_keys"
+	local dir="${JB_SSHD_CONFIG_D:-/etc/ssh/sshd_config.d}"
+	local dropin="${dir}/${_SSHD_MAC_DROPIN_NAME}"
+	local user="" n notes=()
+
+	if [[ -n ${SSHD_ALLOW} ]]; then
+		_warn "--sshd-allow is Windows-only: macOS's firewall filters by application, not address"
+	fi
+
+	# 1. The keys.
+	if user="$(_sshd_github_user)"; then
+		if [[ ! ${user} =~ ^[A-Za-z0-9-]+$ ]]; then
+			_warn "not a GitHub user name: ${user}"
+			_result "sshd:    failed (bad --github-user)"
+			return 0
+		fi
+		if [[ ${DRY_RUN} -eq 1 ]]; then
+			_info "would add github.com/${user}.keys to ${ak}"
+		elif n="$(_sshd_macos_keys "${user}" "${ak}")"; then
+			_info "github.com/${user}.keys: ${n} added to ${ak}"
+			notes+=("keys from github.com/${user}.keys")
+		else
+			_warn "could not fetch github.com/${user}.keys"
+			_result "sshd:    failed (no github.com/${user}.keys)"
+			return 0
+		fi
+	else
+		_info "no GitHub user (--github-user NAME, or sign in to gh): ${ak} kept as it is"
+	fi
+
+	# 2. Remote Login.
+	if _macos_remote_login_on; then
+		_info "Remote Login already on"
+	else
+		_info "turning on Remote Login"
+		_priv systemsetup -setremotelogin on || true
+		if [[ ${DRY_RUN} -eq 0 ]] && ! _macos_remote_login_on; then
+			_warn "Remote Login is still off. macOS lets only a terminal with Full Disk Access switch it:"
+			_warn "turn it on in System Settings > General > Sharing > Remote Login, then re-run"
+			_result "sshd:    failed (Remote Login still off)"
+			return 0
+		fi
+	fi
+
+	# 3. Key-only.
+	if [[ -r ${dropin} ]] && [[ "$(cat "${dropin}")" == "${_SSHD_MAC_DROPIN}" ]]; then
+		_info "password login already off (${dropin})"
+		notes+=("key-only")
+	elif [[ ! -s ${ak} && ! (${DRY_RUN} -eq 1 && -n ${user}) ]]; then
+		_warn "no key in ${ak}: password login left on, so you are not locked out"
+		notes+=("passwords still on: no authorized key")
+	elif [[ ${DRY_RUN} -eq 1 ]]; then
+		_info "would write ${dropin} (password login off), then check it with sshd -t:"
+		printf '%s\n' "${_SSHD_MAC_DROPIN}" | sed 's/^/      /'
+	else
+		local tmp
+		tmp="$(mktemp "${TMPDIR:-/tmp}/jb-sshd.XXXXXX")"
+		printf '%s\n' "${_SSHD_MAC_DROPIN}" >"${tmp}"
+		_info "turning password login off (${dropin})"
+		_priv install -m 0644 "${tmp}" "${dropin}"
+		rm -f "${tmp}"
+		if ! _priv "${JB_SSHD_BIN:-/usr/sbin/sshd}" -t; then
+			_priv rm -f "${dropin}"
+			_warn "sshd rejected ${dropin}; removed it"
+			_result "sshd:    failed (sshd -t rejected the drop-in)"
+			return 0
+		fi
+		notes+=("key-only")
+	fi
+
+	if [[ ${DRY_RUN} -eq 1 ]]; then
+		_result "sshd:    ok (dry run)"
+		return 0
+	fi
+	local summary="Remote Login" note
+	for note in "${notes[@]+"${notes[@]}"}"; do
+		summary="${summary}, ${note}"
+	done
+	_result "sshd:    ok (${summary})"
 }
 
 _sshd_server() {
