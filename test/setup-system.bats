@@ -2934,6 +2934,19 @@ _mac_stubs() {
 	[[ $(grep -o "${hb}" <<<"${output}" | wc -l) -eq 1 ]]
 }
 
+@test 'installed profile moves a Homebrew directly behind /usr/bin' {
+	setup-system.sh -s shell >/dev/null
+	local root="${BATS_TEST_TMPDIR}/brewroot" hb
+	hb="${root}/opt/homebrew/bin"
+	mkdir -p "${hb}"
+	printf '#!/bin/sh\n' >"${hb}/brew"
+	chmod +x "${hb}/brew"
+	run env JB_BREW_ROOT="${root}" PATH="/usr/bin:${hb}" sh -c \
+		". '${HOME}/.config/just-bashit/profile.sh'; echo \"\${PATH}\""
+	assert_success
+	assert_output --partial "${hb}:/usr/bin"
+}
+
 # A nested shell sources profile.sh again (JB_PROFILE is not exported):
 # the second pass must keep the user's directories ahead of Homebrew.
 @test 'installed profile keeps its order when sourced twice' {
