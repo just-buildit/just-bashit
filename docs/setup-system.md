@@ -308,6 +308,22 @@ jbx setup-system -s ssh
 
 `--key-name NAME` overrides the filename.
 
+On macOS the step first pins the host's name. A Mac with no `HostName` set
+takes its name from the network it is on (`mac-mini.lan` one hour,
+`Matthews-Mac-mini.local` the next), so a key named after it, and ssh's `%l`,
+stop agreeing. When `HostName` is unset the step sets it to the lowercased
+`LocalHostName` (`sudo scutil --set HostName matthews-mac-mini`), the name
+Tailscale gives the node too; a `HostName` already set is left alone. It
+then points `github.com` at the key in `~/.ssh/config`, between
+`# >>> just-bashit` markers: zsh, a Mac's login shell, never reads
+`bashrc.sh`, so no shell would put the key in the agent and git over ssh
+would find nothing to offer. Any of ssh's default keys (`id_ed25519` and
+the rest) that exist are listed after it, since naming a key for a host
+stops ssh trying the defaults there. A `Host github.com` entry of your own,
+a symlinked
+`~/.ssh/config` and markers that do not pair are left as they are, and
+nothing is added.
+
 On native Windows that key also goes into **Windows' own ssh-agent
 service**, the one pwsh, Windows' `ssh.exe`, Git and VS Code all use — the
 bash `ssh-agent` the [shell step](#the-shell-step) starts is one none of

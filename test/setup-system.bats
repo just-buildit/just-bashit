@@ -32,6 +32,13 @@ setup() {
 	export JB_PROC_MOUNTS="${BATS_TEST_TMPDIR}/mounts"
 	# Nor the real token check (#184): CI's Windows runners are elevated.
 	export JB_WIN_ELEVATED=0
+	# Nor the real scutil (#225): on a Mac the ssh step would ask it, and
+	# could rename the machine. This one answers nothing, so the step names
+	# the key by $HOSTNAME as anywhere else; _mac_stubs puts its own first.
+	mkdir -p "${BATS_TEST_TMPDIR}/noscutil"
+	printf '#!/bin/sh\nexit 1\n' >"${BATS_TEST_TMPDIR}/noscutil/scutil"
+	chmod +x "${BATS_TEST_TMPDIR}/noscutil/scutil"
+	PATH="${BATS_TEST_TMPDIR}/noscutil:${PATH}"
 	# Nor Windows' own OpenSSH client (#190): on a native Windows runner the
 	# agent step would otherwise ask the machine's real ssh-agent service.
 	export JB_WIN_OPENSSH="${BATS_TEST_TMPDIR}/no-openssh"
@@ -2815,11 +2822,27 @@ _mac_stubs() {
 		[[ \${MAC_RL_STUCK:-0} == 1 ]] || touch "${MAC}/rl-on"
 	EOF
 	printf '#!/bin/bash\necho "sshd $*" >>"%s/calls"\nexit "${MAC_SSHD_RC:-0}"\n' "${MAC}" >"${MAC}/bin/sshd"
+	# scutil: HostName is unset unless MAC_HOSTNAME says otherwise, as on a
+	# fresh Mac; LocalHostName is the Bonjour name from the Computer Name.
+	cat >"${MAC}/bin/scutil" <<-EOF
+		#!/bin/bash
+		case "\$1 \$2" in
+		"--get HostName")
+			[[ -n \${MAC_HOSTNAME:-} ]] || { echo "HostName: not set"; exit 1; }
+			echo "\${MAC_HOSTNAME}" ;;
+		"--get LocalHostName") echo Matthews-Mac-mini ;;
+		"--set HostName") echo "scutil \$*" >>"${MAC}/calls" ;;
+		*) exit 1 ;;
+		esac
+	EOF
 	chmod +x "${MAC}/bin"/*
 	# Real keys: the step adds only what ssh-keygen reads as one.
 	ssh-keygen -q -t ed25519 -N '' -C one -f "${MAC}/k1"
 	ssh-keygen -q -t ed25519 -N '' -C two -f "${MAC}/k2"
 	cat "${MAC}/k1.pub" "${MAC}/k2.pub" >"${MAC}/keys/octo.keys"
+	# GitHub accepts whatever key is offered unless STUB_GH says otherwise:
+	# the ssh step names a key for github.com only once it is accepted.
+	_github_ssh_stub
 	printf 'UsePAM yes\n' >"${MAC}/sshd_config.d/100-macos.conf"
 }
 
@@ -3100,4 +3123,173 @@ _mac_stubs() {
 	assert_output --partial "sshd:    ok (dry run)"
 	refute [ -e "${HOME}/.ssh/authorized_keys" ]
 	refute [ -e "${MAC}/calls" ]
+}
+
+# #225: a Mac with no HostName takes its name from the network, so the box
+# key and ssh's %l stopped agreeing. The ssh step pins it first.
+@test 'macos ssh: an unset HostName is pinned to LocalHostName, lowercased' {
+	command -v ssh-keygen >/dev/null 2>&1 || skip "ssh-keygen not installed"
+	_mac_stubs
+	run env HOSTNAME=mac-mini.lan setup-system.sh -y -s ssh
+	assert_success
+	grep -qx "scutil --set HostName matthews-mac-mini" "${MAC}/calls"
+	[[ -r "${HOME}/.ssh/matthews-mac-mini.pub" ]]
+	[[ ! -e "${HOME}/.ssh/mac-mini" ]]
+}
+
+@test 'macos ssh: a HostName already set is kept and names the key' {
+	_mac_stubs
+	export MAC_HOSTNAME=studio.example.org
+	run setup-system.sh -n -s ssh
+	assert_success
+	assert_output --partial "generating ed25519 key ${HOME}/.ssh/studio"
+	# A real run with that key present: nothing is re-pinned.
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub" \
+		"${HOME}/.ssh/studio" "${HOME}/.ssh/studio.pub"
+	run setup-system.sh -s ssh
+	assert_success
+	grep -qxF "    IdentityFile \"${HOME}/.ssh/studio\"" "${HOME}/.ssh/config"
+	run grep -q 'scutil --set' "${MAC}/calls"
+	assert_failure
+}
+
+# zsh never reads bashrc.sh, so the box key reached no agent and git over ssh
+# failed on the Mac. ~/.ssh/config names it for github.com instead.
+@test 'macos ssh: github.com is pointed at the box key, once' {
+	command -v ssh-keygen >/dev/null 2>&1 || skip "ssh-keygen not installed"
+	_mac_stubs
+	mkdir -p "${HOME}/.ssh"
+	printf 'Host box\n    User me\n' >"${HOME}/.ssh/config"
+	local cfg="${HOME}/.ssh/config"
+	run setup-system.sh -y -s ssh
+	assert_success
+	grep -qxF "    IdentityFile \"${HOME}/.ssh/matthews-mac-mini\"" "${cfg}"
+	run setup-system.sh -y -s ssh
+	assert_success
+	assert_equal "$(grep -c '^Host github.com$' "${cfg}")" 1
+	grep -qxF "    IdentityFile \"${HOME}/.ssh/matthews-mac-mini\"" "${cfg}"
+	grep -qx 'Host box' "${cfg}"
+	# MSYS has no Unix modes to read back.
+	case "${OSTYPE:-}" in
+	msys* | cygwin*) ;;
+	*) assert_equal "$(stat -c %a "${cfg}" 2>/dev/null || stat -f %Lp "${cfg}")" 600 ;;
+	esac
+}
+
+@test 'macos ssh: an existing key is the one github.com is pointed at' {
+	_mac_stubs
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
+	run setup-system.sh -s ssh
+	assert_success
+	grep -qxF "    IdentityFile \"${HOME}/.ssh/id_ed25519\"" "${HOME}/.ssh/config"
+	# Named once, not again as a default.
+	assert_equal "$(grep -c IdentityFile "${HOME}/.ssh/config")" 1
+	# The box key arriving later replaces the line in place.
+	touch "${HOME}/.ssh/matthews-mac-mini" "${HOME}/.ssh/matthews-mac-mini.pub"
+	run setup-system.sh -s ssh
+	assert_success
+	run grep -m1 IdentityFile "${HOME}/.ssh/config"
+	assert_output "    IdentityFile \"${HOME}/.ssh/matthews-mac-mini\""
+	assert_equal "$(grep -c '^Host github.com$' "${HOME}/.ssh/config")" 1
+}
+
+@test 'macos ssh: a Host github.com the user wrote is left alone' {
+	_mac_stubs
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
+	printf 'Host gitlab.com github.com\n    IdentityFile ~/.ssh/mine\n' >"${HOME}/.ssh/config"
+	local before
+	before="$(cat "${HOME}/.ssh/config")"
+	run setup-system.sh -s ssh
+	assert_success
+	assert_output --partial "already has a Host github.com entry"
+	assert_equal "$(cat "${HOME}/.ssh/config")" "${before}"
+}
+
+@test 'macos ssh: a dry run pins nothing and writes no config' {
+	_mac_stubs
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
+	run setup-system.sh -n -s ssh
+	assert_success
+	assert_output --partial "scutil --set HostName matthews-mac-mini"
+	[[ ! -e "${HOME}/.ssh/config" ]]
+	run grep -q 'scutil --set' "${MAC}/calls"
+	assert_failure
+}
+
+# An IdentityFile for github.com replaces ssh's id_* defaults there, so the
+# defaults that exist are listed after the box key: an id_ed25519 GitHub
+# knows keeps working whether or not the box key is registered.
+@test 'macos ssh: the default keys stay offered to github.com' {
+	_mac_stubs
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub" \
+		"${HOME}/.ssh/id_rsa" "${HOME}/.ssh/id_rsa.pub" \
+		"${HOME}/.ssh/matthews-mac-mini" "${HOME}/.ssh/matthews-mac-mini.pub"
+	STUB_GH=denied run setup-system.sh -s ssh
+	assert_success
+	run grep IdentityFile "${HOME}/.ssh/config"
+	assert_output "$(printf '    IdentityFile "%s"\n' \
+		"${HOME}/.ssh/matthews-mac-mini" "${HOME}/.ssh/id_rsa" "${HOME}/.ssh/id_ed25519")"
+}
+
+# A dotfile manager's link stays a link: mv would put a plain file there.
+@test 'macos ssh: a symlinked ~/.ssh/config is left alone' {
+	case "${OSTYPE:-}" in
+	msys* | cygwin*) skip "MSYS ln -s copies the file: no symlink to keep" ;;
+	*) ;;
+	esac
+	_mac_stubs
+	mkdir -p "${HOME}/.ssh" "${HOME}/dotfiles"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
+	printf 'Host box\n' >"${HOME}/dotfiles/ssh_config"
+	ln -s "${HOME}/dotfiles/ssh_config" "${HOME}/.ssh/config"
+	run setup-system.sh -s ssh
+	assert_success
+	assert_output --partial "is a symlink"
+	[[ -L "${HOME}/.ssh/config" ]]
+	assert_equal "$(cat "${HOME}/dotfiles/ssh_config")" "Host box"
+}
+
+# An orphan begin marker would have the rewrite drop every line after it.
+@test 'macos ssh: markers out of order leave ~/.ssh/config as it is' {
+	_mac_stubs
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
+	local b="# >>> just-bashit: github.com key (setup-system) >>>"
+	local e="# <<< just-bashit: github.com key (setup-system) <<<"
+	printf '%s\nHost box\n%s\nHost github.com\n%s\n    User me\n' \
+		"${e}" "${b}" "${e}" >"${HOME}/.ssh/config"
+	local before
+	before="$(cat "${HOME}/.ssh/config")"
+	run setup-system.sh -s ssh
+	assert_success
+	assert_output --partial "unpaired just-bashit marker"
+	assert_equal "$(cat "${HOME}/.ssh/config")" "${before}"
+}
+
+@test 'macos ssh: an unpaired marker leaves ~/.ssh/config as it is' {
+	_mac_stubs
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
+	printf '%s\nHost github.com\n    IdentityFile x\nHost box\n    User me\n' \
+		"# >>> just-bashit: github.com key (setup-system) >>>" >"${HOME}/.ssh/config"
+	local before
+	before="$(cat "${HOME}/.ssh/config")"
+	run setup-system.sh -s ssh
+	assert_success
+	assert_output --partial "unpaired just-bashit marker"
+	assert_equal "$(cat "${HOME}/.ssh/config")" "${before}"
+}
+
+@test 'linux ssh: ~/.ssh/config is not touched' {
+	export JB_UNAME_S=Linux
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
+	run setup-system.sh -s ssh
+	assert_success
+	[[ ! -e "${HOME}/.ssh/config" ]]
 }
