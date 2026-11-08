@@ -3070,13 +3070,13 @@ _mac_stubs() {
 
 @test 'macos sshd: a drop-in that cannot be written fails the step, not the run' {
 	_mac_stubs
-	chmod 0555 "${MAC}/sshd_config.d"
-	printf '#!/bin/bash\nexec "$@"\n' >"${MAC}/bin/sudo"
-	run setup-system.sh -s sshd,git --github-user octo
-	chmod 0755 "${MAC}/sshd_config.d"
-	[[ $(id -u) -ne 0 ]] || skip "root writes a read-only directory"
+	# A directory that is a FILE: the write fails everywhere, as root too
+	# and on MSYS, where a 0555 directory is still writable.
+	: >"${MAC}/notadir"
+	JB_SSHD_CONFIG_D="${MAC}/notadir/sshd_config.d" \
+		run setup-system.sh -s sshd,git --github-user octo
 	assert_success
-	assert_output --partial "sshd:    failed (could not write ${MAC}/sshd_config.d/050-just-bashit.conf)"
+	assert_output --partial "sshd:    failed (could not write ${MAC}/notadir/sshd_config.d/050-just-bashit.conf)"
 	# The run went on to the next step.
 	assert_output --partial "git:     "
 }
