@@ -448,9 +448,10 @@ The version is pinned in the script, so picking up a newer PowerShell is an
 upgrade you chose rather than whatever was released this morning. Re-running
 the step after a bump replaces the tree in place.
 
-On **macOS** it installs the Homebrew cask instead — the tarball above is a
-Linux build, and unpacking it on a Mac would produce a `pwsh` that cannot
-execute.
+On **macOS** it installs Microsoft's `osx` tarball at the same pin, linked as
+`/usr/local/bin/pwsh` (macOS keeps `/usr/bin` read-only). The Linux tarball
+would produce a `pwsh` that cannot execute there, and Homebrew no longer has a
+`powershell` cask.
 
 On **Windows** it does nothing but say so, and reports `skipped` rather than
 pretending otherwise. `install-deps` has a `winget` section, but this step

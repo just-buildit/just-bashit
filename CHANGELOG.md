@@ -18,6 +18,13 @@
         to `authorized_keys` and turns password login off, only when a key is
         there to log in with.
 
+### Fixed
+
+- **setup-system pwsh installs on macOS again.** Homebrew dropped its
+    `powershell` cask, so the step failed on every Mac without pwsh. It now
+    installs Microsoft's `osx` tarball at the same pinned version as Linux,
+    linked as `/usr/local/bin/pwsh`.
+
 ## [0.13.1] - 2026-11-07
 
 ### Fixed

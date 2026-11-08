@@ -1436,7 +1436,16 @@ _ps_ver() {
 	run env JB_PWSH=no-pwsh-here JB_UNAME_S=Darwin JB_UNAME_M=arm64 setup-system.sh -n -s pwsh
 	assert_success
 	refute_output --partial "linux-arm64.tar.gz"
-	refute_output --partial "releases/download"
+}
+
+# Homebrew's powershell cask is gone; the step takes Microsoft's macOS
+# tarball at the same pin, linked where System Integrity Protection allows.
+@test 'pwsh step installs the pinned osx tarball on macOS' {
+	run env JB_PWSH=no-pwsh-here JB_UNAME_S=Darwin JB_UNAME_M=arm64 setup-system.sh -n -s pwsh
+	assert_success
+	assert_output --regexp "releases/download/v[0-9.]+/powershell-[0-9.]+-osx-arm64\.tar\.gz"
+	assert_output --regexp "ln -sf .*/pwsh /usr/local/bin/pwsh"
+	refute_output --partial "brew install"
 }
 
 @test 'pwsh step skips a platform it cannot provision' {
@@ -1535,7 +1544,7 @@ _pwsh_stub() {
 	assert_output --regexp "install .*${want}"
 }
 
-@test 'pwsh step installs no ICU on macOS, where brew provisions pwsh' {
+@test 'pwsh step installs no ICU on macOS, whose pwsh uses the system ICU' {
 	run env JB_PWSH=no-pwsh-here JB_UNAME_S=Darwin JB_UNAME_M=arm64 \
 		setup-system.sh -n -s pwsh
 	assert_success

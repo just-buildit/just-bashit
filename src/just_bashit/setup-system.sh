@@ -2264,6 +2264,8 @@ step_tools() {
 _PS_VER="7.6.6"
 _PWSH_DIR="/opt/microsoft/powershell/7"
 _PWSH_LINK="/usr/bin/pwsh"
+# macOS keeps /usr/bin read-only (System Integrity Protection).
+_PWSH_LINK_OSX="/usr/local/bin/pwsh"
 
 # The interpreter this step looks for and then drives. Named through a
 # variable so a test can point it at an interpreter that is not there, or at
@@ -2276,7 +2278,7 @@ _PWSH_BIN="${JB_PWSH:-pwsh}"
 
 # Why the step could not install anything here, phrased for the summary. An
 # install helper returns 2 and sets this when the machine cannot have pwsh
-# (no upstream build, no downloader, no Homebrew), and 1 when it tried and
+# (no upstream build, no downloader), and 1 when it tried and
 # the install itself failed — the summary must not call the first a failure.
 _PWSH_SKIP=""
 
@@ -2311,10 +2313,13 @@ _pwsh_arch() {
 }
 
 # ---------------------------------------------------------------------------
-# _pwsh_install_linux — the pinned tarball into /opt, symlinked onto PATH.
+# _pwsh_install_tarball OS LINK — the pinned tarball for OS (linux or osx)
+# into /opt, symlinked as LINK. Microsoft publishes both; each runs only on
+# its own system, so a Linux tarball on a Mac would install a pwsh that
+# cannot execute.
 # ---------------------------------------------------------------------------
-_pwsh_install_linux() {
-	local arch url tarball
+_pwsh_install_tarball() {
+	local os="$1" link="$2" arch url tarball
 	if ! arch="$(_pwsh_arch)"; then
 		_warn "no PowerShell build for ${_UNAME_M}"
 		_PWSH_SKIP="no build for ${_UNAME_M}"
@@ -2331,10 +2336,10 @@ _pwsh_install_linux() {
 		return 2
 	fi
 
-	url="https://github.com/PowerShell/PowerShell/releases/download/v${_PS_VER}/powershell-${_PS_VER}-linux-${arch}.tar.gz"
-	tarball="${TMPDIR:-/tmp}/powershell-${_PS_VER}-linux-${arch}.tar.gz"
+	url="https://github.com/PowerShell/PowerShell/releases/download/v${_PS_VER}/powershell-${_PS_VER}-${os}-${arch}.tar.gz"
+	tarball="${TMPDIR:-/tmp}/powershell-${_PS_VER}-${os}-${arch}.tar.gz"
 
-	_info "installing PowerShell ${_PS_VER} (linux-${arch}) into ${_PWSH_DIR}"
+	_info "installing PowerShell ${_PS_VER} (${os}-${arch}) into ${_PWSH_DIR}"
 	_curl_retry_opts_init
 	_curl_tls_init
 	if ! _run curl -sSL --fail "${_CURL_RETRY_OPTS[@]}" --connect-timeout 30 \
@@ -2350,7 +2355,8 @@ _pwsh_install_linux() {
 	if _priv mkdir -p "${_PWSH_DIR}" &&
 		_priv tar zxf "${tarball}" -C "${_PWSH_DIR}" &&
 		_priv chmod +x "${_PWSH_DIR}/pwsh" &&
-		_priv ln -sf "${_PWSH_DIR}/pwsh" "${_PWSH_LINK}"; then
+		_priv mkdir -p "${link%/*}" &&
+		_priv ln -sf "${_PWSH_DIR}/pwsh" "${link}"; then
 		_run rm -f "${tarball}"
 		return 0
 	fi
@@ -2424,21 +2430,6 @@ _pwsh_starts() {
 }
 
 # ---------------------------------------------------------------------------
-# _pwsh_install_darwin — Homebrew, because the tarball above is a LINUX
-# build. Downloading it on a Mac would install something that cannot run,
-# and the first sign of it would be an exec format error from the lint gate.
-# ---------------------------------------------------------------------------
-_pwsh_install_darwin() {
-	if ! _have brew; then
-		_warn "Homebrew not installed — cannot install PowerShell here"
-		_PWSH_SKIP="no brew"
-		return 2
-	fi
-	_info "installing PowerShell via Homebrew"
-	_run brew install --cask powershell
-}
-
-# ---------------------------------------------------------------------------
 # _pwsh_analyzer — the module `make lint-psscriptanalyzer` requires. It fails
 # loudly when the module is absent, deliberately: an analyzer that never ran
 # has checked nothing.
@@ -2480,8 +2471,11 @@ step_pwsh() {
 		_info "pwsh already installed ($("${_PWSH_BIN}" --version))"
 	else
 		case "${_UNAME_S}" in
-		Linux) _pwsh_install_linux || rc=$? ;;
-		Darwin) _pwsh_install_darwin || rc=$? ;;
+		# macOS too, from Microsoft's osx tarball at the same pin: Homebrew
+		# dropped its powershell cask (found on a fresh Mac, 2026-11-07),
+		# and a cask would follow brew's version rather than this pin.
+		Linux) _pwsh_install_tarball linux "${_PWSH_LINK}" || rc=$? ;;
+		Darwin) _pwsh_install_tarball osx "${_PWSH_LINK_OSX}" || rc=$? ;;
 		*)
 			# Not wired to install-deps' winget section yet (#59), so
 			# there is nothing honest to do here but say so.
