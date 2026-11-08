@@ -57,7 +57,10 @@ setup() {
 			exit "${TART_CLONE_RC:-0}" ;;
 		delete) rm -f "${STATE}/$2" ;;
 		rename) mv "${STATE}/$2" "${STATE}/$3" ;;
-		run) sleep 0.1 ;;
+		run)
+			# Which softnet tart would find: the first on its PATH.
+			printf 'tart-softnet %s\n' "$(command -v softnet)" >>"${LOG}"
+			sleep 0.1 ;;
 		exec)
 			shift
 			# The boot probe always answers; only the job can fail.
@@ -98,9 +101,24 @@ setup() {
 		exit 0
 	EOF
 	printf '#!/bin/bash\nexit 0\n' >"${STUBS}/launchctl"
-	# Only its setuid bit is checked; tart, which would run it, is a stub.
-	printf '#!/bin/bash\nexit 0\n' >"${STUBS}/softnet"
-	chmod 4755 "${STUBS}/softnet"
+	# Its own directory, as /usr/local/bin is. Only its owner and mode are
+	# checked; tart, which would run it, is a stub. The tests cannot make
+	# root-owned files, so this uid is trusted beside root, and the
+	# directories above it lose any group or other write a umask gave them.
+	SBIN="${BATS_TEST_TMPDIR}/sbin"
+	export SBIN
+	mkdir -p "${SBIN}"
+	printf '#!/bin/bash\nexit 0\n' >"${SBIN}/softnet"
+	chmod 4755 "${SBIN}/softnet"
+	export JB_RUNNER_SOFTNET="${SBIN}/softnet"
+	JB_RUNNER_TRUSTED_UID="$(id -u)"
+	export JB_RUNNER_TRUSTED_UID
+	local d="${SBIN}"
+	while [[ ${d} != / ]]; do
+		# macOS's per-user temp root refuses chmod; it is mode 700 anyway.
+		if [[ -O ${d} ]]; then chmod go-w "${d}" 2>/dev/null || :; fi
+		d="$(dirname "${d}")"
+	done
 	chmod +x "${STUBS}/tart" "${STUBS}/curl" "${STUBS}/sudo" "${STUBS}/launchctl"
 	PATH="${STUBS}:${PATH}"
 }
@@ -316,7 +334,7 @@ setup() {
 }
 
 @test 'run and image: refuse without a setuid softnet' {
-	chmod 0755 "${STUBS}/softnet"
+	chmod 0755 "${SBIN}/softnet"
 	run runner-host.sh run --once
 	assert_failure
 	assert_output --partial 'softnet is not installed setuid'
@@ -325,4 +343,86 @@ setup() {
 	assert_output --partial 'softnet is not installed setuid'
 	run grep -E '^tart (clone|run)' "${LOG}"
 	assert_failure
+}
+
+@test 'softnet: refused when anyone but root could replace it' {
+	chmod 4775 "${SBIN}/softnet"
+	run runner-host.sh run --once
+	assert_failure
+	assert_output --partial "${SBIN}/softnet is writable by group or other"
+	chmod 4755 "${SBIN}/softnet"
+	# Its directory: a writable one lets anyone swap the binary.
+	chmod 777 "${SBIN}"
+	run runner-host.sh run --once
+	assert_failure
+	assert_output --partial "${SBIN} is writable by group or other"
+	chmod 755 "${SBIN}"
+	# Owned by someone not trusted (here: this uid, once it is not).
+	JB_RUNNER_TRUSTED_UID=0 run runner-host.sh run --once
+	assert_failure
+	assert_output --partial "is owned by uid $(id -u), not root"
+	# A symlink: what it points at can change under it.
+	mv "${SBIN}/softnet" "${SBIN}/softnet.real"
+	ln -s softnet.real "${SBIN}/softnet"
+	run runner-host.sh run --once
+	assert_failure
+	assert_output --partial 'softnet is not installed at'
+	run grep -E '^tart (clone|run)' "${LOG}"
+	assert_failure
+}
+
+@test 'softnet: tart runs the pinned one, not one planted earlier on PATH' {
+	local planted="${BATS_TEST_TMPDIR}/home-bin"
+	mkdir -p "${planted}"
+	printf '#!/bin/bash\nexit 0\n' >"${planted}/softnet"
+	chmod 4755 "${planted}/softnet"
+	PATH="${planted}:${PATH}" run runner-host.sh run --once
+	assert_success
+	run grep -Fx "tart-softnet ${SBIN}/softnet" "${LOG}"
+	assert_success
+}
+
+@test 'run: a symlinked token is refused by name' {
+	mv "${JB_RUNNER_TOKEN_FILE}" "${BATS_TEST_TMPDIR}/token.real"
+	ln -s token.real "${JB_RUNNER_TOKEN_FILE}"
+	run runner-host.sh run --once
+	assert_failure
+	assert_output --partial 'is a symlink; point JB_RUNNER_TOKEN_FILE at the file itself'
+}
+
+@test 'lock: a pid from an earlier boot is not a live holder' {
+	# This test's own shell is alive; the boot time is not this boot's.
+	mkdir "${JB_RUNNER_LOCK}"
+	printf '%s 1\n' "$$" >"${JB_RUNNER_LOCK}/pid"
+	run runner-host.sh run --once
+	assert_success
+	[ ! -e "${JB_RUNNER_LOCK}" ]
+}
+
+@test 'lock: an empty lock dir is waited for, then taken over' {
+	mkdir "${JB_RUNNER_LOCK}"
+	run runner-host.sh run --once
+	assert_success
+	[ ! -e "${JB_RUNNER_LOCK}" ]
+	run ls "${BATS_TEST_TMPDIR}"
+	refute_output --partial 'lock.stale'
+}
+
+@test 'install: every value in the plist is XML-escaped' {
+	JB_RUNNER_PLIST="${BATS_TEST_TMPDIR}/daemon.plist" \
+		JB_RUNNER_INSTALL_DIR="${BATS_TEST_TMPDIR}/lib<&>exec" \
+		JB_RUNNER_LOG="${BATS_TEST_TMPDIR}/a&b.log" \
+		run runner-host.sh install
+	assert_success
+	local plist="${BATS_TEST_TMPDIR}/daemon.plist"
+	run grep -F 'lib&lt;&amp;&gt;exec/runner-host.sh</string>' "${plist}"
+	assert_success
+	run grep -cF 'a&amp;b.log</string>' "${plist}"
+	assert_output 2
+	run grep -F 'a&b' "${plist}"
+	assert_failure
+	if command -v plutil >/dev/null 2>&1; then
+		run plutil -lint "${plist}"
+		assert_success
+	fi
 }

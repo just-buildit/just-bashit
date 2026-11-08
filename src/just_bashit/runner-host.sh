@@ -41,6 +41,15 @@ TART="${JB_RUNNER_TART:-tart}"
 # this closes the gateway too. The VM's DNS is then public (see `image`).
 NET_BLOCK="${JB_RUNNER_NET_BLOCK:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10}"
 DNS="${JB_RUNNER_DNS:-1.1.1.1 8.8.8.8}"
+# The one softnet tart may run. Tart finds softnet on PATH, and the daemon's
+# PATH starts with ~/.local/bin, which this user can write: a softnet planted
+# there would run in place of the filter. So tart gets this binary's
+# directory first on its PATH, and the binary and every directory above it
+# must be root's alone.
+SOFTNET="${JB_RUNNER_SOFTNET:-/usr/local/bin/softnet}"
+# Owners trusted for SOFTNET and its directories besides root. Root only by
+# default; the tests, which cannot make root-owned files, add their own uid.
+TRUSTED_UID="${JB_RUNNER_TRUSTED_UID:-0}"
 # This host's short name, in every VM and runner name: two hosts registering
 # `jb-job-<epoch>` with --replace would replace each other's runners.
 HOST_TAG="${JB_RUNNER_HOST_TAG:-$(hostname -s | tr '[:upper:]' '[:lower:]')}"
@@ -96,6 +105,8 @@ read -r -d '' HELP <<-'EOF' || true
 	  JB_RUNNER_CPU / JB_RUNNER_MEMORY  per VM [4 / 8192 MB]
 	  JB_RUNNER_NET_BLOCK   CIDRs no VM may reach [RFC 1918, 100.64.0.0/10]
 	  JB_RUNNER_DNS         the image's DNS servers [1.1.1.1 8.8.8.8]
+	  JB_RUNNER_SOFTNET     the softnet tart runs [/usr/local/bin/softnet];
+	                        setuid, and it and its directories root's alone
 	  JB_RUNNER_HOST_TAG    in every VM and runner name [hostname -s]
 	  JB_RUNNER_LOCK        held by run and image [~/.local/state/jb-runner.lock]
 	  JB_RUNNER_BREW        packages added to the image [jq]
@@ -185,13 +196,53 @@ _need_safe_labels() {
 _need_tart() {
 	command -v "${TART}" >/dev/null 2>&1 ||
 		_die "tart not found (https://github.com/cirruslabs/tart/releases)"
-	# Tart runs softnet from PATH, and it needs root to make the network:
-	# a setuid binary. Without it `tart run --net-softnet-block` fails, and
-	# a VM on Tart's default network reaches this Mac, the LAN and the
-	# tailnet. So refuse rather than fall back.
-	local sn
-	sn="$(command -v softnet 2>/dev/null)" && [[ -u ${sn} ]] ||
-		_die "softnet is not installed setuid (docs/runner-host.md, Network)"
+	_need_softnet
+}
+
+# _owner_mode PATH -- "UID MODE" for PATH, MODE in octal with its setuid and
+# sticky bits (4755, 1777). GNU stat first (the tests run on Linux), then
+# BSD, whose %p carries the file type too: only its last four digits count.
+_owner_mode() {
+	local out uid mode
+	out="$(stat -c '%u %a' "$1" 2>/dev/null || stat -f '%u %p' "$1")" || return 1
+	IFS=' ' read -r uid mode <<<"${out}"
+	((${#mode} <= 4)) || mode="${mode:${#mode}-4}"
+	printf '%s %s\n' "${uid}" "${mode}"
+}
+
+# softnet runs setuid root. A setuid-root binary that anyone but root can
+# replace, or that sits in a directory anyone but root can write, is a root
+# escalation: write your own, and tart runs it as root. So SOFTNET must be a
+# real file (not a symlink), setuid, owned by root, writable by no group or
+# other, and so must every directory from it up to /. A sticky directory
+# (/tmp) is allowed when root owns it: no one else can replace an entry in
+# it. Without softnet, `tart run --net-softnet-block` fails, and a VM on
+# Tart's default network reaches this Mac, the LAN and the tailnet. So refuse
+# rather than fall back.
+_need_softnet() {
+	local why="(docs/runner-host.md, Network)"
+	[[ -f ${SOFTNET} && ! -L ${SOFTNET} ]] ||
+		_die "softnet is not installed at ${SOFTNET} ${why}"
+	local uid mode p="${SOFTNET}"
+	while :; do
+		uid='' mode=''
+		IFS=' ' read -r uid mode < <(_owner_mode "${p}")
+		# Unreadable is a refusal: an empty mode must never read as "not
+		# writable".
+		[[ ${uid} =~ ^[0-9]+$ && ${mode} =~ ^[0-7]{3,4}$ ]] ||
+			_die "cannot read the owner and mode of ${p} ${why}"
+		if [[ ${p} == "${SOFTNET}" ]] && ! ((8#${mode} & 8#4000)); then
+			_die "softnet is not installed setuid ${why}"
+		fi
+		[[ ${uid} == 0 || ${uid} == "${TRUSTED_UID}" ]] ||
+			_die "${p} is owned by uid ${uid}, not root: softnet runs as root ${why}"
+		if ((8#${mode} & 8#022)) &&
+			! [[ -d ${p} && ${uid} == 0 && $((8#${mode} & 8#1000)) -ne 0 ]]; then
+			_die "${p} is writable by group or other: softnet runs as root ${why}"
+		fi
+		[[ ${p} != / ]] || break
+		p="$(cd -P "$(dirname "${p}")" && pwd -P)"
+	done
 }
 
 # The PAT file must be this user's alone: mode 600 or 400, owned by us. A
@@ -199,6 +250,10 @@ _need_tart() {
 # tests run on Linux), BSD stat otherwise.
 _need_token() {
 	[[ -r ${TOKEN_FILE} ]] || _die "no token at ${TOKEN_FILE}"
+	# A symlink's own mode is 777, whatever it points at, and who can
+	# replace the link is a question about its directory. Name the file.
+	[[ ! -L ${TOKEN_FILE} ]] ||
+		_die "${TOKEN_FILE} is a symlink; point JB_RUNNER_TOKEN_FILE at the file itself"
 	local mode owner
 	IFS=' ' read -r mode owner < <(stat -c '%a %U' "${TOKEN_FILE}" 2>/dev/null ||
 		stat -f '%Lp %Su' "${TOKEN_FILE}")
@@ -208,26 +263,63 @@ _need_token() {
 		_die "${TOKEN_FILE} is mode ${mode}; run: chmod 600 ${TOKEN_FILE}"
 }
 
-# One process at a time takes LOCK_DIR. mkdir is atomic; the holder's pid is
-# kept inside, so a lock left by a killed process is taken over, not waited
-# on forever. Released on exit, which the signal traps reach too.
+# This boot's start time, so a pid recorded before a reboot, and reused
+# since by some other process, is not taken for a live holder.
+_boot_id() {
+	local b
+	b="$(sysctl -n kern.boottime 2>/dev/null | sed -n 's/^{ sec = \([0-9]*\),.*/\1/p')"
+	[[ -n ${b} ]] || b="$(awk '/^btime/ {print $2}' /proc/stat 2>/dev/null)"
+	printf '%s\n' "${b:-unknown}"
+}
+
+# One process at a time takes LOCK_DIR. mkdir is atomic. The holder writes
+# "PID BOOT" to a temp file and renames it into place, so the pid file is
+# never seen half-written. A lock whose holder is gone (dead pid, or a pid
+# from an earlier boot) is taken over: renamed away to a name of our own,
+# then checked to be the stale lock we read, so two processes taking over
+# at once cannot remove a live one. An empty lock dir is a holder between
+# mkdir and rename: waited for, and taken over only if it stays empty.
+# Released on exit, which the signal traps reach too.
 _lock() {
 	mkdir -p "$(dirname "${LOCK_DIR}")"
-	if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
-		local holder
-		holder="$(cat "${LOCK_DIR}/pid" 2>/dev/null || true)"
-		if [[ -n ${holder} ]] && kill -0 "${holder}" 2>/dev/null; then
-			_die "another runner-host (pid ${holder}) holds ${LOCK_DIR}"
+	local boot try held seen
+	boot="$(_boot_id)"
+	# Up to 5 s for an empty lock to fill, then room to take it over.
+	for try in 1 2 3 4 5 6 7 8; do
+		if mkdir "${LOCK_DIR}" 2>/dev/null; then
+			printf '%s %s\n' "$$" "${boot}" >"${LOCK_DIR}/pid.$$"
+			mv -f "${LOCK_DIR}/pid.$$" "${LOCK_DIR}/pid"
+			trap '_unlock' EXIT
+			return 0
 		fi
-		rm -rf "${LOCK_DIR}"
-		mkdir "${LOCK_DIR}" || _die "could not take ${LOCK_DIR}"
-	fi
-	printf '%s\n' "$$" >"${LOCK_DIR}/pid"
-	trap '_unlock' EXIT
+		held="$(cat "${LOCK_DIR}/pid" 2>/dev/null || true)"
+		if [[ -z ${held} && ${try} -lt 6 ]]; then
+			sleep 1
+			continue
+		fi
+		# A pid alone (no boot time) is trusted as this boot's.
+		local pid="${held%% *}" pboot="${boot}"
+		[[ ${held} != *' '* ]] || pboot="${held#* }"
+		if [[ -n ${held} && ${pboot} == "${boot}" ]] && kill -0 "${pid}" 2>/dev/null; then
+			_die "another runner-host (pid ${pid}) holds ${LOCK_DIR}"
+		fi
+		mv "${LOCK_DIR}" "${LOCK_DIR}.stale.$$" 2>/dev/null || continue
+		seen="$(cat "${LOCK_DIR}.stale.$$/pid" 2>/dev/null || true)"
+		if [[ ${seen} != "${held}" ]]; then
+			# Someone else's fresh lock, taken between our read and the
+			# rename: put it back.
+			[[ -e ${LOCK_DIR} ]] || mv "${LOCK_DIR}.stale.$$" "${LOCK_DIR}"
+			_die "${LOCK_DIR} changed hands while being taken over; try again"
+		fi
+		rm -rf "${LOCK_DIR}.stale.$$"
+	done
+	_die "could not take ${LOCK_DIR}"
 }
 
 _unlock() {
-	[[ "$(cat "${LOCK_DIR}/pid" 2>/dev/null)" != "$$" ]] || rm -rf "${LOCK_DIR}"
+	local held
+	held="$(cat "${LOCK_DIR}/pid" 2>/dev/null || true)"
+	[[ ${held%% *} != "$$" ]] || rm -rf "${LOCK_DIR}"
 }
 
 # _curl_tls_init -- the TLS options every curl fetch passes, in _CURL_TLS:
@@ -292,7 +384,8 @@ _vm_delete() {
 # Boot headless and wait for the guest agent, which `tart exec` needs. The
 # Cirrus Labs images ship the agent; a vanilla image does not.
 _vm_boot() { # NAME
-	"${TART}" run --no-graphics --net-softnet-block="${NET_BLOCK}" "$1" >/dev/null 2>&1 &
+	PATH="$(dirname "${SOFTNET}"):${PATH}" \
+		"${TART}" run --no-graphics --net-softnet-block="${NET_BLOCK}" "$1" >/dev/null 2>&1 &
 	local waited=0
 	until "${TART}" exec "$1" /usr/bin/true >/dev/null 2>&1; do
 		((waited < BOOT_TIMEOUT)) || return 1
@@ -465,14 +558,20 @@ cmd_run() {
 
 # The effective configuration, so the daemon runs what `install` was run
 # with rather than the defaults. XML-escaped: a value is data, not markup.
+_xml() {
+	local v="$1"
+	v="${v//&/&amp;}"
+	v="${v//</&lt;}"
+	v="${v//>/&gt;}"
+	printf '%s' "${v}"
+}
+
 _plist_env() {
 	local k v
 	for k in ORG TOKEN_FILE BASE IMAGE RUNNER_VERSION RUNNER_SHA256 CPU MEMORY \
-		BREW LABELS PREFIX API BOOT_TIMEOUT TART HOST_TAG LOCK_DIR NET_BLOCK; do
-		v="${!k}"
-		v="${v//&/&amp;}"
-		v="${v//</&lt;}"
-		v="${v//>/&gt;}"
+		BREW LABELS PREFIX API BOOT_TIMEOUT TART HOST_TAG LOCK_DIR NET_BLOCK \
+		SOFTNET; do
+		v="$(_xml "${!k}")"
 		case "${k}" in
 		RUNNER_VERSION) k=VERSION ;;
 		RUNNER_SHA256) k=SHA256 ;;
@@ -490,24 +589,24 @@ _plist() {
 		<plist version="1.0">
 		<dict>
 			<key>Label</key><string>${DAEMON_LABEL}</string>
-			<key>UserName</key><string>$(id -un)</string>
+			<key>UserName</key><string>$(_xml "$(id -un)")</string>
 			<key>ProgramArguments</key>
 			<array>
 				<string>/bin/bash</string>
-				<string>${INSTALL_DIR}/runner-host.sh</string>
+				<string>$(_xml "${INSTALL_DIR}")/runner-host.sh</string>
 				<string>run</string>
 			</array>
 			<key>EnvironmentVariables</key>
 			<dict>
-				<key>HOME</key><string>${HOME}</string>
-				<key>PATH</key><string>${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+				<key>HOME</key><string>$(_xml "${HOME}")</string>
+				<key>PATH</key><string>$(_xml "${HOME}")/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
 				$(_plist_env)
 			</dict>
 			<key>RunAtLoad</key><true/>
 			<key>KeepAlive</key><true/>
 			<key>ThrottleInterval</key><integer>30</integer>
-			<key>StandardOutPath</key><string>${LOG_FILE}</string>
-			<key>StandardErrorPath</key><string>${LOG_FILE}</string>
+			<key>StandardOutPath</key><string>$(_xml "${LOG_FILE}")</string>
+			<key>StandardErrorPath</key><string>$(_xml "${LOG_FILE}")</string>
 		</dict>
 		</plist>
 	EOF

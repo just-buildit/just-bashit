@@ -37,7 +37,8 @@ usable, and stays within Apple's licence, which allows two macOS VMs per Mac.
 `run` needs a fine-grained personal access token. Its resource owner is the
 org, with the Organization permission **Self-hosted runners: Read and write**.
 Save it, mode 600, at `~/.config/jb-runner/token`. `run` and `install` refuse
-a token file another account can read, or one owned by another user.
+a token file another account can read, one owned by another user, or a
+symlink.
 
 The token never enters a VM. It reaches `curl` as a header on stdin, so no
 `ps` on the host can see it. Each VM gets only a short-lived registration
@@ -78,8 +79,16 @@ gateway would otherwise answer DNS, so `image` sets the VM's resolvers to
 IPv6 route.
 
 Softnet needs root to create the VM's network, so it is installed setuid root.
-It drops privileges after setup. `run` and `image` refuse to start without
-it, rather than fall back to the open network. Install a release pinned by
+It drops privileges after setup. Tart runs whichever `softnet` is first on its
+PATH, so `run` puts `JB_RUNNER_SOFTNET` (`/usr/local/bin/softnet`) first. A
+`softnet` someone drops in `~/.local/bin` is never used. `run` and `image`
+refuse to start, rather than fall back to the open network, unless that file:
+
+- is a real file (not a symlink), setuid, and owned by root;
+- is writable by no group or other, and so is every directory above it. A
+    sticky root-owned directory such as `/tmp` is allowed.
+
+A setuid-root binary that anyone else can replace is a root escalation. Install a release pinned by
 its SHA-256, from
 [cirruslabs/softnet](https://github.com/cirruslabs/softnet/releases):
 
@@ -98,7 +107,7 @@ VM and runner names carry the host's short name (`jb-job-<host>-<time>`), so
 two Macs registering to one org never replace each other's runners. `run` and
 `image` take a lock (`JB_RUNNER_LOCK`), so a manual `run --once` cannot sweep
 the daemon's live VM, and `image` cannot replace the image under a clone. A
-lock left by a killed process is taken over.
+lock left by a killed process, or by one from before a reboot, is taken over.
 
 Each job puts `~/.local/bin` first in the runner's `.path`, after `config.sh`
 writes it.
