@@ -1423,8 +1423,10 @@ _installed_report() {
 # passphrase-protected key that is not in the agent cannot be tested that
 # way, and is reported as exactly that, never as "not registered".
 # JB_SSH_GITHUB_CHECK=0 turns the check off (the test suite, offline boxes).
+_GH_ACCEPTED=0
 _ssh_github_check() {
 	local key="$1" out user
+	_GH_ACCEPTED=0
 	[[ ${JB_SSH_GITHUB_CHECK:-1} == 0 ]] && return 0
 	if [[ ${DRY_RUN} -eq 1 ]]; then
 		_info "would test ${key} against git@github.com"
@@ -1440,6 +1442,7 @@ _ssh_github_check() {
 	local hi_re="Hi ([^!]+)! You.ve successfully authenticated"
 	if [[ ${out} =~ ${hi_re} ]]; then
 		user="${BASH_REMATCH[1]}"
+		_GH_ACCEPTED=1
 		_info "GitHub accepts ${key} (account ${user})"
 		_result "github:  ok (${key##*/} authenticates as ${user})"
 	elif [[ ${out} == *"Permission denied"* ]]; then
@@ -1498,15 +1501,43 @@ _SSH_GH_END="# <<< just-bashit: github.com key (setup-system) <<<"
 # login shell is zsh, which reads profile.sh and never bashrc.sh, and ssh on
 # its own tries only the id_* names. So the box key reached no agent and git
 # over ssh failed. An IdentityFile in ~/.ssh/config works for every shell,
-# interactive or not. Kept between markers and rewritten in place, so a
-# second run changes nothing; a `Host github.com` the user wrote is theirs,
-# and then nothing is added. No IdentitiesOnly: a key the agent holds is
-# still tried first.
+# interactive or not.
+#
+# Only for a key GitHub has just accepted (_ssh_github_check, run first): an
+# IdentityFile for a host REPLACES ssh's id_* defaults there, so naming a
+# key GitHub does not know would cut off an id_ed25519 that works today. A
+# key not yet registered gets the line on the run after `gh ssh-key add`.
+#
+# Kept between markers and rewritten in place, so a second run changes
+# nothing. Left alone, with a warning: a `Host github.com` the user wrote, a
+# symlinked config (a dotfile manager owns it, and mv would replace the
+# link with a file), and markers that do not pair (rewriting would drop
+# everything after an orphan begin marker). No IdentitiesOnly: a key the
+# agent holds is still tried first.
 _macos_github_identity() {
 	local key="$1" cfg="${HOME}/.ssh/config" kept=""
+	if [[ ${DRY_RUN} -eq 1 ]]; then
+		_info "would point github.com at ${key} in ${cfg}, once GitHub accepts it"
+		return 0
+	fi
+	[[ ${_GH_ACCEPTED} -eq 1 ]] || return 0
+	if [[ -L ${cfg} ]]; then
+		_warn "${cfg} is a symlink -- add to it: Host github.com / IdentityFile ${key}"
+		return 0
+	fi
 	if [[ -f ${cfg} ]]; then
-		kept="$(awk -v b="${_SSH_GH_BEGIN}" -v e="${_SSH_GH_END}" \
-			'$0 == b { skip = 1; next } $0 == e { skip = 0; next } !skip' "${cfg}")"
+		local begins ends
+		begins="$(grep -cxF -- "${_SSH_GH_BEGIN}" "${cfg}" || true)"
+		ends="$(grep -cxF -- "${_SSH_GH_END}" "${cfg}" || true)"
+		if [[ ${begins} != "${ends}" ]]; then
+			_warn "${cfg} has an unpaired just-bashit marker -- leaving it; fix the markers and re-run"
+			return 0
+		fi
+		if ! kept="$(awk -v b="${_SSH_GH_BEGIN}" -v e="${_SSH_GH_END}" \
+			'$0 == b { skip = 1; next } $0 == e { skip = 0; next } !skip' "${cfg}")"; then
+			_warn "could not read ${cfg} -- leaving it"
+			return 0
+		fi
 		if grep -qiE '^[[:space:]]*Host[[:space:]]+(.*[[:space:]])?github\.com([[:space:]]|$)' \
 			<<<"${kept}"; then
 			_info "${cfg} already has a Host github.com entry -- leaving it"
@@ -1516,10 +1547,6 @@ _macos_github_identity() {
 	local block
 	block="$(printf '%s\nHost github.com\n    IdentityFile "%s"\n%s' \
 		"${_SSH_GH_BEGIN}" "${key}" "${_SSH_GH_END}")"
-	if [[ ${DRY_RUN} -eq 1 ]]; then
-		_info "would point github.com at ${key} in ${cfg}"
-		return 0
-	fi
 	local tmp="${cfg}.jb-tmp"
 	if ! {
 		if [[ -n ${kept} ]]; then printf '%s\n\n' "${kept}"; fi
@@ -1568,8 +1595,8 @@ step_ssh() {
 		[[ -r ${key} && -r ${key}.pub ]] && found="${key}"
 		_info "existing key(s) found in ${dir} — not generating another"
 		_result "ssh:     ok (existing key)"
-		if _on_macos; then _macos_github_identity "${found}"; fi
 		_ssh_github_check "${found}"
+		if _on_macos; then _macos_github_identity "${found}"; fi
 		return 0
 	fi
 
@@ -1636,8 +1663,8 @@ step_ssh() {
 		fi
 	fi
 	_result "ssh:     ok (created ${key})"
-	if _on_macos; then _macos_github_identity "${key}"; fi
 	_ssh_github_check "${key}"
+	if _on_macos; then _macos_github_identity "${key}"; fi
 }
 
 # ---------------------------------------------------------------------------

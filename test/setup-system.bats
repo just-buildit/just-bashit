@@ -32,6 +32,12 @@ setup() {
 	export JB_PROC_MOUNTS="${BATS_TEST_TMPDIR}/mounts"
 	# Nor the real token check (#184): CI's Windows runners are elevated.
 	export JB_WIN_ELEVATED=0
+	# Nor the real Mac (#225): on a macOS runner the ssh step would ask the
+	# real scutil, and could rename the machine. A test that wants macOS
+	# calls _mac_stubs, which sets Darwin.
+	if [[ $(uname -s) == Darwin ]]; then
+		export JB_UNAME_S=Linux
+	fi
 	# Nor Windows' own OpenSSH client (#190): on a native Windows runner the
 	# agent step would otherwise ask the machine's real ssh-agent service.
 	export JB_WIN_OPENSSH="${BATS_TEST_TMPDIR}/no-openssh"
@@ -2833,6 +2839,9 @@ _mac_stubs() {
 	ssh-keygen -q -t ed25519 -N '' -C one -f "${MAC}/k1"
 	ssh-keygen -q -t ed25519 -N '' -C two -f "${MAC}/k2"
 	cat "${MAC}/k1.pub" "${MAC}/k2.pub" >"${MAC}/keys/octo.keys"
+	# GitHub accepts whatever key is offered unless STUB_GH says otherwise:
+	# the ssh step names a key for github.com only once it is accepted.
+	_github_ssh_stub
 	printf 'UsePAM yes\n' >"${MAC}/sshd_config.d/100-macos.conf"
 }
 
@@ -3202,6 +3211,47 @@ _mac_stubs() {
 	[[ ! -e "${HOME}/.ssh/config" ]]
 	run grep -q 'scutil --set' "${MAC}/calls"
 	assert_failure
+}
+
+# An IdentityFile for github.com replaces ssh's id_* defaults there, so a key
+# GitHub refused must not be named: an id_ed25519 that works would be lost.
+@test 'macos ssh: a key GitHub refuses is not named for github.com' {
+	_mac_stubs
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub" \
+		"${HOME}/.ssh/matthews-mac-mini" "${HOME}/.ssh/matthews-mac-mini.pub"
+	STUB_GH=denied run setup-system.sh -s ssh
+	assert_success
+	[[ ! -e "${HOME}/.ssh/config" ]]
+}
+
+# A dotfile manager's link stays a link: mv would put a plain file there.
+@test 'macos ssh: a symlinked ~/.ssh/config is left alone' {
+	_mac_stubs
+	mkdir -p "${HOME}/.ssh" "${HOME}/dotfiles"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
+	printf 'Host box\n' >"${HOME}/dotfiles/ssh_config"
+	ln -s "${HOME}/dotfiles/ssh_config" "${HOME}/.ssh/config"
+	run setup-system.sh -s ssh
+	assert_success
+	assert_output --partial "is a symlink"
+	[[ -L "${HOME}/.ssh/config" ]]
+	assert_equal "$(cat "${HOME}/dotfiles/ssh_config")" "Host box"
+}
+
+# An orphan begin marker would have the rewrite drop every line after it.
+@test 'macos ssh: an unpaired marker leaves ~/.ssh/config as it is' {
+	_mac_stubs
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
+	printf '%s\nHost github.com\n    IdentityFile x\nHost box\n    User me\n' \
+		"# >>> just-bashit: github.com key (setup-system) >>>" >"${HOME}/.ssh/config"
+	local before
+	before="$(cat "${HOME}/.ssh/config")"
+	run setup-system.sh -s ssh
+	assert_success
+	assert_output --partial "unpaired just-bashit marker"
+	assert_equal "$(cat "${HOME}/.ssh/config")" "${before}"
 }
 
 @test 'linux ssh: ~/.ssh/config is not touched' {
