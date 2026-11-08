@@ -111,8 +111,14 @@ if [ "${JB_PATH:-1}" = 1 ]; then
 		if [ -x "${_jb_hb}/bin/brew" ]; then
 			HOMEBREW_PREFIX="${_jb_hb}"
 			export HOMEBREW_PREFIX
-			_jb_path_front "${_jb_hb}/sbin"
-			_jb_path_front "${_jb_hb}/bin"
+			_jb_path_prepend "${_jb_hb}/sbin"
+			# Moved to the front only from BEHIND /usr/bin. Unconditionally,
+			# a second sourcing (a nested shell) put brew ahead of the user
+			# directories the first one had put ahead of it.
+			case ":${PATH}:" in
+			*":/usr/bin:"*":${_jb_hb}/bin:"*) _jb_path_front "${_jb_hb}/bin" ;;
+			*) _jb_path_prepend "${_jb_hb}/bin" ;;
+			esac
 			break
 		fi
 	done

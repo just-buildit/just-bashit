@@ -759,7 +759,9 @@ _brew_ensure() {
 	fi
 	_info "Homebrew not installed -- installing it, with the Xcode Command Line Tools"
 	if [[ ${DRY_RUN} -eq 1 ]]; then
-		_info "would run: /bin/bash -c \"\$(curl -fsSL ${_BREW_INSTALL_SH})\""
+		local how=""
+		[[ ${ASSUME_YES} -eq 1 ]] && how="NONINTERACTIVE=1 "
+		_info "would download ${_BREW_INSTALL_SH} and run: ${how}/bin/bash <it>"
 		return 0
 	fi
 	if ! _have curl; then
@@ -1744,14 +1746,26 @@ KbdInteractiveAuthentication no"
 
 # _macos_remote_login_on -- true when launchd has Remote Login enabled.
 _macos_remote_login_on() {
+	# "enabled" on current macOS; "false" (not disabled) on Monterey and
+	# earlier.
 	launchctl print-disabled system 2>/dev/null |
-		grep -qF '"com.openssh.sshd" => enabled'
+		grep -qE '"com\.openssh\.sshd" => (enabled|false)'
 }
 
-# _sshd_macos_keys USER AK -- add github.com/USER.keys to AK. Prints the
-# number added; returns 1 when the keys could not be fetched.
+# _ak_has_key FILE -- true when FILE holds at least one line ssh-keygen
+# reads as a public key. Being non-empty is not that: a captive portal's
+# HTML, a blank line or only comments would pass -s, and password login
+# would then go off with nothing to log in with (the reviewer's repro).
+_ak_has_key() {
+	[[ -s $1 ]] && ssh-keygen -l -f "$1" >/dev/null 2>&1
+}
+
+# _sshd_macos_keys USER AK -- add github.com/USER.keys to AK, each line only
+# when ssh-keygen reads it as a key, and print each added key's fingerprint
+# so a mistyped --github-user shows whose keys went in. Prints the count
+# last; returns 1 when the keys could not be fetched.
 _sshd_macos_keys() {
-	local user="$1" ak="$2" keys line added=0
+	local user="$1" ak="$2" keys line added=0 one fp
 	_curl_tls_init
 	_curl_retry_opts_init
 	keys="$(curl -fsSL "${_CURL_RETRY_OPTS[@]}" \
@@ -1761,13 +1775,21 @@ _sshd_macos_keys() {
 	chmod 700 "${ak%/*}"
 	touch "${ak}"
 	chmod 600 "${ak}"
+	one="$(mktemp "${TMPDIR:-/tmp}/jb-key.XXXXXX")"
 	while IFS= read -r line; do
 		[[ -n ${line} ]] || continue
+		printf '%s\n' "${line}" >"${one}"
+		if ! fp="$(ssh-keygen -l -f "${one}" 2>/dev/null)"; then
+			_warn "not a public key, skipped: ${line:0:60}"
+			continue
+		fi
 		if ! grep -qxF "${line}" "${ak}"; then
 			printf '%s\n' "${line}" >>"${ak}"
+			_info "added ${fp}" >&2
 			added=$((added + 1))
 		fi
 	done <<<"${keys}"
+	rm -f "${one}"
 	printf '%s\n' "${added}"
 }
 
@@ -1821,7 +1843,7 @@ _sshd_macos() {
 	if [[ -r ${dropin} ]] && [[ "$(cat "${dropin}")" == "${_SSHD_MAC_DROPIN}" ]]; then
 		_info "password login already off (${dropin})"
 		notes+=("key-only")
-	elif [[ ! -s ${ak} && ! (${DRY_RUN} -eq 1 && -n ${user}) ]]; then
+	elif ! _ak_has_key "${ak}" && ! [[ ${DRY_RUN} -eq 1 && -n ${user} ]]; then
 		_warn "no key in ${ak}: password login left on, so you are not locked out"
 		notes+=("passwords still on: no authorized key")
 	elif [[ ${DRY_RUN} -eq 1 ]]; then
@@ -2466,6 +2488,12 @@ step_pwsh() {
 	# which is the check that matters.
 	if [[ ${_UNAME_S} == Linux ]]; then
 		_pwsh_icu || _warn "the ICU install failed — pwsh may not start"
+	fi
+
+	# The macOS link's directory, which `ssh mac cmd` leaves off PATH:
+	# without it every re-run installed pwsh again.
+	if [[ ${_UNAME_S} == Darwin && -d ${_PWSH_LINK_OSX%/*} ]]; then
+		_path_add "${_PWSH_LINK_OSX%/*}"
 	fi
 
 	local rc=0

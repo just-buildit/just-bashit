@@ -1481,6 +1481,21 @@ _ps_ver() {
 	assert_output "installed analyzer"
 }
 
+# Over `ssh mac cmd` the link's directory is off PATH: a re-run must still
+# find the pwsh installed there, not install it again.
+@test 'pwsh step on macOS finds an earlier install off PATH' {
+	local t="${BATS_TEST_TMPDIR}/pw2"
+	mkdir -p "${t}/linkdir"
+	printf '#!/bin/bash\nexit 0\n' >"${t}/linkdir/jb-test-pwsh"
+	chmod +x "${t}/linkdir/jb-test-pwsh"
+	JB_UNAME_S=Darwin JB_UNAME_M=arm64 JB_PWSH=jb-test-pwsh \
+		JB_PWSH_LINK_OSX="${t}/linkdir/jb-test-pwsh" \
+		run setup-system.sh -n -s pwsh
+	assert_success
+	assert_output --partial "pwsh already installed"
+	refute_output --partial "releases/download"
+}
+
 @test 'pwsh step skips a platform it cannot provision' {
 	run env JB_PWSH=no-pwsh-here JB_UNAME_S=MINGW64_NT-10.0 \
 		JB_UNAME_M=x86_64 setup-system.sh -n -s pwsh
@@ -2787,7 +2802,11 @@ _mac_stubs() {
 		#!/bin/bash
 		state=\${MAC_RL}
 		[[ -e "${MAC}/rl-on" ]] && state=on
-		[[ \${state} == on ]] && v=enabled || v=disabled
+		if [[ \${MAC_RL_OLD:-0} == 1 ]]; then
+			[[ \${state} == on ]] && v=false || v=true
+		else
+			[[ \${state} == on ]] && v=enabled || v=disabled
+		fi
 		printf 'disabled services = {\n\t"com.openssh.sshd" => %s\n}\n' "\${v}"
 	EOF
 	cat >"${MAC}/bin/systemsetup" <<-EOF
@@ -2797,7 +2816,10 @@ _mac_stubs() {
 	EOF
 	printf '#!/bin/bash\necho "sshd $*" >>"%s/calls"\nexit "${MAC_SSHD_RC:-0}"\n' "${MAC}" >"${MAC}/bin/sshd"
 	chmod +x "${MAC}/bin"/*
-	printf 'ssh-ed25519 AAAAkeyone one\nssh-ed25519 AAAAkeytwo two\n' >"${MAC}/keys/octo.keys"
+	# Real keys: the step adds only what ssh-keygen reads as one.
+	ssh-keygen -q -t ed25519 -N '' -C one -f "${MAC}/k1"
+	ssh-keygen -q -t ed25519 -N '' -C two -f "${MAC}/k2"
+	cat "${MAC}/k1.pub" "${MAC}/k2.pub" >"${MAC}/keys/octo.keys"
 	printf 'UsePAM yes\n' >"${MAC}/sshd_config.d/100-macos.conf"
 }
 
@@ -2912,6 +2934,22 @@ _mac_stubs() {
 	[[ $(grep -o "${hb}" <<<"${output}" | wc -l) -eq 1 ]]
 }
 
+# A nested shell sources profile.sh again (JB_PROFILE is not exported):
+# the second pass must keep the user's directories ahead of Homebrew.
+@test 'installed profile keeps its order when sourced twice' {
+	setup-system.sh -s shell >/dev/null
+	local root="${BATS_TEST_TMPDIR}/brewroot" hb
+	hb="${root}/opt/homebrew/bin"
+	mkdir -p "${hb}" "${HOME}/.local/bin"
+	printf '#!/bin/sh\n' >"${hb}/brew"
+	chmod +x "${hb}/brew"
+	run env JB_BREW_ROOT="${root}" PATH="/usr/bin:/bin" sh -c \
+		". '${HOME}/.config/just-bashit/profile.sh'; unset JB_PROFILE; \
+		. '${HOME}/.config/just-bashit/profile.sh'; echo \"\${PATH}\""
+	assert_success
+	assert_output --partial "${HOME}/.local/bin:${hb}:"
+}
+
 @test 'installed profile sources under zsh' {
 	command -v zsh >/dev/null 2>&1 || skip "zsh not installed"
 	setup-system.sh -s shell >/dev/null
@@ -2955,6 +2993,48 @@ _mac_stubs() {
 	assert_output --partial "github.com/octo.keys: 0 added"
 	assert_output --partial "Remote Login already on"
 	assert_output --partial "password login already off"
+}
+
+# Monterey and earlier print "=> false" for a service that is NOT disabled.
+@test 'macos sshd: reads Remote Login from an older launchctl' {
+	_mac_stubs
+	MAC_RL_OLD=1 run setup-system.sh -s sshd --github-user octo
+	assert_success
+	assert_output --partial "Remote Login already on"
+	refute_output --partial "still off"
+	run grep -q systemsetup "${MAC}/calls"
+	assert_failure
+}
+
+# A captive portal or an error page answering 200 passes curl -f. Its lines
+# are not keys, and must not count as something to log in with.
+@test 'macos sshd: a keys download that is not keys turns nothing off' {
+	_mac_stubs
+	printf '<html>\n<body>captive portal</body>\n</html>\n' >"${MAC}/keys/octo.keys"
+	run setup-system.sh -s sshd --github-user octo
+	assert_success
+	assert_output --partial "not a public key, skipped"
+	assert_output --partial "github.com/octo.keys: 0 added"
+	assert_output --partial "password login left on"
+	refute [ -e "${MAC}/sshd_config.d/050-just-bashit.conf" ]
+}
+
+@test 'macos sshd: an authorized_keys of blanks and comments is no key' {
+	_mac_stubs
+	mkdir -p "${HOME}/.ssh"
+	printf '\n# a comment\n\n' >"${HOME}/.ssh/authorized_keys"
+	run setup-system.sh -s sshd
+	assert_success
+	assert_output --partial "password login left on"
+	refute [ -e "${MAC}/sshd_config.d/050-just-bashit.conf" ]
+}
+
+@test 'macos sshd: each added key is named by its fingerprint' {
+	_mac_stubs
+	run setup-system.sh -s sshd --github-user octo
+	assert_success
+	assert_output --partial "added $(ssh-keygen -l -f "${MAC}/k1.pub")"
+	assert_output --partial "added $(ssh-keygen -l -f "${MAC}/k2.pub")"
 }
 
 @test 'macos sshd: no key to log in with leaves password login on' {
