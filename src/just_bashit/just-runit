@@ -175,8 +175,10 @@ _secret_conf() {
 	local re='^[[:space:]]*([A-Za-z_]+)[[:space:]]+(.*[^[:space:]])[[:space:]]*$'
 	file="$(_secret_config)"
 	[[ -f ${file} ]] || return 0
-	# Whoever can write this file chooses who the secrets are encrypted to.
-	_secret_private "${file}" 022 "writable by others"
+	# Whoever can write this file -- or replace it, through its directory
+	# -- chooses who the secrets are encrypted to.
+	_secret_private "${file%/*}" 022 "writable by others" 700
+	_secret_private "${file}" 022 "writable by others" 600
 	while IFS= read -r line || [[ -n ${line} ]]; do
 		n=$((n + 1))
 		line="${line%$'\r'}"
@@ -195,19 +197,22 @@ _secret_conf() {
 	done <"${file}"
 }
 
-# _secret_private FILE MASK WHAT -- refuse FILE when it is not the user's
-# own, or when its mode has any bit of MASK (022: group or world may
-# write; 077: anyone else may read). Skipped on MSYS2 and Cygwin, where
-# NTFS has no Unix modes for this to read (the windows runner reports 644
-# after chmod 600) and ownership is not a uid.
+# _secret_private PATH MASK WHAT FIX -- refuse PATH when it is not the
+# user's own, or when its mode has any bit of MASK (022: group or world
+# may write; 077: anyone else may read); FIX is the mode the message tells
+# them to set. A symlink (a stow-style dotfile) is judged by its target:
+# -O follows it, and so does stat -L, or a 600 file behind a 777 link
+# was refused. Skipped on MSYS2 and Cygwin, where NTFS has no Unix modes
+# for this to read (the windows runner reports 644 after chmod 600) and
+# ownership is not a uid.
 _secret_private() {
-	local file="$1" mask="$2" what="$3" mode
+	local path="$1" mask="$2" what="$3" fix="$4" mode
 	case "${OSTYPE:-}" in msys* | cygwin*) return 0 ;; esac
-	[[ -O ${file} ]] ||
-		_secret_err "${file} is not owned by you; nothing in it is trusted: replace it with your own copy, mode 600"
-	mode="$(stat -c %a "${file}" 2>/dev/null || stat -f %Lp "${file}")"
+	[[ -O ${path} ]] ||
+		_secret_err "${path} is not owned by you; nothing in it is trusted: replace it with your own, mode ${fix}"
+	mode="$(stat -L -c %a "${path}" 2>/dev/null || stat -L -f %Lp "${path}")"
 	if ((8#${mode} & 8#${mask})); then
-		_secret_err "${file} is ${what} (mode ${mode}): chmod 600 ${file}"
+		_secret_err "${path} is ${what} (mode ${mode}): chmod ${fix} ${path}"
 	fi
 	return 0
 }
@@ -294,7 +299,7 @@ _secret_dec_age() {
 			_secret_err "identity '${i}' in $(_secret_config) is not an absolute path: write ~/ or / in front of it"
 		# Unreadable is age's own error to give; readable by others is a
 		# private key handed round, refused here.
-		[[ -f ${i} ]] && _secret_private "${i}" 077 "readable by others"
+		[[ -f ${i} ]] && _secret_private "${i}" 077 "readable by others" 600
 		args+=(-i "${i}")
 	done <<<"${list}"
 	[[ ${#args[@]} -gt 0 ]] ||

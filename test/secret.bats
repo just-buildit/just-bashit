@@ -26,6 +26,7 @@ _need() {
 }
 
 setup_file() {
+	umask 077
 	# A short path: gpg-agent puts its socket in GNUPGHOME when there is no
 	# /run/user (macOS, root containers), and a socket path is capped near
 	# 104 bytes; BATS_FILE_TMPDIR on macOS is longer than that.
@@ -66,6 +67,11 @@ teardown_file() {
 }
 
 setup() {
+	# The fixtures do not depend on the caller's umask: under 002 (the
+	# user-private-group default on Debian and Fedora logins) _conf wrote a
+	# 664 recipients file, which jbx rightly refuses. The one test about
+	# that sets 002 itself.
+	umask 077
 	HOME="${BATS_TEST_TMPDIR}/home"
 	mkdir -p "${HOME}"
 	export HOME GNUPGHOME="${JB_TEST_GNUPGHOME}"
@@ -762,4 +768,50 @@ _on_windows() { [[ ${OSTYPE:-} == msys* || ${OSTYPE:-} == cygwin* ]]; }
 	_conf "gpg 0x${fpr}"
 	run just-runit secret set A --backend gpg <<<"${VALUE}"
 	assert_success
+}
+
+# Sabotage-proven (PR #230): reading the mode with stat but not -L, so
+# the link's own 777 is judged instead of the 600 file it points at, turns
+# this red.
+@test 'a recipients file that is a symlink to a 600 file is accepted' {
+	_need age
+	mkdir -p "${HOME}/dotfiles"
+	printf 'age %s\nidentity %s\n' "$(<"${KEYS}/age1.pub")" "${KEYS}/age1" \
+		>"${HOME}/dotfiles/recipients"
+	chmod 600 "${HOME}/dotfiles/recipients"
+	ln -s "${HOME}/dotfiles/recipients" "${CONF}"
+	run just-runit secret set A --backend age <<<"${VALUE}"
+	assert_success
+	assert_equal "$(just-runit secret get A)" "${VALUE}"
+}
+
+@test 'under umask 002 a fresh recipients file is refused, naming chmod 600' {
+	_need age
+	umask 002
+	_conf "age $(<"${KEYS}/age1.pub")" "identity ${KEYS}/age1"
+	run just-runit secret set A --backend age <<<"${VALUE}"
+	if _on_windows; then
+		assert_success
+		return 0
+	fi
+	assert_failure
+	assert_output "just-runit secret: error: ${CONF} is writable by others (mode 664): chmod 600 ${CONF}"
+	chmod 600 "${CONF}"
+	run just-runit secret set A --backend age <<<"${VALUE}"
+	assert_success
+}
+
+# Sabotage-proven (PR #230): dropping the directory check turns this red.
+@test 'a recipients directory others can write is refused, naming chmod 700' {
+	_need age
+	_conf "age $(<"${KEYS}/age1.pub")" "identity ${KEYS}/age1"
+	chmod 775 "${CONF%/*}"
+	run just-runit secret set A --backend age <<<"${VALUE}"
+	if _on_windows; then
+		assert_success
+		return 0
+	fi
+	assert_failure
+	assert_output "just-runit secret: error: ${CONF%/*} is writable by others (mode 775): chmod 700 ${CONF%/*}"
+	[[ ! -e ${STORE}/A.age ]] || fail 'stored anyway'
 }

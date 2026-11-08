@@ -548,10 +548,16 @@ A `gpg` line is a full 40-hex fingerprint (`gpg --fingerprint KEY`): a
 short key id is refused, since short ids collide. An `age` value is a
 recipient or an **absolute** path (`~/` counts); a bare word that is
 neither is refused, and a relative path is never looked up, so a file
-planted in the directory you run from cannot choose the key. The file must
-be yours and not writable by group or world, and an `identity` file not
-readable by them; each is one `error:` line naming the `chmod 600`. Windows
-(MSYS2, Git Bash) has no Unix modes, so these two checks are skipped there.
+planted in the directory you run from cannot choose the key.
+
+**The recipients file must be mode 600**, and yours; its directory
+(`~/.config/jb/secrets`) must be yours and not writable by group or world
+(700); an `identity` file must not be readable by them. Each refusal is one
+`error:` line naming the `chmod` that fixes it. An editor running under
+umask 002 -- the default for a login on Debian and Fedora -- creates the
+recipients file as 664, which is refused: `chmod 600` it once. A symlinked
+file (a stow-style dotfile) is judged by the file it points to. Windows
+(MSYS2, Git Bash) has no Unix modes, so these checks are skipped there.
 
 With no `gpg` line, gpg encrypts to your own key. With no `default_backend`,
 `set` uses gpg when you have a gpg secret key, else age. An unknown key is an
