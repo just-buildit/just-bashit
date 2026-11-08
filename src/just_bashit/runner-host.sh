@@ -153,6 +153,16 @@ _api() { # METHOD PATH
 			"${API}$2"
 }
 
+# Remove a runner registration by name. An ephemeral runner removes itself
+# after its job; one whose VM was killed first stays listed until GitHub
+# expires it, and shows as an idle runner nobody can reach.
+_deregister() { # NAME
+	local id
+	id="$(_api GET "/orgs/${ORG}/actions/runners?per_page=100" |
+		jq -r --arg n "$1" '.runners[] | select(.name == $n) | .id')" || return 0
+	[[ -z ${id} ]] || _api DELETE "/orgs/${ORG}/actions/runners/${id}" >/dev/null || true
+}
+
 _registration_token() {
 	local t
 	t="$(_api POST "/orgs/${ORG}/actions/runners/registration-token" | jq -r '.token // empty')" || return 1
@@ -237,16 +247,17 @@ _one_job() {
 	}
 	_log "clone ${IMAGE} -> ${vm}"
 	"${TART}" clone "${IMAGE}" "${vm}" || return 1
-	# shellcheck disable=SC2064  # bind this VM's name now
-	trap "_vm_delete '${vm}'" EXIT
+	CURRENT_VM="${vm}"
 	if ! _vm_boot "${vm}"; then
 		_log "${vm} did not come up within ${BOOT_TIMEOUT}s"
-		_vm_delete "${vm}"
-		trap - EXIT
+		_cleanup
 		return 1
 	fi
 	_log "${vm} up; registering and waiting for a job"
 	local rc=0
+	# In the background and waited for: bash runs a trap only between
+	# foreground commands, so a SIGTERM from launchd during a job that runs
+	# for an hour would otherwise wait that hour. `wait` is interrupted.
 	# shellcheck disable=SC2016  # expanded in the guest, not here
 	printf '%s\n' "${token}" | "${TART}" exec -i "${vm}" /bin/bash -lc '
 		set -euo pipefail
@@ -255,11 +266,27 @@ _one_job() {
 		./config.sh --unattended --ephemeral --disableupdate --replace \
 			--url "$1" --name "$2" --labels "$3" --token "$t" >/dev/null
 		exec ./run.sh
-	' _ "https://github.com/${ORG}" "${vm}" "${LABELS}" || rc=$?
+	' _ "https://github.com/${ORG}" "${vm}" "${LABELS}" &
+	wait "$!" || rc=$?
 	_log "${vm} finished (exit ${rc}); deleting"
-	_vm_delete "${vm}"
-	trap - EXIT
+	_cleanup
 	return "${rc}"
+}
+
+# The VM the loop is on, so a signal can take it down with the loop.
+CURRENT_VM=""
+_cleanup() {
+	[[ -n ${CURRENT_VM} ]] || return 0
+	local vm="${CURRENT_VM}"
+	CURRENT_VM=""
+	_vm_delete "${vm}"
+	_deregister "${vm}"
+}
+
+_on_signal() { # EXIT_CODE
+	_log "signal; deleting ${CURRENT_VM:-no VM}"
+	_cleanup
+	exit "$1"
 }
 
 cmd_run() {
@@ -270,12 +297,16 @@ cmd_run() {
 		return 0
 	fi
 	_vm_exists "${IMAGE}" || _die "no image ${IMAGE}; run: runner-host.sh image"
+	trap '_on_signal 143' TERM
+	trap '_on_signal 130' INT
+	trap '_on_signal 129' HUP
 	# A crash or reboot mid-job leaves a VM behind. Nothing else names VMs
 	# with this prefix, so any found at start are ours and stale.
 	local stale
 	for stale in $("${TART}" list --format json | jq -r --arg p "${PREFIX}-" '.[] | select(.Name | startswith($p)) | .Name'); do
 		_log "deleting stale ${stale}"
 		_vm_delete "${stale}"
+		_deregister "${stale}"
 	done
 	if [[ ${ONCE} -eq 1 ]]; then
 		_one_job

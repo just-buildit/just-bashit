@@ -11,9 +11,11 @@ setup() {
 	STUBS="${BATS_TEST_TMPDIR}/stubs"
 	LOG="${BATS_TEST_TMPDIR}/calls.log"
 	STATE="${BATS_TEST_TMPDIR}/vms"
-	export STUBS LOG STATE
+	REGISTERED="${BATS_TEST_TMPDIR}/registered"
+	export STUBS LOG STATE REGISTERED
 	mkdir -p "${STUBS}" "${STATE}"
 	: >"${LOG}"
+	: >"${REGISTERED}"
 	touch "${STATE}/jb-base"
 
 	printf 'pat-SECRET-123\n' >"${BATS_TEST_TMPDIR}/token"
@@ -42,7 +44,12 @@ setup() {
 			shift
 			# The boot probe always answers; only the job can fail.
 			[ "$1" = -i ] || exit 0
+			shift
 			printf 'stdin %s\n' "$(cat)" >>"${LOG}"
+			# The runner registers with GitHub, which outlives the VM.
+			printf '%s\n' "$1" >>"${REGISTERED}"
+			# A job that waits for work, as a real idle runner does.
+			[ -n "${TART_EXEC_SLEEP:-}" ] && exec sleep "${TART_EXEC_SLEEP}"
 			exit "${TART_EXEC_RC:-0}" ;;
 		esac
 	EOF
@@ -54,7 +61,15 @@ setup() {
 		[[ " $* " == *" @- "* ]] && printf 'curl-stdin %s\n' "$(cat)" >>"${LOG}"
 		case "$*" in
 		*registration-token*) printf '{"token":"REG-TOKEN-456"}\n' ;;
-		*/runners*) printf '{"runners":[]}\n' ;;
+		*-X\ DELETE*) ;;
+		*/runners*)
+			# Every runner a VM registered, as GitHub still lists one whose
+			# VM was killed mid-wait.
+			printf '{"runners":['; sep=''
+			while read -r name; do
+				printf '%s{"id":7,"name":"%s"}' "$sep" "$name"; sep=,
+			done <"${REGISTERED}"
+			printf ']}\n' ;;
 		esac
 	EOF
 	chmod +x "${STUBS}/tart" "${STUBS}/curl"
@@ -139,4 +154,22 @@ setup() {
 	assert_output --partial 'would: sudo launchctl bootstrap system'
 	[ ! -e "${BATS_TEST_TMPDIR}/libexec" ]
 	[ ! -e "${BATS_TEST_TMPDIR}/daemon.plist" ]
+}
+
+@test 'run: SIGTERM mid-job deletes the VM and deregisters its runner' {
+	TART_EXEC_SLEEP=60 runner-host.sh run --once >"${BATS_TEST_TMPDIR}/out" 2>&1 &
+	local pid=$!
+	local _
+	for _ in $(seq 50); do
+		[ -s "${REGISTERED}" ] && break
+		sleep 0.1
+	done
+	kill -TERM "${pid}"
+	local rc=0
+	wait "${pid}" || rc=$?
+	assert_equal "${rc}" 143
+	run ls "${STATE}"
+	assert_output jb-base
+	run grep -E '^curl .*-X DELETE .*/actions/runners/7' "${LOG}"
+	assert_success
 }
