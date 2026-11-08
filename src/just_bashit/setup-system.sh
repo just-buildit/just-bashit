@@ -1777,6 +1777,7 @@ _sshd_macos() {
 	local dropin="${dir}/${_SSHD_MAC_DROPIN_NAME}"
 	local user="" n notes=()
 
+	_sudo_init
 	if [[ -n ${SSHD_ALLOW} ]]; then
 		_warn "--sshd-allow is Windows-only: macOS's firewall filters by application, not address"
 	fi
@@ -1831,7 +1832,11 @@ _sshd_macos() {
 		tmp="$(mktemp "${TMPDIR:-/tmp}/jb-sshd.XXXXXX")"
 		printf '%s\n' "${_SSHD_MAC_DROPIN}" >"${tmp}"
 		_info "turning password login off (${dropin})"
-		_priv install -m 0644 "${tmp}" "${dropin}"
+		if ! _priv install -m 0644 "${tmp}" "${dropin}"; then
+			rm -f "${tmp}"
+			_result "sshd:    failed (could not write ${dropin})"
+			return 0
+		fi
 		rm -f "${tmp}"
 		if ! _priv "${JB_SSHD_BIN:-/usr/sbin/sshd}" -t; then
 			_priv rm -f "${dropin}"

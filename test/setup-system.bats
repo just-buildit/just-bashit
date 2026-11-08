@@ -2877,6 +2877,14 @@ _mac_stubs() {
 	run cat "${MAC}/calls"
 	assert_line --partial "systemsetup -setremotelogin on"
 	assert_line --partial "sshd -t"
+	# Every change to the system goes through sudo: the real /etc/ssh is
+	# root's (found on a real Mac, where the drop-in install was refused).
+	# A root runner needs no prefix, and gets none.
+	if [[ $(id -u) -ne 0 ]]; then
+		assert_line "sudo systemsetup -setremotelogin on"
+		assert_line --regexp "^sudo install -m 0644 .* ${MAC}/sshd_config.d/050-just-bashit.conf$"
+		assert_line "sudo ${MAC}/bin/sshd -t"
+	fi
 	run cat "${MAC}/sshd_config.d/050-just-bashit.conf"
 	assert_line 'PasswordAuthentication no'
 	assert_line 'KbdInteractiveAuthentication no'
@@ -2905,6 +2913,19 @@ _mac_stubs() {
 	assert_output --partial "System Settings > General > Sharing > Remote Login"
 	assert_output --partial "sshd:    failed (Remote Login still off)"
 	refute [ -e "${MAC}/sshd_config.d/050-just-bashit.conf" ]
+}
+
+@test 'macos sshd: a drop-in that cannot be written fails the step, not the run' {
+	_mac_stubs
+	chmod 0555 "${MAC}/sshd_config.d"
+	printf '#!/bin/bash\nexec "$@"\n' >"${MAC}/bin/sudo"
+	run setup-system.sh -s sshd,git --github-user octo
+	chmod 0755 "${MAC}/sshd_config.d"
+	[[ $(id -u) -ne 0 ]] || skip "root writes a read-only directory"
+	assert_success
+	assert_output --partial "sshd:    failed (could not write ${MAC}/sshd_config.d/050-just-bashit.conf)"
+	# The run went on to the next step.
+	assert_output --partial "git:     "
 }
 
 @test 'macos sshd: a drop-in sshd rejects is removed again' {
