@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Added
+
+- **setup-system sets up a fresh Mac (#223).** Before, a Mac needed
+    Homebrew, Remote Login and a copied key by hand, and a Terminal window
+    got none of `profile.sh`.
+    - `deps` installs Homebrew when it is missing, which brings the Xcode
+        Command Line Tools; it no longer plans `brew install` with no brew and
+        reports ok.
+    - `profile.sh` puts Homebrew on PATH (`/opt/homebrew` or `/usr/local`),
+        behind the user's own directories.
+    - `shell` sources `profile.sh` from `~/.zprofile` on macOS, whose login
+        shell is zsh.
+    - `-s sshd` on macOS turns on Remote Login, adds `github.com/<user>.keys`
+        to `authorized_keys` and turns password login off, only when a key is
+        there to log in with.
+
+### Fixed
+
+- **setup-system pwsh installs on macOS again.** Homebrew dropped its
+    `powershell` cask, so the step failed on every Mac without pwsh. It now
+    installs Microsoft's `osx` tarball at the same pinned version as Linux,
+    linked as `/usr/local/bin/pwsh`.
+
 ## [0.13.1] - 2026-11-07
 
 ### Fixed
