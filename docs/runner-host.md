@@ -21,13 +21,13 @@ job as the account someone also uses for their own macOS testing.
 So each job gets a fresh VM:
 
 1. `image` clones a Cirrus Labs macOS base image, pinned by digest, and
-   installs a pinned actions/runner (checked against its SHA-256) and the
-   `JB_RUNNER_BREW` packages. It saves the result as `jb-base`.
-2. `run`, which the LaunchDaemon runs, loops: it mints a registration
-   token, clones `jb-base`, boots the clone headless, registers an
-   `--ephemeral` runner in it, runs exactly one job, and deletes the VM.
-   A failed job still deletes its VM. VMs left behind by a crash or reboot
-   are deleted when `run` starts.
+    installs a pinned actions/runner (checked against its SHA-256) and the
+    `JB_RUNNER_BREW` packages. It saves the result as `jb-base`.
+1. `run`, which the LaunchDaemon runs, loops: it mints a registration
+    token, clones `jb-base`, boots the clone headless, registers an
+    `--ephemeral` runner in it, runs exactly one job, and deletes the VM.
+    A failed job still deletes its VM. VMs left behind by a crash or reboot
+    are deleted when `run` starts.
 
 One VM runs at a time, with 4 cores and 8 GB by default. That leaves the host
 usable, and stays within Apple's licence, which allows two macOS VMs per Mac.
