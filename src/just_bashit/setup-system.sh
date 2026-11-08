@@ -1423,10 +1423,8 @@ _installed_report() {
 # passphrase-protected key that is not in the agent cannot be tested that
 # way, and is reported as exactly that, never as "not registered".
 # JB_SSH_GITHUB_CHECK=0 turns the check off (the test suite, offline boxes).
-_GH_ACCEPTED=0
 _ssh_github_check() {
 	local key="$1" out user
-	_GH_ACCEPTED=0
 	[[ ${JB_SSH_GITHUB_CHECK:-1} == 0 ]] && return 0
 	if [[ ${DRY_RUN} -eq 1 ]]; then
 		_info "would test ${key} against git@github.com"
@@ -1442,7 +1440,6 @@ _ssh_github_check() {
 	local hi_re="Hi ([^!]+)! You.ve successfully authenticated"
 	if [[ ${out} =~ ${hi_re} ]]; then
 		user="${BASH_REMATCH[1]}"
-		_GH_ACCEPTED=1
 		_info "GitHub accepts ${key} (account ${user})"
 		_result "github:  ok (${key##*/} authenticates as ${user})"
 	elif [[ ${out} == *"Permission denied"* ]]; then
@@ -1503,10 +1500,11 @@ _SSH_GH_END="# <<< just-bashit: github.com key (setup-system) <<<"
 # over ssh failed. An IdentityFile in ~/.ssh/config works for every shell,
 # interactive or not.
 #
-# Only for a key GitHub has just accepted (_ssh_github_check, run first): an
-# IdentityFile for a host REPLACES ssh's id_* defaults there, so naming a
-# key GitHub does not know would cut off an id_ed25519 that works today. A
-# key not yet registered gets the line on the run after `gh ssh-key add`.
+# KEY first, then every one of ssh's default id_* keys that exists: an
+# IdentityFile for a host REPLACES ssh's defaults there, and the lines
+# accumulate, so listing them keeps an id_ed25519 that works today working
+# whichever key GitHub knows. No asking GitHub first: a passphrase key
+# cannot be tested unattended, and the box key would never be named.
 #
 # Kept between markers and rewritten in place, so a second run changes
 # nothing. Left alone, with a warning: a `Host github.com` the user wrote, a
@@ -1517,24 +1515,25 @@ _SSH_GH_END="# <<< just-bashit: github.com key (setup-system) <<<"
 _macos_github_identity() {
 	local key="$1" cfg="${HOME}/.ssh/config" kept=""
 	if [[ ${DRY_RUN} -eq 1 ]]; then
-		_info "would point github.com at ${key} in ${cfg}, once GitHub accepts it"
+		_info "would point github.com at ${key} in ${cfg}"
 		return 0
 	fi
-	[[ ${_GH_ACCEPTED} -eq 1 ]] || return 0
 	if [[ -L ${cfg} ]]; then
 		_warn "${cfg} is a symlink -- add to it: Host github.com / IdentityFile ${key}"
 		return 0
 	fi
 	if [[ -f ${cfg} ]]; then
-		local begins ends
-		begins="$(grep -cxF -- "${_SSH_GH_BEGIN}" "${cfg}" || true)"
-		ends="$(grep -cxF -- "${_SSH_GH_END}" "${cfg}" || true)"
-		if [[ ${begins} != "${ends}" ]]; then
+		# Exit 3: a marker out of turn, or a begin never closed.
+		local rc=0
+		kept="$(awk -v b="${_SSH_GH_BEGIN}" -v e="${_SSH_GH_END}" '
+			$0 == b { if (skip) exit 3; skip = 1; next }
+			$0 == e { if (!skip) exit 3; skip = 0; next }
+			!skip
+			END { if (skip) exit 3 }' "${cfg}")" || rc=$?
+		if [[ ${rc} -eq 3 ]]; then
 			_warn "${cfg} has an unpaired just-bashit marker -- leaving it; fix the markers and re-run"
 			return 0
-		fi
-		if ! kept="$(awk -v b="${_SSH_GH_BEGIN}" -v e="${_SSH_GH_END}" \
-			'$0 == b { skip = 1; next } $0 == e { skip = 0; next } !skip' "${cfg}")"; then
+		elif [[ ${rc} -ne 0 ]]; then
 			_warn "could not read ${cfg} -- leaving it"
 			return 0
 		fi
@@ -1544,9 +1543,16 @@ _macos_github_identity() {
 			return 0
 		fi
 	fi
-	local block
-	block="$(printf '%s\nHost github.com\n    IdentityFile "%s"\n%s' \
-		"${_SSH_GH_BEGIN}" "${key}" "${_SSH_GH_END}")"
+	local block def
+	block="$(printf '%s\nHost github.com\n    IdentityFile "%s"' \
+		"${_SSH_GH_BEGIN}" "${key}")"
+	# ssh_config(5)'s default IdentityFile list, in its order.
+	for def in id_rsa id_ecdsa id_ecdsa_sk id_ed25519 id_ed25519_sk id_xmss id_dsa; do
+		def="${HOME}/.ssh/${def}"
+		[[ ${def} != "${key}" && -r ${def} ]] || continue
+		block="$(printf '%s\n    IdentityFile "%s"' "${block}" "${def}")"
+	done
+	block="$(printf '%s\n%s' "${block}" "${_SSH_GH_END}")"
 	local tmp="${cfg}.jb-tmp"
 	if ! {
 		if [[ -n ${kept} ]]; then printf '%s\n\n' "${kept}"; fi

@@ -317,10 +317,10 @@ Tailscale gives the node too; a `HostName` already set is left alone. It
 then points `github.com` at the key in `~/.ssh/config`, between
 `# >>> just-bashit` markers: zsh, a Mac's login shell, never reads
 `bashrc.sh`, so no shell would put the key in the agent and git over ssh
-would find nothing to offer. It does so only once GitHub accepts the key —
-naming a key for a host stops ssh trying `id_ed25519` and the other
-defaults there — so a new key gets the entry on the run after
-`gh ssh-key add`. A `Host github.com` entry of your own, a symlinked
+would find nothing to offer. Any of ssh's default keys (`id_ed25519` and
+the rest) that exist are listed after it, since naming a key for a host
+stops ssh trying the defaults there. A `Host github.com` entry of your own,
+a symlinked
 `~/.ssh/config` and markers that do not pair are left as they are, and
 nothing is added.
 

@@ -3179,13 +3179,15 @@ _mac_stubs() {
 	run setup-system.sh -s ssh
 	assert_success
 	grep -qxF "    IdentityFile \"${HOME}/.ssh/id_ed25519\"" "${HOME}/.ssh/config"
+	# Named once, not again as a default.
+	assert_equal "$(grep -c IdentityFile "${HOME}/.ssh/config")" 1
 	# The box key arriving later replaces the line in place.
 	touch "${HOME}/.ssh/matthews-mac-mini" "${HOME}/.ssh/matthews-mac-mini.pub"
 	run setup-system.sh -s ssh
 	assert_success
-	grep -qxF "    IdentityFile \"${HOME}/.ssh/matthews-mac-mini\"" "${HOME}/.ssh/config"
-	run grep -q id_ed25519 "${HOME}/.ssh/config"
-	assert_failure
+	run grep -m1 IdentityFile "${HOME}/.ssh/config"
+	assert_output "    IdentityFile \"${HOME}/.ssh/matthews-mac-mini\""
+	assert_equal "$(grep -c '^Host github.com$' "${HOME}/.ssh/config")" 1
 }
 
 @test 'macos ssh: a Host github.com the user wrote is left alone' {
@@ -3213,16 +3215,20 @@ _mac_stubs() {
 	assert_failure
 }
 
-# An IdentityFile for github.com replaces ssh's id_* defaults there, so a key
-# GitHub refused must not be named: an id_ed25519 that works would be lost.
-@test 'macos ssh: a key GitHub refuses is not named for github.com' {
+# An IdentityFile for github.com replaces ssh's id_* defaults there, so the
+# defaults that exist are listed after the box key: an id_ed25519 GitHub
+# knows keeps working whether or not the box key is registered.
+@test 'macos ssh: the default keys stay offered to github.com' {
 	_mac_stubs
 	mkdir -p "${HOME}/.ssh"
 	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub" \
+		"${HOME}/.ssh/id_rsa" "${HOME}/.ssh/id_rsa.pub" \
 		"${HOME}/.ssh/matthews-mac-mini" "${HOME}/.ssh/matthews-mac-mini.pub"
 	STUB_GH=denied run setup-system.sh -s ssh
 	assert_success
-	[[ ! -e "${HOME}/.ssh/config" ]]
+	run grep IdentityFile "${HOME}/.ssh/config"
+	assert_output "$(printf '    IdentityFile "%s"\n' \
+		"${HOME}/.ssh/matthews-mac-mini" "${HOME}/.ssh/id_rsa" "${HOME}/.ssh/id_ed25519")"
 }
 
 # A dotfile manager's link stays a link: mv would put a plain file there.
@@ -3240,6 +3246,22 @@ _mac_stubs() {
 }
 
 # An orphan begin marker would have the rewrite drop every line after it.
+@test 'macos ssh: markers out of order leave ~/.ssh/config as it is' {
+	_mac_stubs
+	mkdir -p "${HOME}/.ssh"
+	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
+	local b="# >>> just-bashit: github.com key (setup-system) >>>"
+	local e="# <<< just-bashit: github.com key (setup-system) <<<"
+	printf '%s\nHost box\n%s\nHost github.com\n%s\n    User me\n' \
+		"${e}" "${b}" "${e}" >"${HOME}/.ssh/config"
+	local before
+	before="$(cat "${HOME}/.ssh/config")"
+	run setup-system.sh -s ssh
+	assert_success
+	assert_output --partial "unpaired just-bashit marker"
+	assert_equal "$(cat "${HOME}/.ssh/config")" "${before}"
+}
+
 @test 'macos ssh: an unpaired marker leaves ~/.ssh/config as it is' {
 	_mac_stubs
 	mkdir -p "${HOME}/.ssh"
