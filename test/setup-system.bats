@@ -32,12 +32,13 @@ setup() {
 	export JB_PROC_MOUNTS="${BATS_TEST_TMPDIR}/mounts"
 	# Nor the real token check (#184): CI's Windows runners are elevated.
 	export JB_WIN_ELEVATED=0
-	# Nor the real Mac (#225): on a macOS runner the ssh step would ask the
-	# real scutil, and could rename the machine. A test that wants macOS
-	# calls _mac_stubs, which sets Darwin.
-	if [[ $(uname -s) == Darwin ]]; then
-		export JB_UNAME_S=Linux
-	fi
+	# Nor the real scutil (#225): on a Mac the ssh step would ask it, and
+	# could rename the machine. This one answers nothing, so the step names
+	# the key by $HOSTNAME as anywhere else; _mac_stubs puts its own first.
+	mkdir -p "${BATS_TEST_TMPDIR}/noscutil"
+	printf '#!/bin/sh\nexit 1\n' >"${BATS_TEST_TMPDIR}/noscutil/scutil"
+	chmod +x "${BATS_TEST_TMPDIR}/noscutil/scutil"
+	PATH="${BATS_TEST_TMPDIR}/noscutil:${PATH}"
 	# Nor Windows' own OpenSSH client (#190): on a native Windows runner the
 	# agent step would otherwise ask the machine's real ssh-agent service.
 	export JB_WIN_OPENSSH="${BATS_TEST_TMPDIR}/no-openssh"
@@ -3131,7 +3132,7 @@ _mac_stubs() {
 	_mac_stubs
 	run env HOSTNAME=mac-mini.lan setup-system.sh -y -s ssh
 	assert_success
-	grep -qx "sudo scutil --set HostName matthews-mac-mini" "${MAC}/calls"
+	grep -qx "scutil --set HostName matthews-mac-mini" "${MAC}/calls"
 	[[ -r "${HOME}/.ssh/matthews-mac-mini.pub" ]]
 	[[ ! -e "${HOME}/.ssh/mac-mini" ]]
 }
@@ -3277,6 +3278,7 @@ _mac_stubs() {
 }
 
 @test 'linux ssh: ~/.ssh/config is not touched' {
+	export JB_UNAME_S=Linux
 	mkdir -p "${HOME}/.ssh"
 	touch "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ed25519.pub"
 	run setup-system.sh -s ssh
