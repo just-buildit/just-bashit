@@ -136,28 +136,26 @@ _tty() {
 # _tty_type INPUT CMD... -- as _tty, and type INPUT once CMD has printed
 # its prompt (a line ending ": "), the way a person would: typed before it,
 # the terminal echoes it whatever the prompt then does. Prints the
-# terminal's transcript.
+# terminal's transcript, which script(1) writes to stdout as it goes -- so
+# the writer can watch it for the prompt. No fifo and no `script -F`: the
+# BSD script on the macOS runner never wrote the prompt through either.
+# shellcheck disable=SC2094  # reading the transcript as script writes it is the point
 _tty_type() {
-	local input="$1" log="${BATS_TEST_TMPDIR}/tty.log" fifo="${BATS_TEST_TMPDIR}/tty.in"
-	local cmd i rc=0 pid
+	local input="$1" log="${BATS_TEST_TMPDIR}/tty.log" cmd rc=0
 	shift
 	printf -v cmd '%q ' "$@"
-	rm -f "${log:?}" "${fifo:?}"
-	mkfifo "${fifo}"
-	if script --version 2>/dev/null | grep -q util-linux; then
-		SHELL="$(command -v bash)" script -qefc "${cmd}" "${log}" <"${fifo}" >/dev/null 2>&1 3>&- &
+	: >"${log}"
+	{
+		for ((i = 0; i < 200; i++)); do
+			grep -q ': ' "${log}" && break
+			sleep 0.1
+		done
+		printf '%s\n' "${input}"
+	} | if script --version 2>/dev/null | grep -q util-linux; then
+		SHELL="$(command -v bash)" script -qec "${cmd}" /dev/null
 	else
-		script -q -F "${log}" "$@" <"${fifo}" >/dev/null 2>&1 3>&- &
-	fi
-	pid=$!
-	exec 4>"${fifo}"
-	for ((i = 0; i < 200; i++)); do
-		grep -q ': ' "${log}" 2>/dev/null && break
-		sleep 0.1
-	done
-	printf '%s\n' "${input}" >&4
-	exec 4>&-
-	wait "${pid}" || rc=$?
+		script -q /dev/null "$@"
+	fi >"${log}" 2>&1 || rc=$?
 	cat "${log}"
 	return "${rc}"
 }
