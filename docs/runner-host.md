@@ -50,6 +50,10 @@ every workflow keeps fork PRs on GitHub-hosted runners
 ([just-buildit.github.io#203](https://github.com/just-buildit/just-buildit.github.io/issues/203)).
 Until then, the runner registers and sits idle.
 
+That gate treats a label shaped like a GitHub-hosted image name (`ubuntu-*`,
+`macos-*`, `windows-*`) as GitHub-hosted. So `run` refuses to register with
+such a label: a runner carrying `macos-latest` would take fork jobs.
+
 ## Configuration
 
 Every setting is an environment variable. `--help` lists them all.

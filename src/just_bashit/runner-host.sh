@@ -81,7 +81,9 @@ read -r -d '' HELP <<-'EOF' || true
 	  JB_RUNNER_VERSION     actions/runner version, with JB_RUNNER_SHA256
 	  JB_RUNNER_CPU / JB_RUNNER_MEMORY  per VM [4 / 8192 MB]
 	  JB_RUNNER_BREW        packages added to the image [jq]
-	  JB_RUNNER_LABELS      runner labels [self-hosted,macOS,ARM64]
+	  JB_RUNNER_LABELS      runner labels [self-hosted,macOS,ARM64]; one
+	                        shaped like a GitHub-hosted image (ubuntu-*,
+	                        macos-*, windows-*) is refused
 
 	  The PAT never enters a VM. Only a registration token does, and it is
 	  passed on stdin, never on a command line the host's ps can see.
@@ -131,6 +133,22 @@ done
 _need_macos() {
 	[[ "${JB_RUNNER_OS:-$(uname -s)}" == Darwin ]] ||
 		_die "macOS only: Tart runs on Apple's Virtualization.framework"
+}
+
+# A label shaped like a GitHub-hosted image name (ubuntu-*, macos-*,
+# windows-*) is refused. The workflow-side fork-PR gate treats such labels as
+# GitHub-hosted, so a runner carrying one would take a fork job that asked
+# for, say, macos-latest. GitHub matches labels case-insensitively, so this
+# does too.
+_need_safe_labels() {
+	local label lower
+	local -a labels
+	IFS=, read -r -a labels <<<"${LABELS}"
+	for label in "${labels[@]}"; do
+		lower="$(printf '%s' "${label}" | tr '[:upper:]' '[:lower:]')"
+		[[ ! ${lower} =~ ^(ubuntu|macos|windows)- ]] ||
+			_die "refusing label ${label}: it looks like a GitHub-hosted image"
+	done
 }
 
 _need_tart() {
@@ -290,6 +308,7 @@ _on_signal() { # EXIT_CODE
 }
 
 cmd_run() {
+	_need_safe_labels
 	_need_macos
 	_need_tart
 	if [[ ${DRY_RUN} -eq 1 ]]; then

@@ -139,6 +139,22 @@ setup() {
 	assert_success
 }
 
+@test 'run: refuses a label shaped like a GitHub-hosted image' {
+	local label
+	for label in macos-latest ubuntu-24.04 windows-2025 MacOS-14; do
+		: >"${LOG}"
+		JB_RUNNER_LABELS="self-hosted,${label}" run runner-host.sh run --once
+		assert_failure
+		assert_output --partial "refusing label ${label}"
+		# Refused before any token is minted or VM cloned.
+		run cat "${LOG}"
+		assert_output ''
+	done
+	# The default set is fine, and macOS alone is not an image name.
+	run runner-host.sh run --once
+	assert_success
+}
+
 @test 'run: no image is an error that names the fix' {
 	rm "${STATE}/jb-base"
 	run runner-host.sh run --once
