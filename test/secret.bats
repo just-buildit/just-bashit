@@ -246,7 +246,9 @@ _roundtrip() {
 @test 'set with no --backend: age when there is no gpg secret key' {
 	_need age
 	GNUPGHOME="${BATS_TEST_TMPDIR}/empty-gnupg"
-	mkdir -m 700 "${GNUPGHOME}"
+	# mkdir then chmod: MSYS2 refuses mkdir -m 700 outright.
+	mkdir "${GNUPGHOME}"
+	chmod 700 "${GNUPGHOME}"
 	_conf "age $(<"${KEYS}/age1.pub")" "identity ${KEYS}/age1"
 	run just-runit secret set TOK <<<"${VALUE}"
 	assert_success
@@ -512,7 +514,9 @@ _roundtrip() {
 @test 'no gpg key and no gpg recipients is one error line' {
 	_need gpg
 	GNUPGHOME="${BATS_TEST_TMPDIR}/empty-gnupg"
-	mkdir -m 700 "${GNUPGHOME}"
+	# mkdir then chmod: MSYS2 refuses mkdir -m 700 outright.
+	mkdir "${GNUPGHOME}"
+	chmod 700 "${GNUPGHOME}"
 	run just-runit secret set A --backend gpg <<<"${VALUE}"
 	assert_failure
 	assert_output --partial 'error: no gpg recipients'
