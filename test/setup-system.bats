@@ -2941,10 +2941,11 @@ _mac_stubs() {
 	mkdir -p "${hb}"
 	printf '#!/bin/sh\n' >"${hb}/brew"
 	chmod +x "${hb}/brew"
-	run env JB_BREW_ROOT="${root}" PATH="/usr/bin:${hb}" sh -c \
+	# /bin after brew: sh lives there on macOS and Alpine, not in /usr/bin.
+	run env JB_BREW_ROOT="${root}" PATH="/usr/bin:${hb}:/bin" sh -c \
 		". '${HOME}/.config/just-bashit/profile.sh'; echo \"\${PATH}\""
 	assert_success
-	assert_output --partial "${hb}:/usr/bin"
+	assert_output --partial "${hb}:/usr/bin:/bin"
 }
 
 # A nested shell sources profile.sh again (JB_PROFILE is not exported):
