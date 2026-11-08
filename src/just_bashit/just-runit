@@ -134,12 +134,18 @@ Files:
                  the backend.
   \${XDG_CONFIG_HOME:-~/.config}/jb/secrets/recipients
                  One 'KEY VALUE' per line; '#' starts a comment line:
-                   gpg KEYID            a gpg recipient
+                   gpg FINGERPRINT      a gpg recipient, its full 40-hex
+                                        fingerprint (gpg --fingerprint)
                    age RECIPIENT        age1..., an ssh public key line, or
-                                        the path of a recipients file
-                   identity PATH        an age identity file (age-keygen's
-                                        output, or an ssh private key)
+                                        the absolute path of a recipients
+                                        file (~/ counts)
+                   identity PATH        an age identity file, absolute
+                                        (age-keygen's output, or an ssh
+                                        private key)
                    default_backend gpg|age
+                 It must be yours and not writable by others, and an
+                 identity file not readable by others (not checked on
+                 Windows, which has no Unix modes).
                  With no gpg recipients, gpg encrypts to your own key.
                  With no default_backend: gpg when you have a gpg secret
                  key, else age.
@@ -169,6 +175,8 @@ _secret_conf() {
 	local re='^[[:space:]]*([A-Za-z_]+)[[:space:]]+(.*[^[:space:]])[[:space:]]*$'
 	file="$(_secret_config)"
 	[[ -f ${file} ]] || return 0
+	# Whoever can write this file chooses who the secrets are encrypted to.
+	_secret_private "${file}" 022 "writable by others"
 	while IFS= read -r line || [[ -n ${line} ]]; do
 		n=$((n + 1))
 		line="${line%$'\r'}"
@@ -186,6 +194,28 @@ _secret_conf() {
 		esac
 	done <"${file}"
 }
+
+# _secret_private FILE MASK WHAT -- refuse FILE when it is not the user's
+# own, or when its mode has any bit of MASK (022: group or world may
+# write; 077: anyone else may read). Skipped on MSYS2 and Cygwin, where
+# NTFS has no Unix modes for this to read (the windows runner reports 644
+# after chmod 600) and ownership is not a uid.
+_secret_private() {
+	local file="$1" mask="$2" what="$3" mode
+	case "${OSTYPE:-}" in msys* | cygwin*) return 0 ;; esac
+	[[ -O ${file} ]] ||
+		_secret_err "${file} is not owned by you; nothing in it is trusted: replace it with your own copy, mode 600"
+	mode="$(stat -c %a "${file}" 2>/dev/null || stat -f %Lp "${file}")"
+	if ((8#${mode} & 8#${mask})); then
+		_secret_err "${file} is ${what} (mode ${mode}): chmod 600 ${file}"
+	fi
+	return 0
+}
+
+# _secret_abs PATH -- PATH is absolute (after the config's ~/ expansion):
+# /..., or a Windows drive path on MSYS2. A relative one would be read from
+# whatever directory jbx runs in, so it is never taken as a file.
+_secret_abs() { [[ $1 == /* || $1 =~ ^[A-Za-z]:[\\/] ]]; }
 
 # _secret_need BACKEND -- the backend's tool is installed, or one error line
 # saying what to install.
@@ -211,11 +241,16 @@ _secret_enc_gpg() {
 	# shorten the list, and encrypt to one recipient fewer.
 	list="$(_secret_conf gpg)" || exit 1
 	while IFS= read -r r; do
-		[[ -n ${r} ]] && args+=(--recipient "${r}")
+		[[ -n ${r} ]] || continue
+		# A short key id is a 32- or 64-bit guess at a key, and short ids
+		# collide on purpose: only the whole fingerprint names one key.
+		[[ ${r} =~ ^(0x)?([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$ ]] ||
+			_secret_err "gpg recipient '${r}' in $(_secret_config) is not a full fingerprint (40 hex digits): gpg --fingerprint '${r}'"
+		args+=(--recipient "${r}")
 	done <<<"${list}"
 	if [[ ${#args[@]} -eq 0 ]]; then
 		_secret_gpg_has_key ||
-			_secret_err "no gpg recipients: add 'gpg KEYID' to $(_secret_config), or create a key: gpg --quick-gen-key 'NAME <EMAIL>'"
+			_secret_err "no gpg recipients: add 'gpg FINGERPRINT' to $(_secret_config), or create a key: gpg --quick-gen-key 'NAME <EMAIL>'"
 		args=(--default-recipient-self)
 	fi
 	# The recipients file is the statement of trust, so gpg's web of trust
@@ -230,12 +265,19 @@ _secret_enc_age() {
 	local r list args=()
 	list="$(_secret_conf age)" || exit 1
 	while IFS= read -r r; do
-		# A recipients file (an ssh .pub among them) is -R, anything else
-		# is the recipient itself.
-		if [[ -f ${r} ]]; then
+		[[ -n ${r} ]] || continue
+		# An absolute path is a recipients file (an ssh .pub among them),
+		# -R. Anything else is the recipient itself, -r, and is never
+		# looked up as a file: a file named like a recipient, planted in
+		# the directory jbx runs from, would otherwise choose the key. A
+		# single word that is not an age1 recipient is a relative path,
+		# refused for the same reason.
+		if _secret_abs "${r}"; then
 			args+=(-R "${r}")
-		elif [[ -n ${r} ]]; then
+		elif [[ ${r} == age1* || ${r} == *[[:space:]]* ]]; then
 			args+=(-r "${r}")
+		else
+			_secret_err "age recipient '${r}' in $(_secret_config) is neither a recipient (age1..., an ssh public key) nor an absolute path: write ~/ or / in front of a file"
 		fi
 	done <<<"${list}"
 	[[ ${#args[@]} -gt 0 ]] ||
@@ -247,7 +289,13 @@ _secret_dec_age() {
 	local i list args=()
 	list="$(_secret_conf identity)" || exit 1
 	while IFS= read -r i; do
-		[[ -n ${i} ]] && args+=(-i "${i}")
+		[[ -n ${i} ]] || continue
+		_secret_abs "${i}" ||
+			_secret_err "identity '${i}' in $(_secret_config) is not an absolute path: write ~/ or / in front of it"
+		# Unreadable is age's own error to give; readable by others is a
+		# private key handed round, refused here.
+		[[ -f ${i} ]] && _secret_private "${i}" 077 "readable by others"
+		args+=(-i "${i}")
 	done <<<"${list}"
 	[[ ${#args[@]} -gt 0 ]] ||
 		_secret_err "no age identity: add 'identity PATH' (an age-keygen key file, or an ssh private key) to $(_secret_config)"
@@ -444,6 +492,13 @@ _secret_run() {
 		_secret_name_ok "${name}"
 		[[ ${var} =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] ||
 			_secret_err "'${var}' is not an environment variable name; use NAME=VAR"
+		# A variable that changes how CMD runs, or what it loads, is not a
+		# place to put a secret.
+		case "${var}" in
+		PATH | LD_* | DYLD_* | BASH_ENV | ENV | SHELLOPTS | BASHOPTS | IFS | PS4 | BASH_XTRACEFD)
+			_secret_err "'${var}' changes how CMD runs; it cannot hold a secret: use NAME=VAR with another VAR"
+			;;
+		esac
 		names+=("${name}")
 		vars+=("${var}")
 	done
@@ -493,11 +548,37 @@ _secret_rm() {
 
 # _secret_reencrypt NAME BACKEND -- decrypt NAME and encrypt it again with
 # BACKEND, plaintext over a pipe only.
+#
+# The new ciphertext goes to a temporary file in the store, and replaces
+# the old only once both halves of the pipe succeeded AND it decrypts to
+# the same bytes as the old one (compared by digest, so no value is held
+# anywhere). A decryption that fails would otherwise feed the encrypter an
+# empty stream, and its output would replace the secret with nothing.
 _secret_reencrypt() {
-	local file
-	file="$(_secret_file "$1")" || exit 1
-	_secret_need "$2"
-	_secret_call dec "${file##*.}" "${file}" | _secret_store "$1" "$2"
+	local name="$1" to="$2" file from dir tmp want got other=age
+	local -a st=(0 0)
+	file="$(_secret_file "${name}")" || exit 1
+	from="${file##*.}"
+	_secret_need "${from}"
+	_secret_need "${to}"
+	[[ ${to} == age ]] && other=gpg
+	dir="$(_secret_dir)"
+	tmp="${dir}/.${name}.${to}.$$"
+	_secret_call dec "${from}" "${file}" | _secret_call enc "${to}" "${tmp}" ||
+		st=("${PIPESTATUS[@]}")
+	if [[ ${st[0]} -ne 0 || ${st[1]} -ne 0 ]]; then
+		rm -f "${tmp:?}"
+		_secret_err "'${name}' is unchanged: it could not be re-encrypted"
+	fi
+	if ! want="$(_secret_call dec "${from}" "${file}" | _sha256)" ||
+		! got="$(_secret_call dec "${to}" "${tmp}" | _sha256)" ||
+		[[ ${want} != "${got}" ]]; then
+		rm -f "${tmp:?}"
+		_secret_err "'${name}' is unchanged: the re-encrypted copy does not decrypt to the same value with your keys (keep one of your own among the recipients)"
+	fi
+	chmod 600 "${tmp}"
+	mv -f "${tmp}" "${dir}/${name}.${to}"
+	[[ ${to} == "${from}" ]] || rm -f "${dir:?}/${name:?}.${other}"
 }
 
 _secret_migrate() {
@@ -547,6 +628,14 @@ _secret_rekey() {
 }
 
 _secret_main() {
+	# Tracing would print every value: `+ export A=...`, `+ printf %s ...`.
+	# SHELLOPTS=xtrace and a BASH_ENV running `set -x` both turn it on
+	# before this line, so it is turned off here, first. Subshells inherit
+	# that, and a child bash (CMD) is handed SHELLOPTS without xtrace.
+	# BASH_XTRACEFD is left alone: unsetting it when it names fd 2 closes
+	# stderr (bash(1), measured with 5.3), and with tracing off it carries
+	# nothing.
+	set +x
 	local cmd="${1:-}"
 	# Every file this makes is the user's alone, the temporary ones too.
 	umask 077

@@ -536,13 +536,22 @@ stored keeps its backend unless `--backend` says otherwise.
 `KEY VALUE` per line, `#` starting a comment line:
 
 ```text
-gpg 0x1234ABCD5678EF90          # a gpg recipient (key id or fingerprint)
+gpg 0123456789ABCDEF0123456789ABCDEF01234567  # a full gpg fingerprint
 age age1qyqszqgpqyqszqgp...     # an age recipient
 age ~/.ssh/id_ed25519.pub       # a recipients file: age reads ssh keys too
 identity ~/.config/jb/age.key   # what age decrypts with (age-keygen's output,
                                 #   or an ssh private key)
 default_backend age
 ```
+
+A `gpg` line is a full 40-hex fingerprint (`gpg --fingerprint KEY`): a
+short key id is refused, since short ids collide. An `age` value is a
+recipient or an **absolute** path (`~/` counts); a bare word that is
+neither is refused, and a relative path is never looked up, so a file
+planted in the directory you run from cannot choose the key. The file must
+be yours and not writable by group or world, and an `identity` file not
+readable by them; each is one `error:` line naming the `chmod 600`. Windows
+(MSYS2, Git Bash) has no Unix modes, so these two checks are skipped there.
 
 With no `gpg` line, gpg encrypts to your own key. With no `default_backend`,
 `set` uses gpg when you have a gpg secret key, else age. An unknown key is an
@@ -552,6 +561,13 @@ error, not a skipped line, so a typo cannot leave a recipient out.
 
 - No secret value is ever an argument -- not of `just-runit`, gpg or age. It
     goes in on stdin and comes out on a pipe.
+- `migrate` and `rekey` replace a file only once the new copy decrypts to
+    the same bytes; any failure leaves the original as it was.
+- Shell tracing (`SHELLOPTS=xtrace`, a `BASH_ENV` that runs `set -x`) is
+    turned off before any value is handled, so no trace shows one.
+- `run` refuses a VAR that changes how CMD runs: `PATH`, `LD_*`, `DYLD_*`,
+    `BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS`, `IFS`, `PS4`,
+    `BASH_XTRACEFD`.
 - `run` decrypts every secret before it exports any, then execs CMD: CMD is
     the only process given them, not gpg, age, or the shell you ran it from.
     Trailing newlines are dropped, as `$(...)` drops them.

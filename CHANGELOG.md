@@ -9,7 +9,8 @@
     one implementation over both backends; the file's extension
     (`NAME.gpg`, `NAME.age`) says which. No value is ever an argument:
     it goes in on stdin and out on a pipe, `run` hands it to CMD alone,
-    and `get` refuses a terminal without `--show`. `setup-system -s deps`
+    `get` refuses a terminal without `--show`, and `migrate` and `rekey`
+    replace a file only once the new copy decrypts to the same bytes. `setup-system -s deps`
     now installs gpg and age.
 
 ### Fixed

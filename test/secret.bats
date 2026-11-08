@@ -341,7 +341,15 @@ _roundtrip() {
 	_need age
 	_conf "age $(<"${KEYS}/age1.pub")" "identity ${KEYS}/age1"
 	just-runit secret set TOK --backend age <<<"${VALUE}"
+	cp "${STORE}/TOK.age" "${BATS_TEST_TMPDIR}/before"
+	# To a key none of your identities opens: refused, since the new copy
+	# cannot be checked, and it would lock you out.
 	_conf "age $(<"${KEYS}/age2.pub")" "identity ${KEYS}/age1"
+	run just-runit secret rekey
+	assert_failure
+	assert_output --partial "'TOK' is unchanged"
+	cmp "${STORE}/TOK.age" "${BATS_TEST_TMPDIR}/before"
+	_conf "age $(<"${KEYS}/age2.pub")" "identity ${KEYS}/age1" "identity ${KEYS}/age2"
 	run just-runit secret rekey
 	assert_success
 	assert_output 'rekeyed TOK (age)'
@@ -577,4 +585,181 @@ _roundtrip() {
 	run just-runit secret set A --backend rot13 <<<"${VALUE}"
 	assert_failure
 	assert_output --partial "unknown backend 'rot13'"
+}
+
+# ---- review findings (#230) -------------------------------------------------
+
+# Sabotage-proven (PR #230): rekey or migrate piping a failed decryption
+# into the encrypter, then replacing the file with what came out, turns
+# these red -- the secret became 0 bytes, or was deleted.
+@test 'rekey with a broken identity leaves the secret byte-identical' {
+	_need age
+	_conf "age $(<"${KEYS}/age1.pub")" "identity ${KEYS}/age1"
+	just-runit secret set A --backend age <<<"${VALUE}"
+	cp "${STORE}/A.age" "${BATS_TEST_TMPDIR}/before"
+	_conf "age $(<"${KEYS}/age1.pub")" "identity ${HOME}/k.TYPO"
+	run just-runit secret rekey A
+	assert_failure
+	assert_output --partial "'A' is unchanged"
+	cmp "${STORE}/A.age" "${BATS_TEST_TMPDIR}/before"
+	run ls -A "${STORE}"
+	assert_output 'A.age'
+	_conf "age $(<"${KEYS}/age1.pub")" "identity ${KEYS}/age1"
+	assert_equal "$(just-runit secret get A)" "${VALUE}"
+}
+
+@test 'migrate whose decryption fails leaves the secret byte-identical' {
+	_need gpg age
+	_conf_both
+	just-runit secret set B --backend gpg <<<"${VALUE}"
+	cp "${STORE}/B.gpg" "${BATS_TEST_TMPDIR}/before"
+	# The gpg home moved aside: no secret key to decrypt with.
+	GNUPGHOME="${BATS_TEST_TMPDIR}/aside"
+	mkdir "${GNUPGHOME}"
+	chmod 700 "${GNUPGHOME}"
+	run just-runit secret migrate B --to age
+	assert_failure
+	assert_output --partial "'B' is unchanged"
+	cmp "${STORE}/B.gpg" "${BATS_TEST_TMPDIR}/before"
+	[[ ! -e ${STORE}/B.age ]] || fail 'an age copy was left behind'
+	run ls -A "${STORE}"
+	assert_output 'B.gpg'
+	GNUPGHOME="${JB_TEST_GNUPGHOME}"
+	assert_equal "$(just-runit secret get B)" "${VALUE}"
+}
+
+# Sabotage-proven (PR #230): without the `set +x` on entry, each of these
+# prints the value in a trace line.
+@test 'tracing from SHELLOPTS or BASH_ENV never shows a value' {
+	_need gpg age script
+	_conf_both
+	just-runit secret set A --backend gpg <<<"${VALUE}"
+	just-runit secret set B --backend age <<<"${VALUE}"
+	run env SHELLOPTS=xtrace just-runit secret run A B -- true
+	assert_success
+	refute_output --partial "${VALUE}"
+	printf 'set -x\n' >"${BATS_TEST_TMPDIR}/bash_env"
+	run env BASH_ENV="${BATS_TEST_TMPDIR}/bash_env" just-runit secret run A B -- true
+	assert_success
+	refute_output --partial "${VALUE}"
+	run env SHELLOPTS=xtrace just-runit secret get A
+	assert_success
+	assert_output --partial "${VALUE}"
+	refute_output --partial "export"
+	run _tty_type "${VALUE}-typed" env SHELLOPTS=xtrace just-runit secret set C --backend age
+	assert_success
+	refute_output --partial "${VALUE}-typed"
+	assert_equal "$(just-runit secret get C)" "${VALUE}-typed"
+}
+
+# Sabotage-proven (PR #230): taking any value that names an existing file
+# as a recipients file, as before, turns this red.
+@test 'a file named like a recipient, planted in the cwd, is not read' {
+	_need age
+	local mine
+	mine="$(<"${KEYS}/age1.pub")"
+	_conf "age ${mine}" "identity ${KEYS}/age1"
+	cp "${KEYS}/age2.pub" "./${mine}"
+	just-runit secret set A --backend age <<<"${VALUE}"
+	assert_equal "$(age --decrypt -i "${KEYS}/age1" "${STORE}/A.age")" "${VALUE}"
+	run age --decrypt -i "${KEYS}/age2" "${STORE}/A.age"
+	assert_failure
+}
+
+@test 'a relative age recipients path, or identity, is refused' {
+	_need age
+	cp "${KEYS}/age1.pub" ./keys.pub
+	_conf 'age keys.pub' "identity ${KEYS}/age1"
+	run just-runit secret set A --backend age <<<"${VALUE}"
+	assert_failure
+	assert_output --partial "age recipient 'keys.pub'"
+	assert_output --partial 'nor an absolute path'
+	[[ ! -e ${STORE}/A.age ]] || fail 'stored anyway'
+	_conf "age ${PWD}/keys.pub" "identity ${KEYS}/age1"
+	just-runit secret set A --backend age <<<"${VALUE}"
+	cp "${KEYS}/age1" ./id
+	_conf "age ${PWD}/keys.pub" 'identity id'
+	run just-runit secret get A
+	assert_failure
+	assert_output --partial "identity 'id'"
+	refute_output --partial "${VALUE}"
+}
+
+# _on_windows -- MSYS2 or Cygwin, where the mode and owner checks are
+# documented as skipped: NTFS has no Unix modes for them to read.
+_on_windows() { [[ ${OSTYPE:-} == msys* || ${OSTYPE:-} == cygwin* ]]; }
+
+# Sabotage-proven (PR #230): an early `return 0` in _secret_private turns
+# this red off Windows. On Windows it asserts the documented skip.
+@test 'a recipients file others can write, or that is not yours, is refused' {
+	_need age
+	_conf "age $(<"${KEYS}/age1.pub")" "identity ${KEYS}/age1"
+	chmod 664 "${CONF}"
+	run just-runit secret set A --backend age <<<"${VALUE}"
+	if _on_windows; then
+		assert_success
+		return 0
+	fi
+	assert_failure
+	assert_output "just-runit secret: error: ${CONF} is writable by others (mode 664): chmod 600 ${CONF}"
+	[[ ! -e ${STORE}/A.age ]] || fail 'stored anyway'
+	chmod 600 "${CONF}"
+	# Not yours: root hands its copy to nobody; anyone else points the
+	# config at a file root owns.
+	if [[ $(id -u) -eq 0 ]]; then
+		chown nobody "${CONF}"
+	else
+		cp "${CONF}" "${BATS_TEST_TMPDIR}/mine"
+		rm -f "${CONF:?}"
+		ln -s /etc/hosts "${CONF}"
+	fi
+	run just-runit secret set A --backend age <<<"${VALUE}"
+	assert_failure
+	assert_output --partial "${CONF} is not owned by you"
+}
+
+@test 'an age identity others can read is refused' {
+	_need age
+	cp "${KEYS}/age1" "${HOME}/id"
+	_conf "age $(<"${KEYS}/age1.pub")" "identity ${HOME}/id"
+	just-runit secret set A --backend age <<<"${VALUE}"
+	chmod 644 "${HOME}/id"
+	run just-runit secret get A
+	if _on_windows; then
+		assert_success
+		return 0
+	fi
+	assert_failure
+	assert_output "just-runit secret: error: ${HOME}/id is readable by others (mode 644): chmod 600 ${HOME}/id"
+	chmod 600 "${HOME}/id"
+	assert_equal "$(just-runit secret get A)" "${VALUE}"
+}
+
+# Sabotage-proven (PR #230): dropping the denylist turns this red.
+@test 'run refuses a VAR that changes how CMD runs' {
+	local var
+	for var in PATH LD_PRELOAD DYLD_INSERT_LIBRARIES BASH_ENV ENV SHELLOPTS BASHOPTS IFS PS4 BASH_XTRACEFD; do
+		run just-runit secret run "A=${var}" -- true
+		assert_failure
+		assert_output "just-runit secret: error: '${var}' changes how CMD runs; it cannot hold a secret: use NAME=VAR with another VAR"
+	done
+	run just-runit secret run PATH -- true
+	assert_failure
+	assert_output --partial "'PATH' changes how CMD runs"
+}
+
+# Sabotage-proven (PR #230): dropping the fingerprint check turns this red.
+@test 'a gpg recipient must be a full fingerprint, not a short key id' {
+	_need gpg
+	local fpr
+	fpr="$(_fpr 1)"
+	_conf "gpg ${fpr: -8}"
+	run just-runit secret set A --backend gpg <<<"${VALUE}"
+	assert_failure
+	assert_output --partial "gpg recipient '${fpr: -8}'"
+	assert_output --partial 'is not a full fingerprint (40 hex digits)'
+	[[ ! -e ${STORE}/A.gpg ]] || fail 'stored anyway'
+	_conf "gpg 0x${fpr}"
+	run just-runit secret set A --backend gpg <<<"${VALUE}"
+	assert_success
 }
