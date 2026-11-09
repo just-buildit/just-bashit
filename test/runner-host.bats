@@ -41,6 +41,9 @@ setup() {
 	# The CI containers run as root, which install refuses. Stand in as a
 	# user; the refuse-root test sets 0.
 	export JB_RUNNER_EUID=4242
+	# One slot unless a test says otherwise, so counts stay simple; the
+	# two-slot tests set 2, and one checks 2 is the default.
+	export JB_RUNNER_VMS=1
 
 	# A tart that keeps its VMs as files, so clone/delete/list agree.
 	cat >"${STUBS}/tart" <<-'EOF'
@@ -74,6 +77,8 @@ setup() {
 			printf '%s\n' "$1" >>"${REGISTERED}"
 			# A job that waits for work, as a real idle runner does.
 			[ -n "${TART_EXEC_SLEEP:-}" ] && exec sleep "${TART_EXEC_SLEEP}"
+			# A job that fails in one slot only.
+			case "$1" in *"-${TART_EXEC_FAIL_SLOT:-none}-"*) exit 3 ;; esac
 			exit "${TART_EXEC_RC:-0}" ;;
 		esac
 	EOF
@@ -152,7 +157,7 @@ setup() {
 	assert_success
 	# The host is in the name, so two hosts' runners never --replace each
 	# other.
-	run grep -c '^tart clone jb-base jb-job-testhost-' "${LOG}"
+	run grep -c '^tart clone jb-base jb-job-testhost-s1-' "${LOG}"
 	assert_output 1
 	run grep -E '^tart delete jb-job-' "${LOG}"
 	assert_success
@@ -441,4 +446,118 @@ setup() {
 	run runner-host.sh -- --once
 	assert_failure
 	assert_output --partial 'unknown argument: --once'
+}
+
+@test 'slots: two by default, each its own VM, runner name and token' {
+	unset JB_RUNNER_VMS
+	run runner-host.sh run --once
+	assert_success
+	run grep -cE '^tart clone jb-base jb-job-testhost-s1-[0-9]+$' "${LOG}"
+	assert_output 1
+	run grep -cE '^tart clone jb-base jb-job-testhost-s2-[0-9]+$' "${LOG}"
+	assert_output 1
+	# A registration token each, minted separately.
+	run grep -c 'registration-token' "${LOG}"
+	assert_output 2
+	# Each runner registered under its own VM's name.
+	run sort -u "${REGISTERED}"
+	assert_line --regexp '^jb-job-testhost-s1-[0-9]+$'
+	assert_line --regexp '^jb-job-testhost-s2-[0-9]+$'
+	# And the PAT still never left curl's stdin.
+	run grep -F 'pat-SECRET-123' <(grep -v '^curl-stdin ' "${LOG}")
+	assert_failure
+	run ls "${STATE}"
+	assert_output jb-base
+}
+
+@test 'slots: more than two, or none, is refused before anything runs' {
+	local n
+	# (Empty is unset: the default, like every JB_RUNNER_* setting.)
+	for n in 3 0 two 12; do
+		: >"${LOG}"
+		JB_RUNNER_VMS="${n}" run runner-host.sh run --once
+		assert_failure
+		assert_output --partial "it must be 1 or 2"
+		run cat "${LOG}"
+		assert_output ''
+	done
+	JB_RUNNER_VMS=3 run runner-host.sh --dry-run install
+	assert_failure
+	assert_output --partial "it must be 1 or 2"
+}
+
+@test 'slots: one failing does not stop the other' {
+	TART_EXEC_FAIL_SLOT=s1 JB_RUNNER_VMS=2 run runner-host.sh run --once
+	assert_failure 3
+	assert_output --regexp 'jb-job-testhost-s1-[0-9]+ finished \(exit 3\)'
+	assert_output --regexp 'jb-job-testhost-s2-[0-9]+ finished \(exit 0\)'
+	run ls "${STATE}"
+	assert_output jb-base
+}
+
+@test 'slots: SIGTERM deletes every VM and deregisters every runner' {
+	# Jobs that would wait 300 s: the loop must end them, not outlast them.
+	JB_RUNNER_VMS=2 TART_EXEC_SLEEP=300.5 runner-host.sh run --once >"${BATS_TEST_TMPDIR}/out" 2>&1 &
+	local pid=$! _
+	for _ in $(seq 50); do
+		[ "$(wc -l <"${REGISTERED}")" -ge 2 ] && break
+		sleep 0.1
+	done
+	kill -TERM "${pid}"
+	for _ in $(seq 100); do
+		kill -0 "${pid}" 2>/dev/null || break
+		sleep 0.1
+	done
+	if kill -0 "${pid}" 2>/dev/null; then
+		pkill -f 'sleep 300.5' || :
+		fail "run was still up 10 s after SIGTERM"
+	fi
+	local rc=0
+	wait "${pid}" || rc=$?
+	assert_equal "${rc}" 143
+	run ls "${STATE}"
+	assert_output jb-base
+	run grep -cE '^curl .*-X DELETE .*/actions/runners/7' "${LOG}"
+	assert_output 2
+	[ ! -e "${JB_RUNNER_LOCK}" ]
+	sleep 0.5
+	run pgrep -f 'sleep 300.5'
+	assert_failure
+}
+
+@test 'slots: stale VMs of every slot are deleted first' {
+	touch "${STATE}/jb-job-testhost-s1-1" "${STATE}/jb-job-testhost-s2-1"
+	run runner-host.sh run --once
+	assert_success
+	run grep -cxE 'tart delete jb-job-testhost-s[12]-1' "${LOG}"
+	assert_output 2
+}
+
+@test 'lock: a takeover that finds a fresh lock puts it back' {
+	# Another process takes the stale lock between this one reading it
+	# and renaming it away: an mv that, on exactly that rename, first
+	# replaces the pid file with a live holder's.
+	local realmv
+	realmv="$(command -v mv)"
+	mkdir "${JB_RUNNER_LOCK}"
+	printf '999999 1\n' >"${JB_RUNNER_LOCK}/pid"
+	cat >"${STUBS}/mv" <<-EOF
+		#!/bin/bash
+		if [ "\$1" = "${JB_RUNNER_LOCK}" ] && [[ "\$2" == "${JB_RUNNER_LOCK}.stale."* ]]; then
+			printf '%s 1\\n' "\$\$" >"${JB_RUNNER_LOCK}/pid"
+		fi
+		exec "${realmv}" "\$@"
+	EOF
+	chmod +x "${STUBS}/mv"
+	run runner-host.sh run --once
+	assert_failure
+	assert_output --partial 'changed hands while being taken over'
+	# The other process's lock is back in place, untouched, and nothing
+	# ran under it.
+	run cat "${JB_RUNNER_LOCK}/pid"
+	refute_output '999999 1'
+	run ls "${BATS_TEST_TMPDIR}"
+	refute_output --partial 'lock.stale'
+	run grep -E '^tart (clone|delete)' "${LOG}"
+	assert_failure
 }

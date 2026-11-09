@@ -30,7 +30,11 @@ IMAGE="${JB_RUNNER_IMAGE:-jb-base}"
 RUNNER_VERSION="${JB_RUNNER_VERSION:-2.338.2}"
 RUNNER_SHA256="${JB_RUNNER_SHA256:-25a065af409ffa317ab4d5a3b614dd15fc9c40f2172bc1b35a1b1258e919a388}"
 CPU="${JB_RUNNER_CPU:-4}"
-MEMORY="${JB_RUNNER_MEMORY:-8192}"
+MEMORY="${JB_RUNNER_MEMORY:-6144}"
+# How many jobs run at once, each in its own VM. Apple's macOS licence
+# allows two macOS VMs per Mac, so 2 is the ceiling. Two at 4 cores and
+# 6 GB leave this Mac about 2 cores and 4 GB of its own.
+VMS="${JB_RUNNER_VMS:-2}"
 BREW="${JB_RUNNER_BREW:-jq}"
 LABELS="${JB_RUNNER_LABELS:-self-hosted,macOS,ARM64}"
 PREFIX="${JB_RUNNER_PREFIX:-jb-job}"
@@ -85,9 +89,10 @@ read -r -d '' HELP <<-'EOF' || true
 	  image      Build the clean image: clone the pinned base, install the
 	             pinned actions/runner and JB_RUNNER_BREW packages into it,
 	             and save it as JB_RUNNER_IMAGE. Re-run to upgrade.
-	  run        The job loop, forever: mint a registration token, clone the
-	             image, boot it, run one job, delete the VM. What the
-	             LaunchDaemon runs. --once stops after one VM.
+	  run        The job loop, forever, in JB_RUNNER_VMS slots at once: each
+	             mints its own registration token, clones the image, boots
+	             it, runs one job, deletes the VM. What the LaunchDaemon
+	             runs. --once stops after one VM per slot.
 	  install    Copy this script to a stable path and install a LaunchDaemon
 	             that runs `run` from boot, as this user. Uses sudo.
 	  uninstall  Remove the LaunchDaemon and any job VMs. Uses sudo.
@@ -96,7 +101,7 @@ read -r -d '' HELP <<-'EOF' || true
 	Options:
 	  -h / --help     Show this message and exit.
 	  -n / --dry-run  Print what would happen; change nothing.
-	  --once          With `run`: one VM, then exit.
+	  --once          With `run`: one VM per slot, then exit.
 
 	Environment (defaults in brackets):
 	  JB_RUNNER_ORG         org the runners register to [just-buildit]
@@ -105,7 +110,8 @@ read -r -d '' HELP <<-'EOF' || true
 	  JB_RUNNER_BASE        Tart base image, pinned by digest
 	  JB_RUNNER_IMAGE       the clean image's local name [jb-base]
 	  JB_RUNNER_VERSION     actions/runner version, with JB_RUNNER_SHA256
-	  JB_RUNNER_CPU / JB_RUNNER_MEMORY  per VM [4 / 8192 MB]
+	  JB_RUNNER_VMS         jobs at once, one VM each; 1 or 2 [2]
+	  JB_RUNNER_CPU / JB_RUNNER_MEMORY  per VM [4 / 6144 MB]
 	  JB_RUNNER_NET_BLOCK   CIDRs no VM may reach [RFC 1918, 100.64.0.0/10]
 	  JB_RUNNER_DNS         the image's DNS servers [1.1.1.1 8.8.8.8]
 	  JB_RUNNER_SOFTNET     the softnet tart runs [/usr/local/bin/softnet];
@@ -209,6 +215,12 @@ _need_safe_labels() {
 	done
 	[[ -n ${out} ]] || _die "no runner labels"
 	LABELS="${out}"
+}
+
+# 1 or 2: Apple's licence allows two macOS VMs per Mac, and 0 runs nothing.
+_need_vms() {
+	[[ ${VMS} =~ ^[12]$ ]] ||
+		_die "JB_RUNNER_VMS is ${VMS}; it must be 1 or 2 (Apple's licence allows two macOS VMs per Mac)"
 }
 
 _need_tart() {
@@ -469,10 +481,12 @@ cmd_image() {
 	_say "Done: ${IMAGE} is ready."
 }
 
-# One job: a fresh VM, an ephemeral runner, deleted whatever happens.
-_one_job() {
+# One job: a fresh VM, an ephemeral runner, deleted whatever happens. The
+# slot is in the name, so two slots started in the same second never share
+# a VM or a runner name.
+_one_job() { # SLOT
 	local vm token
-	vm="${PREFIX}-${HOST_TAG}-$(date +%s)"
+	vm="${PREFIX}-${HOST_TAG}-$1-$(date +%s)"
 	token="$(_registration_token)" || {
 		_log "could not mint a registration token"
 		return 1
@@ -531,47 +545,91 @@ _cleanup() {
 }
 
 _on_signal() { # EXIT_CODE
+	# Once: a second signal (launchd's, after the terminal's) must not cut
+	# the cleanup short.
+	trap '' TERM INT HUP
 	_log "signal; deleting ${CURRENT_VM:-no VM}"
 	_cleanup
 	exit "$1"
 }
 
+# A slot: its own loop, in its own subshell, so it has its own CURRENT_VM
+# and EXEC_PID, and its own traps to clean them up. One slot failing only
+# backs that slot off; the others keep taking jobs.
+_slot() { # SLOT
+	trap '_on_signal 143' TERM
+	trap '_on_signal 130' INT
+	trap '_on_signal 129' HUP
+	if [[ ${ONCE} -eq 1 ]]; then
+		_one_job "$1"
+		return
+	fi
+	local backoff=30
+	while :; do
+		if _one_job "$1"; then
+			backoff=30
+		else
+			_log "$1: retrying in ${backoff}s"
+			sleep "${backoff}" &
+			wait "$!" || :
+			backoff=$((backoff < 600 ? backoff * 2 : 600))
+		fi
+	done
+}
+
+# The loop's signal handler: stop every slot (each deletes its VM and
+# deregisters its runner), wait for them, then exit.
+SLOT_PIDS=()
+_stop_slots() { # EXIT_CODE
+	trap '' TERM INT HUP
+	_log "signal; stopping ${#SLOT_PIDS[@]} slot(s)"
+	local pid
+	for pid in "${SLOT_PIDS[@]+"${SLOT_PIDS[@]}"}"; do
+		kill -TERM "${pid}" 2>/dev/null || :
+	done
+	for pid in "${SLOT_PIDS[@]+"${SLOT_PIDS[@]}"}"; do
+		wait "${pid}" 2>/dev/null || :
+	done
+	exit "$1"
+}
+
 cmd_run() {
 	_need_safe_labels
+	_need_vms
 	_need_macos
 	_need_tart
 	if [[ ${DRY_RUN} -eq 1 ]]; then
-		_say "would loop: mint token for ${ORG}; clone ${IMAGE}; boot; run one job; delete"
+		_say "would loop in ${VMS} slot(s): mint token for ${ORG}; clone ${IMAGE}; boot; run one job; delete"
 		return 0
 	fi
 	_need_token
 	_lock
 	_vm_exists "${IMAGE}" || _die "no image ${IMAGE}; run: runner-host.sh image"
-	trap '_on_signal 143' TERM
-	trap '_on_signal 130' INT
-	trap '_on_signal 129' HUP
-	# A crash or reboot mid-job leaves a VM behind. Nothing else names VMs
-	# with this prefix, so any found at start are ours and stale.
+	trap '_stop_slots 143' TERM
+	trap '_stop_slots 130' INT
+	trap '_stop_slots 129' HUP
+	# A crash or reboot mid-job leaves a VM behind, in any slot. Nothing
+	# else names VMs with this prefix, and the lock says no other run is
+	# live, so any found at start are ours and stale.
 	local stale
 	for stale in $("${TART}" list --format json | jq -r --arg p "${PREFIX}-" '.[] | select(.Name | startswith($p)) | .Name'); do
 		_log "deleting stale ${stale}"
 		_vm_delete "${stale}"
 		_deregister "${stale}"
 	done
-	if [[ ${ONCE} -eq 1 ]]; then
-		_one_job
-		return
-	fi
-	local backoff=30
-	while :; do
-		if _one_job; then
-			backoff=30
-		else
-			_log "retrying in ${backoff}s"
-			sleep "${backoff}"
-			backoff=$((backoff < 600 ? backoff * 2 : 600))
-		fi
+	local i pid r rc=0
+	for ((i = 1; i <= VMS; i++)); do
+		_slot "s${i}" &
+		SLOT_PIDS+=("$!")
 	done
+	# Each slot loops forever; this returns only under --once, with the
+	# first failure among them. A signal interrupts the wait.
+	for pid in "${SLOT_PIDS[@]}"; do
+		r=0
+		wait "${pid}" || r=$?
+		[[ ${rc} -ne 0 ]] || rc=${r}
+	done
+	return "${rc}"
 }
 
 # The effective configuration, so the daemon runs what `install` was run
@@ -588,7 +646,7 @@ _plist_env() {
 	local k v
 	for k in ORG TOKEN_FILE BASE IMAGE RUNNER_VERSION RUNNER_SHA256 CPU MEMORY \
 		BREW LABELS PREFIX API BOOT_TIMEOUT TART HOST_TAG LOCK_DIR NET_BLOCK \
-		SOFTNET; do
+		SOFTNET VMS; do
 		v="$(_xml "${!k}")"
 		case "${k}" in
 		RUNNER_VERSION) k=VERSION ;;
@@ -635,6 +693,7 @@ cmd_install() {
 	# JB_RUNNER_EUID stands in for EUID in the tests, which cannot be root.
 	[[ ${JB_RUNNER_EUID:-${EUID}} -ne 0 ]] || _die "run install as the runner's user, not root; it calls sudo itself"
 	_need_safe_labels
+	_need_vms
 	_need_macos
 	_need_tart
 	_need_token
