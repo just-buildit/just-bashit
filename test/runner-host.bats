@@ -38,6 +38,9 @@ setup() {
 	export JB_RUNNER_BOOT_TIMEOUT=10
 	export JB_RUNNER_LOCK="${BATS_TEST_TMPDIR}/lock"
 	export JB_RUNNER_HOST_TAG=testhost
+	# The CI containers run as root, which install refuses. Stand in as a
+	# user; the refuse-root test sets 0.
+	export JB_RUNNER_EUID=4242
 
 	# A tart that keeps its VMs as files, so clone/delete/list agree.
 	cat >"${STUBS}/tart" <<-'EOF'
@@ -357,10 +360,14 @@ setup() {
 	assert_failure
 	assert_output --partial "${SBIN} is writable by group or other"
 	chmod 755 "${SBIN}"
-	# Owned by someone not trusted (here: this uid, once it is not).
-	JB_RUNNER_TRUSTED_UID=0 run runner-host.sh run --once
-	assert_failure
-	assert_output --partial "is owned by uid $(id -u), not root"
+	# Owned by someone not trusted (here: this uid, once it is not). Root
+	# owns every file under root, and root is always trusted, so this case
+	# runs where the tests are not root (the macOS leg, a workstation).
+	if [[ $(id -u) -ne 0 ]]; then
+		JB_RUNNER_TRUSTED_UID=0 run runner-host.sh run --once
+		assert_failure
+		assert_output --partial "is owned by uid $(id -u), not root"
+	fi
 	# A symlink: what it points at can change under it.
 	mv "${SBIN}/softnet" "${SBIN}/softnet.real"
 	ln -s softnet.real "${SBIN}/softnet"
