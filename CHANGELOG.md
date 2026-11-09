@@ -34,6 +34,14 @@
     `exit`, which would close the window, is refused before it runs.
     **Re-run the one-liner** (`irm https://just-buildit.github.io/get-jb.ps1 | iex`) to rewrite the profile block and get it.
 
+- **runner-host: two jobs at once (`JB_RUNNER_VMS`, default 2).** `run`
+    keeps one slot per VM, each with its own loop, VM, runner name and
+    registration token; one failing backs off only itself, and SIGTERM
+    stops every slot, each deleting its VM and deregistering its runner.
+    More than 2 is refused: Apple's licence allows two macOS VMs per Mac.
+    `JB_RUNNER_MEMORY` now defaults to 6144 MB, so two VMs leave the host
+    about 2 cores and 4 GB.
+
 - **`just-runit secret`: store, get and use secrets encrypted with gpg or
     age (#229).** `set`, `get`, `run`, `list`, `rm`, `migrate` and `rekey`,
     one implementation over both backends; the file's extension

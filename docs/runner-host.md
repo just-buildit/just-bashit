@@ -29,8 +29,14 @@ So each job gets a fresh VM:
     A failed job still deletes its VM. VMs left behind by a crash or reboot
     are deleted when `run` starts.
 
-One VM runs at a time, with 4 cores and 8 GB by default. That leaves the host
-usable, and stays within Apple's licence, which allows two macOS VMs per Mac.
+Two VMs run at once by default (`JB_RUNNER_VMS`), each with 4 cores and 6 GB.
+Apple's licence allows two macOS VMs per Mac, so `run` refuses more than 2.
+Two VMs leave a 10-core, 16 GB Mac about 2 cores and 4 GB of its own.
+
+Each VM is a slot with its own loop. It mints its own registration token,
+clones its own VM, and registers its own runner, with the same labels. One
+slot failing backs off only that slot. A SIGTERM stops every slot: each
+deletes its VM and deregisters its runner.
 
 ## The token
 
@@ -103,7 +109,8 @@ writes the values it was run with into the LaunchDaemon, so the daemon runs
 the configuration you tested. Run `install` as the runner's user, not under
 `sudo`: it calls `sudo` itself, and refuses to run as root.
 
-VM and runner names carry the host's short name (`jb-job-<host>-<time>`), so
+VM and runner names carry the host's short name and the slot
+(`jb-job-<host>-s1-<time>`), so
 two Macs registering to one org never replace each other's runners. `run` and
 `image` take a lock (`JB_RUNNER_LOCK`), so a manual `run --once` cannot sweep
 the daemon's live VM, and `image` cannot replace the image under a clone. A
