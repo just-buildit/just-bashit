@@ -38,6 +38,10 @@ source = "just-bashit:setup-system"
 # script is util-linux's everywhere but macOS, which ships its own; the
 # package that carries it differs per manager. MSYS2 has no msys age, so
 # its native ucrt64 build is the one installed.
+#
+# jq is for test/runner-host.bats: runner-host.sh parses the GitHub API and
+# `tart list` with it. Under CI a missing jq FAILS those tests. The Windows
+# leg skips them (runner-host is macOS-only), so msys2 does not install it.
 [dev.apt]
 packages = [
     "ca-certificates",
@@ -50,6 +54,7 @@ packages = [
     "gnupg",
     "age",
     "bsdextrautils",
+    "jq",
 ]
 
 [dev.pacman]
@@ -64,6 +69,7 @@ packages = [
     "gnupg",
     "age",
     "util-linux",
+    "jq",
 ]
 
 [dev.dnf]
@@ -78,6 +84,7 @@ packages = [
     "gnupg2",
     "age",
     "util-linux-script",
+    "jq",
 ]
 
 [dev.zypper]
@@ -92,6 +99,7 @@ packages = [
     "gpg2",
     "age",
     "util-linux",
+    "jq",
 ]
 
 [dev.apk]
@@ -108,11 +116,12 @@ packages = [
     "gnupg",
     "age",
     "util-linux-misc",
+    "jq",
 ]
 
 # macOS ships ssh-keygen in the base system, so brew has nothing to add.
 [dev.brew]
-packages = ["bash", "coreutils", "diffutils", "bats-core", "gnupg", "age"]
+packages = ["bash", "coreutils", "diffutils", "bats-core", "gnupg", "age", "jq"]
 
 [dev.msys2]
 packages = [

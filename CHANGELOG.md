@@ -13,6 +13,13 @@
     replace a file only once the new copy decrypts to the same bytes. `setup-system -s deps`
     now installs gpg and age.
 
+- **runner-host: host GitHub Actions jobs on a Mac, one throwaway Tart VM
+    per job (just-buildit.github.io#203).** `image` builds a clean image from
+    a digest-pinned macOS base, with a SHA-256-checked, pinned actions/runner.
+    `run` loops: it clones the image, registers an `--ephemeral` runner, runs
+    one job, and deletes the VM. `install` makes that a LaunchDaemon that runs
+    from boot. The PAT reaches curl only on stdin and never enters a VM.
+
 ### Fixed
 
 - **setup-system's ssh step keeps a Mac's key name and reaches GitHub
