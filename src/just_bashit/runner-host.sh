@@ -10,6 +10,9 @@
 # ############################################################################
 set -euo pipefail
 IFS=$'\n\t'
+# Bash 5.2+ reads `&` in a ${v//pat/rep} replacement as the match, which
+# turns _xml's "&lt;" into "<lt;". Off, so `&` is literal on every bash.
+shopt -u patsub_replacement 2>/dev/null || :
 
 _SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
