@@ -23,9 +23,10 @@ ______________________________________________________________________
 jbx setup-system      # jbx: applied to this shell: profile.sh bashrc.sh
 ```
 
-It runs the real `jbx` with `JB_CALLER_APPLIES=1` exported. When that run
-changed something a shell reads at startup, `setup-system` leaves a marker
-listing what to apply, one directive per line:
+It runs the real `jbx` with `JB_CALLER_APPLIES=1` and `JB_RELOAD_MARKER`
+(the marker's path) exported. When that run changed something a shell reads
+at startup, `setup-system` -- or any other script jbx ran -- appends to the
+marker what to apply, one directive per line:
 
 | Directive      | Applied as                                                |
 | -------------- | --------------------------------------------------------- |
@@ -33,27 +34,51 @@ listing what to apply, one directive per line:
 | `bashrc FILE`  | sourced when the shell is bash (`bashrc.sh` is bash-only) |
 | `path DIR`     | put first on `PATH`, once                                 |
 
-Only just-bashit's own files are named. They are written to be sourced
-again: `PATH` entries are added once, and a live ssh-agent is adopted rather
-than a second one started. Your own `~/.profile` is never re-run, because
-Debian's stock one prepends `~/bin` with no check.
+`profile` and `bashrc` name only just-bashit's own files. They are written
+to be sourced again: `PATH` entries are added once, and a live ssh-agent is
+adopted rather than a second one started. Your own `~/.profile` is never
+re-run, because Debian's stock one prepends `~/bin` with no check.
 
-The function returns the run's own exit status, and removes the marker.
+The function removes any marker before the call (so one an interrupted run
+left is never applied), makes its directory, and after the call applies it,
+removes it and returns the run's own exit status.
 
-A run started any other way (`bash setup-system.sh`, a script) exports no
-`JB_CALLER_APPLIES`, leaves no marker, and keeps the "open a new shell" hint
-with its reasons. So a stale marker is never applied to some later shell.
+A run started any other way (`bash setup-system.sh`, a script) has neither
+variable, leaves no marker, and keeps the "open a new shell" hint with its
+reasons.
 
-PowerShell's `jbx` function (from `get-jb.ps1`) cannot source anything into
-PowerShell, so it does not take part in this handshake. It exports
-`JB_CALLER=pwsh` instead, and `setup-system` gives it advice that fits a
-PowerShell window ([closing advice](../setup-system.md#the-closing-advice)).
+### From your own script
+
+Any script `jbx` runs can put a directory on the caller's `PATH` the same
+way. Write `path` lines only, append rather than overwrite, and only when the
+variable is set:
+
+```bash
+if [ -n "${JB_RELOAD_MARKER:-}" ]; then
+	printf 'path %s\n' "${HOME}/.local/bin" >>"${JB_RELOAD_MARKER}"
+else
+	echo "open a new shell to use it"
+fi
+```
+
+[`update-path`](../just-runit.md#update-path) does exactly this.
+
+### From PowerShell
+
+PowerShell's `jbx` function (from `get-jb.ps1`) sets both variables too, with
+a temp file of its own as the marker. Once bash exits it puts each `path` line
+on `$env:PATH`, translated by `cygpath -w` into a Windows path; `profile` and
+`bashrc` lines are bash's and are ignored. It also exports `JB_CALLER=pwsh`,
+and `setup-system` gives it advice that fits a PowerShell window
+([closing advice](../setup-system.md#the-closing-advice)). A PowerShell script
+jbx runs in the session sets `$env:PATH` itself.
 
 ## jb_reload_marker
 
 Print the marker's path:
-`${XDG_STATE_HOME:-$HOME/.local/state}/just-bashit/reload`. Both sides of
-the handshake call it: `setup-system` to write the marker, `jbx` to read it.
+`${XDG_STATE_HOME:-$HOME/.local/state}/just-bashit/reload`. The one
+derivation: the `jbx` function exports it as `JB_RELOAD_MARKER`, which every
+writer uses.
 
 ## Where it is installed
 
