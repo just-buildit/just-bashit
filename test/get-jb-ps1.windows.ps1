@@ -21,7 +21,12 @@
         fails naming the skipped one (#202);
       - a new session that loads the profile has jbx;
       - with HOME pointed at a stub jbx, every argument arrives as typed
-        (spaces, `*`, quotes, empty) and no JB_PS_ variable outlives a call.
+        (spaces, `*`, quotes, empty) and no JB_PS_ variable outlives a call;
+      - with HOME pointed at this checkout's just-runit and a curl stub
+        serving a namespace, `jbx NS:NAME` runs NAME.ps1 in this session
+        (what it sets persists, its arguments arrive as typed), a NAME with
+        only NAME.sh still runs in bash, and a .ps1 that throws or calls
+        exit is one error naming it.
 
     Every failure throws, so the step fails naming the check.
 #>
@@ -130,6 +135,87 @@ Assert-That ($rc -eq 5) "the stub's exit status reaches `$LASTEXITCODE (got $rc)
 Assert-That ($first[0] -eq '[show][a b][*][it''s]["q"][][C:\x y] n=7') "every argument arrives as typed (got $($first[0]))"
 Assert-That ($second[1] -eq 'leaked=0') "no JB_PS_ variable outlives its call (got $($second[1]))"
 Assert-That ($third[0] -eq '[-s][sshd,git][-x][a,b,c] n=4') "an unquoted a,b arrives as one argument a,b (got $($third[0]))"
+
+# A PowerShell script jbx resolves runs in THIS session: an installer that
+# puts a tool on PATH must change the caller, which bash cannot. The jbx
+# installed above is the published one, so a second fake HOME holds this
+# checkout's just-runit as jbx and just-runit, beside a curl stub that serves
+# a namespace from fixtures: jbx fetches over https only, from fixed
+# namespace bases, so a stub is how a local site is served.
+$home2 = Join-Path $work 'home2'
+$bin2 = Join-Path $home2 '.local\bin'
+$fx = Join-Path $work 'fx'
+$base = Join-Path $fx 'just-buildit.github.io\just-makeit'
+New-Item -ItemType Directory -Path $bin2, $base | Out-Null
+$lf = New-Object System.Text.UTF8Encoding($false)
+function Write-Lf {
+    param([string]$Path, [string]$Text)
+    [IO.File]::WriteAllText($Path, ($Text -replace "`r`n", "`n"), $lf)
+}
+$runit = [IO.File]::ReadAllText((Join-Path $root 'src\just_bashit\just-runit'))
+foreach ($n in 'jbx', 'just-runit') { Write-Lf (Join-Path $bin2 $n) $runit }
+Write-Lf (Join-Path $bin2 'curl') @'
+#!/usr/bin/env bash
+dest="" url="" head=0
+while [[ $# -gt 0 ]]; do
+	case "${1}" in
+	-o) dest="${2}"; shift 2; continue ;;
+	--head) head=1 ;;
+	-V) echo "curl stub"; exit 0 ;;
+	https://*) url="${1}" ;;
+	esac
+	shift
+done
+[[ -n ${url} ]] || exit 0
+f="${JB_T_FX}/${url#https://}"
+if [[ ${head} -eq 1 ]]; then
+	[[ -f ${f} ]] && printf 200 || printf 404
+	exit 0
+fi
+[[ -f ${f} ]] || exit 22
+cp "${f}" "${dest}"
+'@
+Write-Lf (Join-Path $base 'aliases.toml') "[aliases]`n"
+Write-Lf (Join-Path $base 'tool.ps1') @'
+param([string]$Name, [switch]$Flag)
+$env:JB_T = "ran:${Name}:$Flag"
+$global:JbTArgs = @($args | ForEach-Object {
+        if ($_ -is [array]) { '(' + ($_ -join ',') + ')' } else { "[$_]" } })
+$env:PATH = 'C:\jb-t-bin' + [IO.Path]::PathSeparator + $env:PATH
+'@
+Write-Lf (Join-Path $base 'shonly.sh') 't() { echo "bash ran [$*] caller=${JB_CALLER-}"; }'
+Write-Lf (Join-Path $base 'boom.ps1') "throw 'boom'"
+Write-Lf (Join-Path $base 'quits.ps1') '$global:JbRan = 1; exit 3'
+$savedHome = $env:HOME
+$env:HOME = $home2
+$env:JB_T_FX = $fx -replace '\\', '/'
+$boom = ''
+$quits = ''
+try {
+    jbx just-makeit:tool -Name 'a b' -Flag x,y '' '*'
+    $rcTool = $LASTEXITCODE
+    $sh = jbx just-makeit:shonly t 'q r'
+    $rcSh = $LASTEXITCODE
+    try { jbx just-makeit:boom } catch { $boom = "$_" }
+    $rcBoom = $LASTEXITCODE
+    try { jbx just-makeit:quits } catch { $quits = "$_" }
+} finally {
+    if ($null -eq $savedHome) { Remove-Item Env:HOME } else { $env:HOME = $savedHome }
+    Remove-Item Env:JB_T_FX
+}
+$ns = 'https://just-buildit.github.io/just-makeit'
+Assert-That ($rcTool -eq 0) "a namespace .ps1 run by jbx leaves `$LASTEXITCODE 0 (got $rcTool)"
+Assert-That ($env:JB_T -eq 'ran:a b:True') "the .ps1 ran in this session, -Name and -Flag bound (got '$env:JB_T')"
+$tArgs = (Get-Variable -Scope Global -Name JbTArgs -ValueOnly) -join '|'
+Assert-That ($tArgs -eq '(x,y)|[]|[*]') "the rest arrive as typed, an array an array (got '$tArgs')"
+Assert-That (@($env:PATH -split ';') -contains 'C:\jb-t-bin') 'the PATH entry the .ps1 added is on this session''s PATH'
+Assert-That (-not (Test-Path Env:JB_PS1_OUT)) 'JB_PS1_OUT does not outlive the call'
+Assert-That ($rcSh -eq 0 -and "$sh" -eq 'bash ran [q r] caller=pwsh') "a name with only NAME.sh still runs in bash (got '$sh', rc $rcSh)"
+Assert-That ($boom -eq "jbx: $ns/boom.ps1 failed: boom" -and $rcBoom -eq 1) "a .ps1 that throws is one error naming it, rc 1 (got '$boom', rc $rcBoom)"
+Assert-That ($quits -like "jbx: $ns/quits.ps1 calls exit*") "a .ps1 that calls exit is refused before it runs (got '$quits')"
+Assert-That (-not (Test-Path Variable:global:JbRan)) 'the refused .ps1 did not run'
+$env:PATH = (@($env:PATH -split ';') | Where-Object { $_ -ne 'C:\jb-t-bin' }) -join ';'
+Remove-Item Env:JB_T
 
 Remove-Item -Recurse -Force -LiteralPath $work
 Write-Information "=== get-jb.ps1 passed on $($PSVersionTable.PSEdition)"

@@ -66,6 +66,12 @@
     is told to open a new PowerShell window only when an install put a
     directory on the Windows PATH that this window predates (#179).
 
+    PowerShell scripts. A script run in bash cannot change this session, so
+    when jbx resolves a call to a PowerShell script ([aliases.ps1], then
+    NAME.ps1), it hands the script back through JB_PS1_OUT and the function
+    runs it here, dot-sourced, with the arguments as typed. jbx still does
+    all the resolving and fetching; see Get-JbProfileBlock.
+
     Environment:
       JB_PS_PROFILE   the profile file(s) to write, separated like PATH
                       (default: both editions')
@@ -325,7 +331,8 @@ function Get-JbProfileBlock {
     <#
     .SYNOPSIS
         The lines between the markers: jbx and just-runit as functions that
-        forward to bash.
+        forward to bash, and run a PowerShell script jbx resolves in the
+        session itself.
     .DESCRIPTION
         One body, stamped out per name. `global:` so the same text defines
         them in this session (from inside a function) and in a profile.
@@ -340,45 +347,94 @@ function Get-JbProfileBlock {
         console and break every prompt; JB_CALLER=pwsh tells what runs that
         it was called from PowerShell, so setup-system's closing advice is
         "open a new PowerShell window" and never `exec bash -l` (#179); and
-        every variable is put back as it was, even on Ctrl-C. A variable that was absent is REMOVED, not set
-        to $null: pwsh 7 keeps a variable set that way, empty, and the next
-        call would hand bash the previous call's extra arguments. A native call sets $LASTEXITCODE, so jbx's exit
-        status is there to read afterwards.
+        every variable is put back as it was, even on Ctrl-C. A variable that
+        was absent is REMOVED, not set to $null: pwsh 7 keeps a variable set
+        that way, empty, and the next call would hand bash the previous
+        call's extra arguments. A native call sets $LASTEXITCODE, so jbx's
+        exit status is there to read afterwards.
+
+        PowerShell scripts. A script run in bash cannot change this session,
+        so an installer that must put a tool on its PATH cannot run there.
+        JB_PS1_OUT names a temp file: when jbx resolves SPEC to a PowerShell
+        script (just-runit's "PowerShell scripts" says how), it caches and
+        checks it as any script, writes it there and exits 0 instead of
+        running it. The file holds how many arguments follow SPEC, the URL,
+        then the script. The function then runs it, dot-sourced, with those
+        arguments exactly as typed (taken from $args, so an array stays an
+        array and -Name value binds by name): what it sets in $env: -- PATH
+        included -- or with global: stays in the session. Resolution is
+        bash's alone; this side only reads the file.
+
+        Before it runs, the script is parsed: a parse error, or an `exit`
+        anywhere in it, is refused naming the URL. `exit` in a script block
+        ends the whole session, not the script, so a script for jbx must be
+        safe to `iex` -- it throws on failure, as get-jb.ps1 does. A throw is
+        one error naming the URL, with $LASTEXITCODE 1; otherwise
+        $LASTEXITCODE is 0, or what the script's last native command left.
     #>
     param([Parameter(Mandatory)][string]$Bash, [Parameter(Mandatory)][string]$Driver)
     $b = $Bash -replace "'", "''"
     $d = $Driver -replace "'", "''"
+    $body = @'
+function global:__NAME__ {
+    $jbOut = [IO.Path]::GetTempFileName()
+    $set = @{ JB_PS_NAME = '__NAME__'; JB_PS_ARGC = [string]$args.Count; JB_CALLER = 'pwsh'
+        JB_PS1_OUT = $jbOut -replace '\\', '/'
+        MSYS = ((([string]$env:MSYS) + ' noglob').Trim()) }
+    for ($i = 0; $i -lt $args.Count; $i++) {
+        $v = $args[$i]
+        if ($v -is [array]) { $v = $v -join ',' }
+        $set["JB_PS_ARG$($i + 1)"] = [string]$v
+    }
+    $saved = @{}
+    foreach ($k in $set.Keys) {
+        $saved[$k] = [Environment]::GetEnvironmentVariable($k)
+        [Environment]::SetEnvironmentVariable($k, $set[$k])
+    }
+    $jbText = ''
+    try {
+        if ($MyInvocation.ExpectingInput) { $input | & '__BASH__' -l '__DRIVER__' }
+        else { & '__BASH__' -l '__DRIVER__' }
+    } finally {
+        foreach ($k in $saved.Keys) {
+            if ($null -eq $saved[$k]) { Remove-Item -LiteralPath "Env:$k" -ErrorAction SilentlyContinue }
+            else { Set-Item -LiteralPath "Env:$k" -Value $saved[$k] }
+        }
+        if ($LASTEXITCODE -eq 0) { $jbText = [IO.File]::ReadAllText($jbOut) }
+        Remove-Item -LiteralPath $jbOut -ErrorAction SilentlyContinue
+    }
+    if (-not $jbText) { return }
+    $jbHead = $jbText.Split([char[]]@([char]10), 3)
+    $jbUrl = $jbHead[1]
+    $jbBody = $jbHead[2].TrimStart([char]0xFEFF)
+    $jbN = [int]$jbHead[0]
+    $jbArgs = @()
+    if ($jbN -eq 1) { $jbArgs = , $args[$args.Count - 1] }
+    elseif ($jbN -gt 1) { $jbArgs = $args[($args.Count - $jbN)..($args.Count - 1)] }
+    $jbErrors = $null
+    $jbAst = [Management.Automation.Language.Parser]::ParseInput($jbBody, [ref]$null, [ref]$jbErrors)
+    $global:LASTEXITCODE = 1
+    if ($jbErrors.Count -gt 0) { throw "__NAME__: $jbUrl does not parse: $($jbErrors[0])" }
+    if ($jbAst.Find({ param($a) $a -is [Management.Automation.Language.ExitStatementAst] }, $true)) {
+        throw ("__NAME__: $jbUrl calls exit, which would end this PowerShell session; " +
+            'a script jbx runs in the session must throw instead')
+    }
+    $global:LASTEXITCODE = 0
+    try { . ([scriptblock]::Create($jbBody)) @jbArgs }
+    catch {
+        $global:LASTEXITCODE = 1
+        throw "__NAME__: $jbUrl failed: $_"
+    }
+}
+'@
     $lines = @(
         '# jbx runs in Git for Windows'' bash, which you never have to open.'
         '# Written by get-jb.ps1 (https://just-buildit.github.io/get-jb.ps1);'
         '# re-run it to refresh this block, or delete the block to remove jbx.'
     )
     foreach ($name in 'jbx', 'just-runit') {
-        $lines += @(
-            "function global:$name {"
-            "    `$set = @{ JB_PS_NAME = '$name'; JB_PS_ARGC = [string]`$args.Count; JB_CALLER = 'pwsh'"
-            "        MSYS = ((([string]`$env:MSYS) + ' noglob').Trim()) }"
-            "    for (`$i = 0; `$i -lt `$args.Count; `$i++) {"
-            "        `$v = `$args[`$i]"
-            "        if (`$v -is [array]) { `$v = `$v -join ',' }"
-            "        `$set[""JB_PS_ARG`$(`$i + 1)""] = [string]`$v"
-            "    }"
-            "    `$saved = @{}"
-            "    foreach (`$k in `$set.Keys) {"
-            "        `$saved[`$k] = [Environment]::GetEnvironmentVariable(`$k)"
-            "        [Environment]::SetEnvironmentVariable(`$k, `$set[`$k])"
-            "    }"
-            "    try {"
-            "        if (`$MyInvocation.ExpectingInput) { `$input | & '$b' -l '$d' }"
-            "        else { & '$b' -l '$d' }"
-            "    } finally {"
-            "        foreach (`$k in `$saved.Keys) {"
-            "            if (`$null -eq `$saved[`$k]) { Remove-Item -LiteralPath ""Env:`$k"" -ErrorAction SilentlyContinue }"
-            "            else { Set-Item -LiteralPath ""Env:`$k"" -Value `$saved[`$k] }"
-            "        }"
-            "    }"
-            "}"
-        )
+        $lines += @(($body.Replace('__NAME__', $name).Replace('__BASH__', $b).Replace(
+                    '__DRIVER__', $d)) -split "`r?`n")
     }
     , $lines
 }

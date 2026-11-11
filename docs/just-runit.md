@@ -112,6 +112,61 @@ it, so it ends by telling you to open a new PowerShell window when an install
 changed the Windows `PATH`, never to `exec bash -l`
 ([closing advice](setup-system.md#the-closing-advice)).
 
+#### PowerShell scripts
+
+A script run in bash cannot change the PowerShell session that called it, so
+an installer that has to put a tool on your `PATH` cannot work through bash.
+So when a namespace serves a PowerShell script, `jbx` in PowerShell runs
+**that**, in your session:
+
+```powershell
+jbx just-makeit:install      # install.ps1, in this session
+```
+
+The same command in bash runs `install.sh`, exactly as before. From
+PowerShell, `NS:NAME` (and a bare `NAME`) resolves in this order:
+
+1. `NAME` in the `[aliases.ps1]` table of the namespace's `aliases.toml`;
+1. a probe of `NS_BASE/NAME.ps1`;
+1. the bash resolution below — `[aliases]`, `NAME.sh`, `NAME.py` — run in
+    bash as before.
+
+A URL form (`https://…`, `gh:…`, a repository URL) is run this way when it
+resolves to a URL ending in `.ps1`. `just-bashit:NAME` is a bash library and
+never is.
+
+`[aliases.ps1]` is a table of its own, rather than a `.ps1` URL in
+`[aliases]`, because one name serves both shells:
+
+```toml
+[aliases]
+install = "https://example.org/tools/install.sh"
+
+[aliases.ps1]
+install = "https://example.org/tools/install.ps1"
+```
+
+A jbx that predates it skips the table, as it skips any table but `[aliases]`.
+
+Resolution is jbx's own, in bash: the function hands it the call, and jbx
+resolves, fetches and caches the `.ps1` as any script — the same cache, TTL,
+`-r`, `-n`, `-t` and `-k` — then hands it back instead of running it. The
+function runs it dot-sourced, with every argument after `SPEC` as you typed
+it: an unquoted `a,b` stays an array and `-Name value` binds by name. What
+it sets in `$env:` — `PATH` included — or with `global:` stays in your
+session; its plain variables do not leak. `-l`, `-f` and `-c` keep the bash
+resolution, since they list, fetch or run in a fresh process.
+
+Before it runs, the script is parsed. A parse error, or an `exit` anywhere in
+it, is refused naming the URL: `exit` there would close your PowerShell
+window, not end the script. A script for jbx must be safe to `irm | iex` in
+the same way — it throws on failure. A throw is one error naming the URL,
+with `$LASTEXITCODE` 1; otherwise `$LASTEXITCODE` is 0, or what the script's
+last native command left.
+
+The function that does this is in the profile block. A block written before
+it forwards every call to bash: re-run the one-liner to rewrite it.
+
 !!! warning "Windows PowerShell 5.1 and the execution policy"
 
     5.1 runs a profile only when the execution policy allows scripts, and a
@@ -155,6 +210,11 @@ ______________________________________________________________________
 1. Look up `NAME` in the namespace's `aliases.toml` (cached)
 1. Probe `NS_BASE/NAME.sh` then `NS_BASE/NAME.py`
 1. Error if neither resolves
+
+From PowerShell (the `jbx` function `get-jb.ps1` writes), a PowerShell script
+comes first: `NAME` in the `[aliases.ps1]` table of the same `aliases.toml`,
+then a probe of `NS_BASE/NAME.ps1`, and only then the order above. See
+[PowerShell scripts](#powershell-scripts).
 
 ```bash
 # Default namespace (just-buildit.github.io)
