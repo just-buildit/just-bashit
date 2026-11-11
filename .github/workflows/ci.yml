@@ -69,7 +69,7 @@ jobs:
 
       - name: Bootstrap checkout prerequisites (arch)
         if: matrix.distro == 'arch'
-        run: pacman -Sy --noconfirm --needed git
+        run: pacman -Syu --noconfirm --needed git
 
       - name: Bootstrap checkout prerequisites (fedora)
         if: matrix.distro == 'fedora'

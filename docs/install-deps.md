@@ -388,14 +388,14 @@ ______________________________________________________________________
 
 ```bash
 jbx install-deps --dry-run
-# sudo pacman -Sy --needed --noconfirm zeromq fftw
-# sudo pacman -Sy --needed --noconfirm base-devel cmake python
+# sudo pacman -Syu --needed --noconfirm zeromq fftw
+# sudo pacman -Syu --needed --noconfirm base-devel cmake python
 
 jbx install-deps --dry-run -g runtime
-# sudo pacman -Sy --needed --noconfirm zeromq fftw
+# sudo pacman -Syu --needed --noconfirm zeromq fftw
 
 jbx install-deps --dry-run --no-sudo -g runtime
-# pacman -Sy --needed --noconfirm zeromq fftw
+# pacman -Syu --needed --noconfirm zeromq fftw
 ```
 
 ### Verbose output
@@ -405,9 +405,9 @@ jbx install-deps --dry-run --verbose
 # section:  pacman
 # groups:   runtime,dev
 # packages: zeromq fftw
-# sudo pacman -Sy --needed --noconfirm zeromq fftw
+# sudo pacman -Syu --needed --noconfirm zeromq fftw
 # packages: base-devel cmake python
-# sudo pacman -Sy --needed --noconfirm base-devel cmake python
+# sudo pacman -Syu --needed --noconfirm base-devel cmake python
 ```
 
 ### Override the detected package manager
