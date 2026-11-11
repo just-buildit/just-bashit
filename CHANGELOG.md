@@ -4,6 +4,23 @@
 
 ### Added
 
+- **`jbx update-path`: `~/.local/bin` on PATH in every shell you have.**
+    It writes a marked, idempotent block to `~/.bashrc`, and to `~/.zshrc`
+    when there is a zsh (always on macOS, whose login shell never read the
+    `~/.bashrc` line get-jb.sh wrote). On Windows it appends the directory to
+    your user `Path` in the registry, once, keeping the other entries and
+    their `%VARS%` as they were. A file that already puts the directory on
+    PATH is left alone. It prints what it wrote, where. get-jb.sh's own PATH
+    step now runs it, so there is one implementation.
+
+- **Any script jbx runs can put a directory on the caller's PATH.** The
+    `jbx` function now exports `JB_RELOAD_MARKER`, the reload marker's path;
+    a script appends `path DIR` lines to it and the function applies them
+    to the shell that ran it, as it did for setup-system alone. PowerShell's
+    `jbx` function takes part too: it applies the `path` lines to
+    `$env:PATH`. **Re-run the one-liner** (`get-jb.sh` or `get-jb.ps1`) to
+    get the new function.
+
 - **`jbx` in PowerShell runs a namespace's PowerShell script in your
     session.** A script run in bash cannot change the PowerShell session
     that called it, so an installer that puts a tool on `PATH` could not

@@ -35,10 +35,15 @@ It uses [`install-uv`](libraries/pkg.md#install-uv), so on Windows that
 means winget and the machine's native build, even from an emulated x64 Git
 Bash on ARM64. The directory uv lands in goes on your PATH right away.
 
+For every later shell it runs [`update-path`](#update-path), which adds
+`~/.local/bin` to `~/.bashrc`, to `~/.zshrc` when you have zsh, and on
+Windows to your user `Path`.
+
 !!! warning "Use at your own risk"
 
     This script is provided as-is, without warranty of any kind. It writes
-    to `~/.local/bin` and may modify `~/.bashrc`. The tool it installs
+    to `~/.local/bin` and may modify `~/.bashrc`, `~/.zshrc` and, on
+    Windows, your user `Path`. The tool it installs
     runs arbitrary remote code with no safety guarantees — you are solely
     responsible for what you choose to run with it. Review the source before
     running: [get-jb.sh](https://just-buildit.github.io/get-jb.sh)
@@ -54,6 +59,50 @@ To force reinstall even when already at the current version:
 ```bash
 JB_REINSTALL=1 . <(curl -sSL https://just-buildit.github.io/get-jb.sh)
 ```
+
+### update-path
+
+```bash
+jbx update-path
+```
+
+Puts `~/.local/bin` on `PATH` for good, in every shell you have: where jbx
+lives, and where tools such as just-makeit's `jm`, uv and pipx link their
+commands. Installers that put a command there point you at it.
+
+| Shell   | Written to                                                                  |
+| ------- | --------------------------------------------------------------------------- |
+| bash    | `~/.bashrc`                                                                 |
+| zsh     | `~/.zshrc`, when zsh is installed or the file exists, and always on macOS   |
+| Windows | your user `Path` in the registry (from Git Bash, and from PowerShell's jbx) |
+
+An rc file that already has an uncommented line naming `.local/bin`, or
+sources just-bashit's own `bashrc.sh` or `profile.sh` (which put it there), is
+left exactly as it is. Otherwise a marked block is appended:
+
+```bash
+# >>> just-bashit update-path >>>
+case ":${PATH}:" in *":${HOME}/.local/bin:"*) ;; *) export PATH="${HOME}/.local/bin:${PATH}" ;; esac
+# <<< just-bashit update-path <<<
+```
+
+The Windows directory is appended only when no entry of the user `Path`
+already expands to it; the other entries, unexpanded `%VARS%` included, and
+the value's type are kept. A re-run changes nothing anywhere. Each place gets
+one line saying what was written, or why nothing was:
+
+```text
+update-path: ~/.bashrc: appended
+update-path: ~/.zshrc: line 12 already covers it -- unchanged
+update-path: Windows user Path: appended C:\Users\me\.local\bin (new windows see it)
+update-path: this shell: jbx puts ~/.local/bin on PATH when this exits
+```
+
+Run through the `jbx` function -- [jbx-shell](libraries/jbx-shell.md) in
+bash, and `get-jb.ps1`'s in PowerShell -- the shell you ran it in gets the
+directory at once, through the reload marker. The script is
+`update-path.sh`: the bare name `update-path` is the default namespace's
+alias for it, and `jbx just-bashit:update-path` names it directly.
 
 ### From PowerShell (Windows)
 
