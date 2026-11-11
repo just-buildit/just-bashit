@@ -85,9 +85,22 @@ setup_suite() {
 	# runner makes -- so a test reached the network only in CI, and wrote to
 	# the user's home locally. Every run starts cold, here.
 	export XDG_CACHE_HOME="${BATS_SUITE_TMPDIR}/cache"
+	# update-path.sh writes the Windows USER Path, which on the Windows
+	# runner is real. Every run writes a scratch key instead, which
+	# teardown_suite deletes; off Windows nothing reads it.
+	JB_WIN_ENV_KEY="HKCU:\\Software\\just-bashit-test\\bats-${RANDOM}${RANDOM}"
+	export JB_WIN_ENV_KEY
 }
 
 teardown_suite() {
+	case "$(uname -s)" in
+	MINGW* | MSYS* | CYGWIN*)
+		# shellcheck disable=SC2016  # PowerShell's $
+		JB_UP_KEY="${JB_WIN_ENV_KEY}" powershell.exe -NoProfile -NonInteractive \
+			-Command 'Remove-Item -LiteralPath $env:JB_UP_KEY -Recurse -ErrorAction SilentlyContinue' \
+			2>/dev/null || true
+		;;
+	esac
 	[[ -s ${JB_EGRESS_LOG} ]] || return 0
 	echo "A test reached for the network (just-bashit#147). Answer it from a" \
 		"shim first on PATH, as network.bats and _serve_fixtures do:" >&2

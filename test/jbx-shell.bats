@@ -141,3 +141,42 @@ _run_in() {
 	[[ -n ${a} ]]
 	assert_equal "${b}" "${a}"
 }
+
+# Any script jbx runs, not only setup-system, can put a directory on the
+# calling shell's PATH: the function exports the marker's path, and the
+# script appends a `path` line to it -- the third-party half of the
+# handshake. The stub is such a script: it knows nothing of
+# jb_reload_marker, only the variable.
+@test 'a script that appends path DIR to JB_RELOAD_MARKER reaches the calling shell' {
+	cat >"${STUBDIR}/jbx" <<-'EOF'
+		#!/bin/sh
+		[ -n "${JB_RELOAD_MARKER:-}" ] || exit 9
+		echo "path ${NEWDIR}" >>"${JB_RELOAD_MARKER}"
+	EOF
+	local s n=0
+	for s in $(_shells); do
+		_run_in "${s}"
+		assert_success
+		assert_output --partial "rc=0"
+		assert_output --partial "path=yes"
+		assert_output --partial "marker=gone"
+		n=$((n + 1))
+	done
+	[[ ${n} -ge 1 ]]
+}
+
+# The function clears the marker before the call: a marker some earlier,
+# interrupted run left is never applied to this one.
+@test 'a stale marker is not applied by the next jbx call' {
+	printf '#!/bin/sh\nexit 0\n' >"${STUBDIR}/jbx"
+	local s m
+	m="${XDG_STATE_HOME}/just-bashit/reload"
+	for s in $(_shells); do
+		mkdir -p "${m%/*}"
+		printf 'path %s\n' "${NEWDIR}" >"${m}"
+		_run_in "${s}"
+		assert_success
+		assert_output --partial "path=no"
+		refute_output --partial "applied to this shell"
+	done
+}

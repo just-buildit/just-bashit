@@ -26,7 +26,13 @@
         serving a namespace, `jbx NS:NAME` runs NAME.ps1 in this session
         (what it sets persists, its arguments arrive as typed), a NAME with
         only NAME.sh still runs in bash, and a .ps1 that throws or calls
-        exit is one error naming it.
+        exit is one error naming it;
+      - `jbx just-bashit:update-path` appends the directory to the user
+        Path once (a scratch HKCU key, JB_WIN_ENV_KEY, never the real one),
+        keeping the other entries unexpanded and the value's type, writes
+        ~/.bashrc once, and puts the directory on this session's PATH; the
+        same script run from Git Bash finds it there; and a `path` line any
+        bash script appends to JB_RELOAD_MARKER reaches this session's PATH.
 
     Every failure throws, so the step fails naming the check.
 #>
@@ -216,6 +222,62 @@ Assert-That ($quits -like "jbx: $ns/quits.ps1 calls exit*") "a .ps1 that calls e
 Assert-That (-not (Test-Path Variable:global:JbRan)) 'the refused .ps1 did not run'
 $env:PATH = (@($env:PATH -split ';') | Where-Object { $_ -ne 'C:\jb-t-bin' }) -join ';'
 Remove-Item Env:JB_T
+
+# update-path and the reload marker, from both sides. The user Path it
+# writes is a scratch HKCU key (JB_WIN_ENV_KEY), never the real one, seeded
+# with an unexpanded %VAR% entry that must survive. This checkout's scripts
+# are served as the jbs co-fetch bundle, so `jbx just-bashit:update-path`
+# runs the update-path.sh under test.
+$jbs = Join-Path $fx 'just-buildit.github.io\jbs'
+New-Item -ItemType Directory -Path $jbs | Out-Null
+foreach ($f in Get-ChildItem -LiteralPath (Join-Path $root 'src\just_bashit') -Filter '*.sh') {
+    Write-Lf (Join-Path $jbs $f.Name) ([IO.File]::ReadAllText($f.FullName))
+}
+Write-Lf (Join-Path $base 'marks.sh') 't() { echo "path ${HOME}/marked" >>"${JB_RELOAD_MARKER}"; }'
+$regKey = 'HKCU:\Software\just-bashit-test\getjb-' + [guid]::NewGuid().ToString('N')
+New-Item -Path $regKey -Force | Out-Null
+New-ItemProperty -LiteralPath $regKey -Name Path -Value '%SystemRoot%\jb-keep;C:\jb-other' -PropertyType ExpandString | Out-Null
+$want = Join-Path $home2 '.local\bin'
+$savedPath = $env:PATH
+$env:HOME = $home2
+$env:JB_T_FX = $fx -replace '\\', '/'
+$env:JB_WIN_ENV_KEY = $regKey
+$env:JB_T_UP = (Join-Path $root 'src\just_bashit\update-path.sh') -replace '\\', '/'
+try {
+    $up1 = jbx just-bashit:update-path
+    $rcUp1 = $LASTEXITCODE
+    $pathAfter1 = $env:PATH
+    $up2 = jbx just-bashit:update-path
+    $rcUp2 = $LASTEXITCODE
+    $env:PATH = $savedPath
+    jbx just-makeit:marks t
+    $marked = $env:PATH
+    $env:PATH = $savedPath
+    # From Git Bash itself, not through PowerShell's jbx: the same script.
+    $up3 = & $gitBash -l -c 'bash "$JB_T_UP"'
+    $rcUp3 = $LASTEXITCODE
+    $k = Get-Item -LiteralPath $regKey
+    $raw = $k.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+    $kind = [string]$k.GetValueKind('Path')
+} finally {
+    $env:PATH = $savedPath
+    if ($null -eq $savedHome) { Remove-Item Env:HOME } else { $env:HOME = $savedHome }
+    Remove-Item Env:JB_T_FX, Env:JB_WIN_ENV_KEY, Env:JB_T_UP
+    Remove-Item -LiteralPath $regKey -Recurse -Force
+}
+Write-Information "    update-path: $($up1 -join ' / ')"
+Write-Information "    re-run:      $($up2 -join ' / ')"
+Write-Information "    Git Bash:    $($up3 -join ' / ')"
+Assert-That ($rcUp1 -eq 0 -and $rcUp2 -eq 0 -and $rcUp3 -eq 0) "update-path exits 0 every time (got $rcUp1, $rcUp2, $rcUp3)"
+Assert-That ($raw -eq "%SystemRoot%\jb-keep;C:\jb-other;$want") "the user Path gains the directory once, the rest unexpanded (got '$raw')"
+Assert-That ($kind -eq 'ExpandString') "the user Path keeps its REG_EXPAND_SZ type (got $kind)"
+Assert-That (@($up1) -contains "update-path: Windows user Path: appended $want (new windows see it)") 'the first run says it appended the directory'
+Assert-That (@($up2) -contains "update-path: Windows user Path: already has $want -- unchanged") 'a re-run says it changed nothing'
+Assert-That (@($up3) -contains "update-path: Windows user Path: already has $want -- unchanged") 'from Git Bash, the same script finds it there'
+$rc = [IO.File]::ReadAllText((Join-Path $home2 '.bashrc'))
+Assert-That (([regex]::Matches($rc, '# >>> just-bashit update-path >>>')).Count -eq 1) 'the ~/.bashrc block is written once'
+Assert-That (@($pathAfter1 -split ';') -contains $want) "this session's PATH gets $want through the reload marker"
+Assert-That (@($marked -split ';') -contains (Join-Path $home2 'marked')) "a bash script's path line reaches this session's PATH as a Windows path (got '$marked')"
 
 Remove-Item -Recurse -Force -LiteralPath $work
 Write-Information "=== get-jb.ps1 passed on $($PSVersionTable.PSEdition)"

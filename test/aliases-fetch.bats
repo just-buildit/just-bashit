@@ -217,3 +217,26 @@ _stale_cache() {
 	assert_output --partial "uv installed (uv 0.13.6 (aarch64-pc-windows-msvc))"
 	assert_line "${links}/uv"
 }
+
+# get-jb.sh persists ~/.local/bin through update-path.sh, the one
+# implementation `jbx update-path` runs, co-fetched by the jbx it just
+# installed: ~/.bashrc gets the block, and a second install changes nothing.
+@test 'get-jb.sh persists PATH through update-path, once' {
+	_case get-jb-path
+	local home="${BATS_TEST_TMPDIR}/home" uvbin="${BATS_TEST_TMPDIR}/uvbin"
+	mkdir -p "${home}" "${uvbin}"
+	printf '#!/bin/sh\necho "uv 0.13.6"\n' >"${uvbin}/uv"
+	chmod +x "${uvbin}/uv"
+	cp "${PROJECT_ROOT}"/src/just_bashit/*.sh "${PROJECT_ROOT}/src/just_bashit/just-runit" \
+		"${CASE_FX}/"
+	for _ in 1 2; do
+		HOME="${home}" JB_UNAME_S=Linux XDG_CACHE_HOME="${CASE_CACHE}" \
+			PATH="${BATS_TEST_TMPDIR}/fixture-curl:${uvbin}:$(_bin_without zsh)" \
+			run bash -c '. "$1"' _ "${PROJECT_ROOT}/src/just_bashit/get-jb.sh"
+		assert_success
+	done
+	assert_output --partial 'update-path: ~/.bashrc: already has the just-bashit block -- unchanged'
+	run grep -cxF '# >>> just-bashit update-path >>>' "${home}/.bashrc"
+	assert_output 1
+	refute [ -e "${home}/.zshrc" ]
+}

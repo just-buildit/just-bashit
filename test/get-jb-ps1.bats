@@ -418,3 +418,56 @@ _e2e_real_env() {
 	assert_line 'rc=1 ran=False'
 	assert_line 'alive'
 }
+
+# The reload marker from PowerShell: a bash script jbx runs appends `path
+# DIR` to JB_RELOAD_MARKER, and the function puts DIR on $env:PATH once bash
+# exits. Then the real update-path, co-fetched from fixtures as
+# just-bashit:update-path, end to end: ~/.bashrc written once, and the
+# session's PATH given ~/.local/bin.
+@test 'get-jb.ps1: a path line a bash script leaves in JB_RELOAD_MARKER reaches the session PATH' {
+	_posix_only
+	_e2e_real_env
+	printf 't() { echo "path %s/added" >>"${JB_RELOAD_MARKER}"; }\n' "${BATS_TEST_TMPDIR}" \
+		>"${BASE}/marks.sh"
+	E2E_CODE="$(_iex)"$(
+		cat <<-'EOF'
+			jbx just-makeit:marks t
+			"rc=$LASTEXITCODE"
+			"n=$(@($env:PATH -split [IO.Path]::PathSeparator | Where-Object { $_ -like '*/added' }).Count)"
+			jbx just-makeit:marks t 2>$null
+			"n=$(@($env:PATH -split [IO.Path]::PathSeparator | Where-Object { $_ -like '*/added' }).Count)"
+			"vars=$(@(Get-ChildItem Env:JB_RELOAD_MARKER, Env:JB_CALLER_APPLIES -ErrorAction SilentlyContinue).Count)"
+		EOF
+	)
+	run _e2e JB_BASH="${BASH_BIN}"
+	assert_success
+	assert_line 'rc=0'
+	assert_line "jbx: applied to this session: PATH+=${BATS_TEST_TMPDIR}/added"
+	assert_line 'n=1'
+	refute_line 'n=2'
+	assert_line 'vars=0'
+}
+
+@test 'get-jb.ps1: jbx just-bashit:update-path from PowerShell, end to end' {
+	_posix_only
+	_e2e_real_env
+	mkdir -p "${FX}/just-buildit.github.io/jbs"
+	cp "${PROJECT_ROOT}"/src/just_bashit/*.sh "${FX}/just-buildit.github.io/jbs/"
+	E2E_CODE="$(_iex)"$(
+		cat <<-'EOF'
+			jbx just-bashit:update-path
+			"rc=$LASTEXITCODE"
+			jbx just-bashit:update-path
+			"rc=$LASTEXITCODE"
+			"onpath=$(@($env:PATH -split [IO.Path]::PathSeparator) -contains (Join-Path $env:HOME '.local/bin'))"
+		EOF
+	)
+	run _e2e JB_BASH="${BASH_BIN}" JB_UNAME_S=Linux
+	assert_success
+	assert_line 'update-path: ~/.bashrc: appended'
+	assert_line 'update-path: ~/.bashrc: already has the just-bashit block -- unchanged'
+	assert_line "jbx: applied to this session: PATH+=${E2E_HOME}/.local/bin"
+	assert_line 'onpath=True'
+	run grep -cxF '# >>> just-bashit update-path >>>' "${E2E_HOME}/.bashrc"
+	assert_output 1
+}
