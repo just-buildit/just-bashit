@@ -317,3 +317,104 @@ _iex() {
 	assert_failure
 	assert_output --partial "get-jb.sh did not install ~/.local/bin/jbx"
 }
+
+# ---------------------------------------------------------------------------
+# A PowerShell script jbx resolves runs in the calling session. Here
+# get-jb.sh installs this checkout's REAL just-runit, as jbx and just-runit,
+# and a curl stub beside it serves a namespace from fixtures: the driver puts
+# ~/.local/bin first on PATH, so the runner finds that curl. Resolution is
+# just-runit's (test/namespaces.bats); this is the function's half -- the
+# hand-off read, the script run in the session with its arguments as typed,
+# and the bash path kept for a name with no .ps1.
+# ---------------------------------------------------------------------------
+_e2e_real_env() {
+	_e2e_env
+	FX="${BATS_TEST_TMPDIR}/fx"
+	BASE="${FX}/just-buildit.github.io/just-makeit"
+	mkdir -p "${BASE}"
+	printf '[aliases]\n' >"${BASE}/aliases.toml"
+	cat >"${BATS_TEST_TMPDIR}/get-jb.sh" <<-EOF
+		mkdir -p "\${HOME}/.local/bin"
+		cp '${PROJECT_ROOT}/src/just_bashit/just-runit' "\${HOME}/.local/bin/just-runit"
+		cp '${PROJECT_ROOT}/src/just_bashit/just-runit' "\${HOME}/.local/bin/jbx"
+		cp '${BATS_TEST_TMPDIR}/curl' "\${HOME}/.local/bin/curl"
+	EOF
+	cat >"${BATS_TEST_TMPDIR}/curl" <<-EOF
+		#!/usr/bin/env bash
+		dest="" url="" head=0
+		while [[ \$# -gt 0 ]]; do
+			case "\${1}" in
+			-o) dest="\${2}"; shift 2; continue ;;
+			--head) head=1 ;;
+			-V) echo "curl stub"; exit 0 ;;
+			https://*) url="\${1}" ;;
+			esac
+			shift
+		done
+		[[ -n \${url} ]] || exit 0
+		f='${FX}/'"\${url#https://}"
+		if [[ \${head} -eq 1 ]]; then
+			[[ -f \${f} ]] && printf 200 || printf 404
+			exit 0
+		fi
+		[[ -f \${f} ]] || exit 22
+		cp "\${f}" "\${dest}"
+	EOF
+	chmod +x "${BATS_TEST_TMPDIR}/curl"
+}
+
+@test 'get-jb.ps1: jbx runs a namespace .ps1 in the session, arguments as typed' {
+	_posix_only
+	_e2e_real_env
+	cat >"${BASE}/tool.ps1" <<-'EOF'
+		param([string]$Name, [switch]$Flag)
+		$env:JB_T = "ran:${Name}:$Flag"
+		$global:JbTArgs = @($args | ForEach-Object {
+			if ($_ -is [array]) { '(' + ($_ -join ',') + ')' } else { "[$_]" } })
+		$env:PATH = '/jb-t-bin' + [IO.Path]::PathSeparator + $env:PATH
+	EOF
+	printf 't() { echo "bash ran [$*] caller=${JB_CALLER-}"; }\n' >"${BASE}/shonly.sh"
+	E2E_CODE="$(_iex)"$(
+		cat <<-'EOF'
+			jbx just-makeit:tool -Name 'a b' -Flag x,y '' '*'
+			"rc=$LASTEXITCODE"
+			"env=$env:JB_T"
+			"global=$($global:JbTArgs -join '|')"
+			"path=$(($env:PATH -split [IO.Path]::PathSeparator) -contains '/jb-t-bin')"
+			"out=$([bool](Test-Path Env:JB_PS1_OUT))"
+			jbx just-makeit:shonly t 'q r'
+			"rc=$LASTEXITCODE"
+		EOF
+	)
+	run _e2e JB_BASH="${BASH_BIN}"
+	assert_success
+	assert_line 'rc=0'
+	assert_line 'env=ran:a b:True'
+	assert_line 'global=(x,y)|[]|[*]'
+	assert_line 'path=True'
+	assert_line 'out=False'
+	assert_line 'bash ran [q r] caller=pwsh'
+}
+
+@test 'get-jb.ps1: a .ps1 that throws is one error naming it; exit is refused' {
+	_posix_only
+	_e2e_real_env
+	printf "throw 'boom'\n" >"${BASE}/boom.ps1"
+	printf "\$global:JbRan = 1; exit 3\n" >"${BASE}/quits.ps1"
+	E2E_CODE="$(_iex)"$(
+		cat <<-'EOF'
+			try { jbx just-makeit:boom } catch { "caught=$_" }
+			"rc=$LASTEXITCODE"
+			try { jbx just-makeit:quits } catch { "caught=$_" }
+			"rc=$LASTEXITCODE ran=$([bool]$global:JbRan)"
+			"alive"
+		EOF
+	)
+	run _e2e JB_BASH="${BASH_BIN}"
+	assert_success
+	assert_line 'caught=jbx: https://just-buildit.github.io/just-makeit/boom.ps1 failed: boom'
+	assert_line 'rc=1'
+	assert_line --partial 'caught=jbx: https://just-buildit.github.io/just-makeit/quits.ps1 calls exit'
+	assert_line 'rc=1 ran=False'
+	assert_line 'alive'
+}
