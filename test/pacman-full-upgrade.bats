@@ -13,10 +13,16 @@ _common_setup
 @test "no pacman sync refreshes without upgrading" {
 	cd "${BATS_TEST_DIRNAME}/.."
 	# A pacman -S... flag cluster holding y but not u, outside this file.
-	# Judged by what grep printed, not its status: xargs exits 123 when
-	# any file does not match, which is every file but the offenders.
-	run bash -c "git ls-files -z | grep -zv '^test/pacman-full-upgrade.bats\$' |
-		xargs -0 grep -nE 'pacman[[:space:]]+-S[a-tv-zA-Z]*y[a-tv-zA-Z]*([[:space:]]|\$)' 2>/dev/null"
+	# git grep, not grep -z | xargs: BusyBox grep (alpine) has no -z. Judged
+	# by what it printed and by its status together -- 1 is "no match", any
+	# other failure (2: bad pattern, not a repository) must not read as clean.
+	run git grep -nE 'pacman[[:space:]]+-S[a-tv-zA-Z]*y[a-tv-zA-Z]*([[:space:]]|$)' \
+		-- . ':!test/pacman-full-upgrade.bats'
+	[ "${status}" -le 1 ] || {
+		echo "the scan itself failed (status ${status}):"
+		echo "${output}"
+		false
+	}
 	[ -z "${output}" ] || {
 		echo "partial upgrades (use -Syu):"
 		echo "${output}"
