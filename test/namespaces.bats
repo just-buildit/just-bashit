@@ -1,4 +1,5 @@
 # shellcheck disable=SC2154  # bats/common-setup export the harness vars
+# shellcheck disable=SC2016  # fixture scripts in single quotes: $ is theirs
 load 'test_helper/common-setup'
 _common_setup
 
@@ -87,4 +88,106 @@ other = "https://just-buildit.github.io/just-makeit/other.sh"'
 	assert_output --partial 'just-buildit          https://just-buildit.github.io/   (default)'
 	assert_output --partial 'just-bashit           https://just-buildit.github.io/jbs/'
 	assert_output --partial 'just-makeit           https://just-buildit.github.io/just-makeit/'
+}
+
+# ---------------------------------------------------------------------------
+# The PowerShell hand-off. get-jb.ps1's jbx function sets JB_PS1_OUT; a run
+# that resolves to a PowerShell script writes the argument count, the URL and
+# the script there and runs nothing, so the function can run it in the
+# session. Resolution stays here, in bash: these are its tests. The function
+# side is test/get-jb-ps1.bats and test/get-jb-ps1.windows.ps1.
+# ---------------------------------------------------------------------------
+
+@test 'from PowerShell, NS:NAME.ps1 is handed back, not run, with the argument count' {
+	_ns_stub
+	local base=https://just-buildit.github.io/just-makeit out="${BATS_TEST_TMPDIR}/handoff"
+	_ns_put "${base}/aliases.toml" '[aliases]'
+	_ns_put "${base}/tool.ps1" '$env:JB_T = "ran"'
+	_ns_put "${base}/tool.sh" 'echo "ran the bash twin"'
+	: >"${out}"
+	JB_PS1_OUT="${out}" run just-runit run -n just-makeit:tool -Name 'a b' ''
+	assert_success
+	assert_output ''
+	run cat "${out}"
+	assert_output "3
+${base}/tool.ps1
+\$env:JB_T = \"ran\""
+}
+
+@test 'from PowerShell, [aliases.ps1] comes before the NAME.ps1 probe' {
+	_ns_stub
+	local base=https://just-buildit.github.io/just-makeit out="${BATS_TEST_TMPDIR}/handoff"
+	_ns_put "${base}/aliases.toml" "[aliases]
+install = \"${base}/sh/install.sh\"
+
+[aliases.ps1]
+install = \"${base}/ps/install.ps1\""
+	_ns_put "${base}/ps/install.ps1" 'Write-Output aliased'
+	_ns_put "${base}/install.ps1" 'Write-Output probed'
+	: >"${out}"
+	JB_PS1_OUT="${out}" run just-runit run -n just-makeit:install
+	assert_success
+	run sed -n 2p "${out}"
+	assert_output "${base}/ps/install.ps1"
+	run grep -c "^${base}/install.ps1\$" "${JB_NS_LOG}"
+	assert_output 0
+}
+
+@test 'from PowerShell, a namespace with no .ps1 runs the bash script as today' {
+	_ns_stub
+	local base=https://just-buildit.github.io/just-makeit out="${BATS_TEST_TMPDIR}/handoff"
+	_ns_put "${base}/aliases.toml" '[aliases]'
+	_ns_put "${base}/tool.sh" 't() { echo "bash ran [$*] out=${JB_PS1_OUT-unset}"; }'
+	: >"${out}"
+	JB_PS1_OUT="${out}" run just-runit run -n just-makeit:tool t 'a b'
+	assert_success
+	assert_output 'bash ran [a b] out=unset'
+	[ ! -s "${out}" ]
+	run grep -c "^${base}/tool.ps1\$" "${JB_NS_LOG}"
+	assert_output 1
+}
+
+@test 'from bash, a NAME.ps1 is never probed and [aliases.ps1] never read' {
+	_ns_stub
+	local base=https://just-buildit.github.io/just-makeit
+	_ns_put "${base}/aliases.toml" "[aliases]
+
+[aliases.ps1]
+tool = \"${base}/tool.ps1\""
+	_ns_put "${base}/tool.ps1" 'Write-Output ps'
+	_ns_put "${base}/tool.sh" 'echo "bash ran"'
+	run just-runit run -n just-makeit:tool
+	assert_success
+	assert_output 'bash ran'
+	run grep -c '\.ps1$' "${JB_NS_LOG}"
+	assert_output 0
+}
+
+@test 'from PowerShell, -f keeps the bash resolution' {
+	_ns_stub
+	local base=https://just-buildit.github.io/just-makeit out="${BATS_TEST_TMPDIR}/handoff"
+	_ns_put "${base}/aliases.toml" '[aliases]'
+	_ns_put "${base}/tool.ps1" 'Write-Output ps'
+	_ns_put "${base}/tool.sh" 'echo "bash ran"'
+	: >"${out}"
+	JB_PS1_OUT="${out}" run just-runit run -n -f just-makeit:tool
+	assert_success
+	assert_output --regexp '\.sh$'
+	[ ! -s "${out}" ]
+}
+
+@test 'from PowerShell, a .ps1 URL is handed back, and -k still checks it' {
+	_ns_stub
+	local url=https://example.com/t/setup.ps1 out="${BATS_TEST_TMPDIR}/handoff"
+	_ns_put "${url}" 'Write-Output hi'
+	: >"${out}"
+	JB_PS1_OUT="${out}" run just-runit run -n -k sha256:0000 "${url}" x
+	assert_failure
+	assert_output --partial 'checksum mismatch'
+	[ ! -s "${out}" ]
+	JB_PS1_OUT="${out}" run just-runit run -n "${url}" x
+	assert_success
+	run head -2 "${out}"
+	assert_output "1
+${url}"
 }

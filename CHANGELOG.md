@@ -4,6 +4,19 @@
 
 ### Added
 
+- **`jbx` in PowerShell runs a namespace's PowerShell script in your
+    session.** A script run in bash cannot change the PowerShell session
+    that called it, so an installer that puts a tool on `PATH` could not
+    work through `jbx` there. From PowerShell, `jbx NS:NAME` now prefers
+    `NAME` in the namespace's new `[aliases.ps1]` table, then
+    `NS_BASE/NAME.ps1`, and runs it dot-sourced in the session with its
+    arguments as typed; with neither, it resolves and runs in bash exactly
+    as before, and from bash nothing changes. jbx still does the
+    resolving, fetching, caching and `-k` checking, and hands the script
+    back. A script that throws is one error naming it; one that calls
+    `exit`, which would close the window, is refused before it runs.
+    **Re-run the one-liner** (`irm https://just-buildit.github.io/get-jb.ps1 | iex`) to rewrite the profile block and get it.
+
 - **`just-runit secret`: store, get and use secrets encrypted with gpg or
     age (#229).** `set`, `get`, `run`, `list`, `rm`, `migrate` and `rekey`,
     one implementation over both backends; the file's extension
