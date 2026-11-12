@@ -19,7 +19,13 @@ _SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_S
 # Every default is an environment variable, so the LaunchDaemon, a test and a
 # person at a shell all configure it the same way.
 ORG="${JB_RUNNER_ORG:-just-buildit}"
+# The org each slot registers to, in slot order: one org serves every slot,
+# two give one slot each. ORG is what a slot's own subshell sets from this.
+ORGS="${JB_RUNNER_ORGS:-${ORG}}"
+# JB_RUNNER_ORG's PAT. A fine-grained PAT has one resource owner, so each
+# other org has its own, token.<org> beside this file (see _token_file).
 TOKEN_FILE="${JB_RUNNER_TOKEN_FILE:-${HOME}/.config/jb-runner/token}"
+TOKEN_ORG="${ORG}"
 # Pinned by digest: `latest` is rebuilt upstream, and an image that changes
 # under a CI fleet is a build that changes for no reason in the diff.
 BASE="${JB_RUNNER_BASE:-ghcr.io/cirruslabs/macos-tahoe-base@sha256:65c3133a633fda8753cf1f71f2d55727792d534a2125b0032466563dcc8e58fd}"
@@ -90,13 +96,13 @@ read -r -d '' HELP <<-'EOF' || true
 	             pinned actions/runner and JB_RUNNER_BREW packages into it,
 	             and save it as JB_RUNNER_IMAGE. Re-run to upgrade.
 	  run        The job loop, forever, in JB_RUNNER_VMS slots at once: each
-	             mints its own registration token, clones the image, boots
-	             it, runs one job, deletes the VM. What the LaunchDaemon
-	             runs. --once stops after one VM per slot.
+	             mints its own registration token for its org, clones the
+	             image, boots it, runs one job, deletes the VM. What the
+	             LaunchDaemon runs. --once stops after one VM per slot.
 	  install    Copy this script to a stable path and install a LaunchDaemon
 	             that runs `run` from boot, as this user. Uses sudo.
 	  uninstall  Remove the LaunchDaemon and any job VMs. Uses sudo.
-	  status     The daemon, the VMs, and the org's registered runners.
+	  status     The daemon, the VMs, and each org's registered runners.
 
 	Options:
 	  -h / --help     Show this message and exit.
@@ -105,8 +111,12 @@ read -r -d '' HELP <<-'EOF' || true
 
 	Environment (defaults in brackets):
 	  JB_RUNNER_ORG         org the runners register to [just-buildit]
-	  JB_RUNNER_TOKEN_FILE  fine-grained PAT, org "Self-hosted runners:
-	                        Read and write" [~/.config/jb-runner/token]
+	  JB_RUNNER_ORGS        one org per slot, comma-separated, slot 1 first;
+	                        one org serves every slot [JB_RUNNER_ORG]
+	  JB_RUNNER_TOKEN_FILE  JB_RUNNER_ORG's fine-grained PAT, org
+	                        "Self-hosted runners: Read and write"
+	                        [~/.config/jb-runner/token]; any other org's is
+	                        token.<org> in the same directory
 	  JB_RUNNER_BASE        Tart base image, pinned by digest
 	  JB_RUNNER_IMAGE       the clean image's local name [jb-base]
 	  JB_RUNNER_VERSION     actions/runner version, with JB_RUNNER_SHA256
@@ -123,7 +133,7 @@ read -r -d '' HELP <<-'EOF' || true
 	                        shaped like a GitHub-hosted image (ubuntu-*,
 	                        macos-*, windows-*) is refused
 
-	  install writes these, as given, into the LaunchDaemon. The token file
+	  install writes these, as given, into the LaunchDaemon. Each token file
 	  must be mode 600 or 400 and owned by the user that runs this.
 
 	  The PAT never enters a VM. Only a registration token does, and it is
@@ -223,6 +233,47 @@ _need_vms() {
 		_die "JB_RUNNER_VMS is ${VMS}; it must be 1 or 2 (Apple's licence allows two macOS VMs per Mac)"
 }
 
+# ORGS as a list, ORG_LIST: each a GitHub org name (it goes into API paths
+# and a file name, so nothing else), one for every slot or one per slot.
+ORG_LIST=()
+_need_orgs() {
+	local o
+	local -a orgs
+	ORG_LIST=()
+	IFS=, read -r -a orgs <<<"${ORGS}"
+	for o in "${orgs[@]+"${orgs[@]}"}"; do
+		o="${o#"${o%%[![:space:]]*}"}"
+		o="${o%"${o##*[![:space:]]}"}"
+		[[ ${o} =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?$ ]] ||
+			_die "JB_RUNNER_ORGS: ${o:-an empty entry} is not a GitHub org name"
+		ORG_LIST+=("${o}")
+	done
+	((${#ORG_LIST[@]} > 0)) || _die "JB_RUNNER_ORGS names no org"
+	((${#ORG_LIST[@]} == 1 || ${#ORG_LIST[@]} == VMS)) ||
+		_die "JB_RUNNER_ORGS names ${#ORG_LIST[@]} orgs for ${VMS} slot(s); give one org, or one per slot (JB_RUNNER_VMS)"
+}
+
+# The org slot N (1-based) registers to.
+_slot_org() { # N
+	if ((${#ORG_LIST[@]} == 1)); then
+		printf '%s\n' "${ORG_LIST[0]}"
+	else
+		printf '%s\n' "${ORG_LIST[$1 - 1]}"
+	fi
+}
+
+# An org's PAT: token.<org> beside TOKEN_FILE when there is one, else
+# TOKEN_FILE for JB_RUNNER_ORG alone. Another org never falls back to it:
+# that would send one org's PAT to another's API, and fail there.
+_token_file() { # ORG
+	local f
+	f="$(dirname "${TOKEN_FILE}")/token.$1"
+	if [[ $1 == "${TOKEN_ORG}" && ! -e ${f} && ! -L ${f} ]]; then
+		f="${TOKEN_FILE}"
+	fi
+	printf '%s\n' "${f}"
+}
+
 _need_tart() {
 	command -v "${TART}" >/dev/null 2>&1 ||
 		_die "tart not found (https://github.com/cirruslabs/tart/releases)"
@@ -275,22 +326,31 @@ _need_softnet() {
 	done
 }
 
-# The PAT file must be this user's alone: mode 600 or 400, owned by us. A
+# A PAT file must be this user's alone: mode 600 or 400, owned by us. A
 # 644 token is readable by every account on the Mac. GNU stat first (the
 # tests run on Linux), BSD stat otherwise.
-_need_token() {
-	[[ -r ${TOKEN_FILE} ]] || _die "no token at ${TOKEN_FILE}"
+_need_token() { # FILE
+	local f="$1"
+	[[ -r ${f} ]] || _die "no token at ${f}"
 	# A symlink's own mode is 777, whatever it points at, and who can
 	# replace the link is a question about its directory. Name the file.
-	[[ ! -L ${TOKEN_FILE} ]] ||
-		_die "${TOKEN_FILE} is a symlink; point JB_RUNNER_TOKEN_FILE at the file itself"
+	[[ ! -L ${f} ]] ||
+		_die "${f} is a symlink; point JB_RUNNER_TOKEN_FILE at the file itself"
 	local mode owner
-	IFS=' ' read -r mode owner < <(stat -c '%a %U' "${TOKEN_FILE}" 2>/dev/null ||
-		stat -f '%Lp %Su' "${TOKEN_FILE}")
+	IFS=' ' read -r mode owner < <(stat -c '%a %U' "${f}" 2>/dev/null ||
+		stat -f '%Lp %Su' "${f}")
 	[[ ${owner} == "$(id -un)" ]] ||
-		_die "${TOKEN_FILE} is owned by ${owner}, not $(id -un)"
+		_die "${f} is owned by ${owner}, not $(id -un)"
 	[[ ${mode} == 600 || ${mode} == 400 ]] ||
-		_die "${TOKEN_FILE} is mode ${mode}; run: chmod 600 ${TOKEN_FILE}"
+		_die "${f} is mode ${mode}; run: chmod 600 ${f}"
+}
+
+# Every org's PAT, checked before anything runs.
+_need_tokens() {
+	local o
+	for o in "${ORG_LIST[@]}"; do
+		_need_token "$(_token_file "${o}")"
+	done
 }
 
 # This boot's start time, so a pid recorded before a reboot, and reused
@@ -373,11 +433,15 @@ _curl_tls_init() {
 # The PAT goes to curl as a header on stdin (-H @-), never in argv: a
 # LaunchDaemon's command lines are visible to every user's ps.
 
+# As ORG: its own PAT. A slot sets ORG to its org; elsewhere, prefix the
+# call (ORG=x _deregister NAME).
 _api() { # METHOD PATH
-	_need_token
+	local tf
+	tf="$(_token_file "${ORG}")"
+	_need_token "${tf}"
 	_curl_tls_init
 	local pat
-	pat="$(<"${TOKEN_FILE}")"
+	pat="$(<"${tf}")"
 	printf 'Authorization: Bearer %s\n' "${pat}" |
 		curl -fsS "${_CURL_TLS[@]+"${_CURL_TLS[@]}"}" -X "$1" -H @- \
 			-H 'Accept: application/vnd.github+json' \
@@ -503,7 +567,7 @@ _one_job() { # SLOT
 		_cleanup
 		return 1
 	fi
-	_log "${vm} up; registering and waiting for a job"
+	_log "${vm} up; registering to ${ORG} and waiting for a job"
 	local rc=0
 	# In the background and waited for: bash runs a trap only between
 	# foreground commands, so a SIGTERM from launchd during a job that runs
@@ -555,8 +619,11 @@ _on_signal() { # EXIT_CODE
 
 # A slot: its own loop, in its own subshell, so it has its own CURRENT_VM
 # and EXEC_PID, and its own traps to clean them up. One slot failing only
-# backs that slot off; the others keep taking jobs.
-_slot() { # SLOT
+# backs that slot off; the others keep taking jobs. Its org is ORG here:
+# the subshell's own, so the token, registration and deregistration all
+# follow it.
+_slot() { # SLOT ORG
+	ORG="$2"
 	trap '_on_signal 143' TERM
 	trap '_on_signal 130' INT
 	trap '_on_signal 129' HUP
@@ -596,13 +663,17 @@ _stop_slots() { # EXIT_CODE
 cmd_run() {
 	_need_safe_labels
 	_need_vms
+	_need_orgs
 	_need_macos
 	_need_tart
+	local i
 	if [[ ${DRY_RUN} -eq 1 ]]; then
-		_say "would loop in ${VMS} slot(s): mint token for ${ORG}; clone ${IMAGE}; boot; run one job; delete"
+		for ((i = 1; i <= VMS; i++)); do
+			_say "would loop in slot s${i}: mint token for $(_slot_org "${i}"); clone ${IMAGE}; boot; run one job; delete"
+		done
 		return 0
 	fi
-	_need_token
+	_need_tokens
 	_lock
 	_vm_exists "${IMAGE}" || _die "no image ${IMAGE}; run: runner-host.sh image"
 	trap '_stop_slots 143' TERM
@@ -610,16 +681,19 @@ cmd_run() {
 	trap '_stop_slots 129' HUP
 	# A crash or reboot mid-job leaves a VM behind, in any slot. Nothing
 	# else names VMs with this prefix, and the lock says no other run is
-	# live, so any found at start are ours and stale.
-	local stale
+	# live, so any found at start are ours and stale. Its runner may be in
+	# any slot's org: the name says which slot, not which org it had then.
+	local stale o
 	for stale in $("${TART}" list --format json | jq -r --arg p "${PREFIX}-" '.[] | select(.Name | startswith($p)) | .Name'); do
 		_log "deleting stale ${stale}"
 		_vm_delete "${stale}"
-		_deregister "${stale}"
+		for o in "${ORG_LIST[@]}"; do
+			ORG="${o}" _deregister "${stale}"
+		done
 	done
-	local i pid r rc=0
+	local pid r rc=0
 	for ((i = 1; i <= VMS; i++)); do
-		_slot "s${i}" &
+		_slot "s${i}" "$(_slot_org "${i}")" &
 		SLOT_PIDS+=("$!")
 	done
 	# Each slot loops forever; this returns only under --once, with the
@@ -646,7 +720,7 @@ _plist_env() {
 	local k v
 	for k in ORG TOKEN_FILE BASE IMAGE RUNNER_VERSION RUNNER_SHA256 CPU MEMORY \
 		BREW LABELS PREFIX API BOOT_TIMEOUT TART HOST_TAG LOCK_DIR NET_BLOCK \
-		SOFTNET VMS; do
+		SOFTNET VMS ORGS; do
 		v="$(_xml "${!k}")"
 		case "${k}" in
 		RUNNER_VERSION) k=VERSION ;;
@@ -694,9 +768,10 @@ cmd_install() {
 	[[ ${JB_RUNNER_EUID:-${EUID}} -ne 0 ]] || _die "run install as the runner's user, not root; it calls sudo itself"
 	_need_safe_labels
 	_need_vms
+	_need_orgs
 	_need_macos
 	_need_tart
-	_need_token
+	_need_tokens
 	local tmp
 	tmp="$(mktemp)"
 	_plist >"${tmp}"
@@ -712,6 +787,7 @@ cmd_install() {
 
 cmd_uninstall() {
 	_need_macos
+	_need_orgs
 	_run sudo launchctl bootout "system/${DAEMON_LABEL}" 2>/dev/null || true
 	_run sudo rm -f "${DAEMON_PLIST}"
 	if command -v "${TART}" >/dev/null 2>&1; then
@@ -720,22 +796,24 @@ cmd_uninstall() {
 			_run _vm_delete "${vm}"
 		done
 	fi
-	# And this host's runners GitHub still lists: a VM killed mid-job
-	# leaves one behind.
-	if [[ -r ${TOKEN_FILE} ]]; then
-		local name
-		for name in $(_api GET "/orgs/${ORG}/actions/runners?per_page=100" |
+	# And this host's runners GitHub still lists, in every org: a VM killed
+	# mid-job leaves one behind.
+	local o name
+	for o in "${ORG_LIST[@]}"; do
+		[[ -r "$(_token_file "${o}")" ]] || continue
+		for name in $(ORG="${o}" _api GET "/orgs/${o}/actions/runners?per_page=100" |
 			jq -r --arg p "${PREFIX}-${HOST_TAG}-" '.runners[] | select(.name | startswith($p)) | .name'); do
-			_run _deregister "${name}"
+			ORG="${o}" _run _deregister "${name}"
 		done
-	fi
+	done
 	_say "Removed ${DAEMON_LABEL}. ${IMAGE} is kept; delete it with: ${TART} delete ${IMAGE}"
 }
 
 cmd_status() {
+	_need_orgs
 	_say "daemon:"
 	if launchctl print "system/${DAEMON_LABEL}" >/dev/null 2>&1; then
-		launchctl print "system/${DAEMON_LABEL}" | grep -E '^[[:space:]]*(state|pid|last exit code) =' | sed 's/^[[:space:]]*/  /'
+		launchctl print "system/${DAEMON_LABEL}" | grep -E '^[[:space:]]*(state|pid|last exit code) =' | sed 's/^[[:space:]]*/  /' || :
 	else
 		_say "  not loaded"
 	fi
@@ -746,9 +824,12 @@ cmd_status() {
 	else
 		_say "  tart not installed"
 	fi
-	_say "runners registered to ${ORG}:"
-	_api GET "/orgs/${ORG}/actions/runners" |
-		jq -r '.runners[] | "  \(.name)  \(.status)\(if .busy then "  busy" else "" end)"'
+	local o
+	for o in "${ORG_LIST[@]}"; do
+		_say "runners registered to ${o}:"
+		ORG="${o}" _api GET "/orgs/${o}/actions/runners" |
+			jq -r '.runners[] | "  \(.name)  \(.status)\(if .busy then "  busy" else "" end)"'
+	done
 }
 
 "cmd_${CMD}"

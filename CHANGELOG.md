@@ -42,6 +42,14 @@
     `JB_RUNNER_MEMORY` now defaults to 6144 MB, so two VMs leave the host
     about 2 cores and 4 GB.
 
+- **runner-host: one Mac, two orgs (`JB_RUNNER_ORGS`).** List one org per
+    slot, e.g. `JB_RUNNER_ORGS=just-buildit,doppler-dsp`, and slot N
+    registers to org N: its registration token, deregistration, the
+    start-up sweep, `status` and `uninstall` all follow the slot's org. Each
+    org other than `JB_RUNNER_ORG` reads its own PAT from `token.<org>`
+    beside `JB_RUNNER_TOKEN_FILE`, and never falls back to the default one.
+    One org, the default, serves every slot as before.
+
 - **`just-runit secret`: store, get and use secrets encrypted with gpg or
     age (#229).** `set`, `get`, `run`, `list`, `rm`, `migrate` and `rekey`,
     one implementation over both backends; the file's extension
