@@ -310,11 +310,38 @@ jobs:
         with:
           sarif_file: shellcheck.sarif
 
+  # The strict docs build, on every PR. Before this job (#240) the only docs
+  # build was deploy-docs, after merge, without --strict: a broken anchor
+  # (6a460e8) failed `make docs` on main for ten days while CI stayed green.
+  # `make docs-check` is the standard's one implementation of the strict
+  # build, so CI and a local run cannot disagree about what it checks.
+  docs:
+    needs: changes
+    # A version bump alone skips this -- unless the site's own inputs
+    # changed, which a release PR's always do (CHANGELOG is in the nav).
+    if: >-
+      needs.changes.outputs.src == 'true' ||
+      needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          python-version: "3.12"
+
+      - name: make docs-check
+        run: make docs-check
+
   ci-passed:
     name: CI passed
     # `changes` too: if it fails, nothing below it ran, and that is not a
     # pass. A job it skipped (an already-tested tree) is `skipped`, which is.
-    needs: [changes, test, test-macos, test-windows, coverage, lint]
+    needs: [changes, test, test-macos, test-windows, coverage, lint, docs]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -417,9 +444,15 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install zensical junit2html junitparser
+      # The report generators below; zensical is NOT installed here. The
+      # site builds through `make docs`, from the lock, the same build the
+      # docs job gated on the PR (#240).
+      - run: pip install junit2html junitparser
 
-      - run: zensical build --clean
+      - uses: astral-sh/setup-uv@v9.0.0
+
+      - name: make docs
+        run: make docs
 
       # Which run's reports to publish: this one's when it ran the matrix,
       # else the merged PR's, else the newest successful main run that kept
