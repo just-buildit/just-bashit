@@ -1639,3 +1639,12 @@ _help_supported_block() {
 	done < <(sed -n 's/^	\([a-z0-9]*\))$/\1/p' \
 		"${PROJECT_ROOT}/src/just_bashit/install-deps.sh")
 }
+
+@test 'gh-248: -- ends options; the deps file after it parses as on its own' {
+	run install-deps.sh --dry-run -s apt "${GROUPED_FILE}"
+	assert_success
+	local plain="${output}"
+	run install-deps.sh --dry-run -s apt -- "${GROUPED_FILE}"
+	assert_success
+	assert_output "${plain}"
+}

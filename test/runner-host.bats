@@ -433,3 +433,12 @@ setup() {
 		assert_success
 	fi
 }
+
+@test 'gh-248: -- ends options; every word after it is a command word' {
+	JB_RUNNER_OS=Linux run runner-host.sh --once -- run
+	assert_failure
+	assert_output --partial 'macOS only'
+	run runner-host.sh -- --once
+	assert_failure
+	assert_output --partial 'unknown argument: --once'
+}

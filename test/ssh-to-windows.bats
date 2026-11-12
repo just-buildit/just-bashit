@@ -177,3 +177,13 @@ setup() {
 	[ -f "${WINHOME}/.ssh/id_test" ]
 	grep -q '/inheritance:r' "${ICACLS_LOG}"
 }
+
+@test "ssh-to-windows: -- ends options, and nothing may follow it (gh-248)" {
+	echo "Linux version 6.1.0-generic" >"${PROC}"
+	run bash "${SCRIPT}" -n --
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"not running under WSL"* ]]
+	run bash "${SCRIPT}" -- extra
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"unexpected argument: extra"* ]]
+}

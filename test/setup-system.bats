@@ -3293,3 +3293,12 @@ _mac_stubs() {
 	assert_success
 	[[ ! -e "${HOME}/.ssh/config" ]]
 }
+
+@test 'gh-248: -- ends options, and nothing may follow it' {
+	run setup-system.sh -n -s bogus --
+	assert_failure
+	assert_output --partial "unknown step 'bogus'"
+	run setup-system.sh -n -- extra
+	assert_failure
+	assert_output --partial 'Unexpected argument: extra'
+}
