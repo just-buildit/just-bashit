@@ -206,7 +206,12 @@ endef
 # badge step reads from — nothing there calls `coverage-gate`, so the
 # threshold is not enforced. GATES_PROVISION says so explicitly; without it,
 # gates-check flags ci.yml's `make coverage` as unreachable from `gates`.
-GATES_PROVISION = install-deps coverage
+GATES_PROVISION = install-deps coverage docs
+
+# The strict docs build guards every PR (ci.yml's `docs` job, #240). The
+# deploy job's `make docs` above is the site build it publishes, not a gate:
+# the same build already passed here before merge.
+GATES_DEPS = lint test-all docs-check
 
 # A report is not a gate; this is the gate. sed rather than `grep -oP`, which
 # is GNU-only and would fail on the macOS runner.
