@@ -90,7 +90,7 @@ _runner_as() { # $1 = name to invoke it under; rest = args
 	assert_output "${short}"
 }
 
-@test '--help after SPEC is the script'"'"'s, not jbx'"'"'s' {
+@test '--help after SPEC goes to the script, not to jbx' {
 	printf '%s\n' 'echo "script got [$*]"' >"${BATS_TEST_TMPDIR}/fixtures/t.sh"
 	run _runner_as jbx -n https://example.com/t.sh --help
 	assert_success
