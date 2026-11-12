@@ -326,6 +326,11 @@ and the [PowerShell hand-off](#powershell-scripts) all apply unchanged.
 do for a script. **Pin a REF to pin the whole namespace:** every script it
 serves then comes from that commit.
 
+**A base's REF has no `/` in it** -- a tag, a commit or a branch such as
+`main`; `ns add` refuses `gh:o/r/scripts@release/1.x`. A `gh:` script SPEC
+takes one (`jbx gh:o/r/t.sh@release/1.x` fetches that branch); a base
+pins such a branch by its commit instead.
+
 **The repository chooses the short names**, in an `aliases.toml` at BASE.
 It must serve one even if it is empty, as every built-in does — a base whose
 `aliases.toml` cannot be fetched is refused rather than probed

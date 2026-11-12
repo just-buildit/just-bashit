@@ -46,15 +46,37 @@ _NAMESPACES=(
 _NS_FILE="${XDG_CONFIG_HOME:-${HOME}/.config}/jb/namespaces"
 _NS_CMD=0
 
-# _ns_user_rows -- the user's namespaces, one "NAME BASE" row per line;
-# nothing when there is no file. Comments and blank lines are skipped.
-_ns_user_rows() {
-	local line
+# _ns_parse -- the namespaces file as rows of exactly "NAME BASE", one per
+# line. The file is hand-editable, so a row is read the way a person writes
+# it: fields split on any whitespace (leading spaces, a tab), and a trailing
+# CR dropped (Notepad under Git Bash), or it would end up in every URL. A row
+# whose second field is not a single https:// URL is skipped with a warning
+# naming the file and line, rather than resolved into a broken fetch.
+# Comments and blank lines are skipped.
+_ns_parse() {
+	local line name base rest n=0
 	[[ -f ${_NS_FILE} ]] || return 0
 	while IFS= read -r line || [[ -n ${line} ]]; do
+		n=$((n + 1))
+		line="${line%$'\r'}"
 		[[ ${line} =~ ^[[:space:]]*(#|$) ]] && continue
-		printf '%s\n' "${line}"
+		IFS=$' \t' read -r name base rest <<<"${line}"
+		if [[ ${base} != https://?* || ${base} == *[[:cntrl:]]* || -n ${rest} ]]; then
+			echo "${_ME}: warning: ${_NS_FILE}:${n}: skipped '${line}': want NAME https://BASE" >&2
+			continue
+		fi
+		printf '%s %s\n' "${name}" "${base%/}"
 	done <"${_NS_FILE}"
+}
+
+# Read once per run, so a bad row warns once however many readers ask.
+_NS_ROWS=()
+while IFS= read -r _row; do _NS_ROWS+=("${_row}"); done < <(_ns_parse)
+
+# _ns_user_rows -- the user's namespaces, one "NAME BASE" row per line;
+# nothing when there is no file.
+_ns_user_rows() {
+	[[ ${#_NS_ROWS[@]} -eq 0 ]] || printf '%s\n' "${_NS_ROWS[@]}"
 }
 # The PowerShell hand-off (see "PowerShell scripts" below). get-jb.ps1's jbx
 # function sets JB_PS1_OUT to a file of its own; a run that resolves to a
@@ -924,8 +946,11 @@ read -r -d '' HELP <<-EOF || true
 	  NS:NAME                     a script in namespace NS (below)
 	  gh:USER/REPO/PATH[@REF]     a file on GitHub; REF defaults to main
 	  https://URL                 any HTTPS URL
-	  https://HOST/PROJECT//PATH[@REF]
-	                              a file in a repository on any forge
+	  [FORGE+]https://HOST/PROJECT//PATH[@REF]
+	                              a file in a repository: github.com,
+	                              gitlab.com, codeberg.org, bitbucket.org;
+	                              name FORGE (github, gitlab, gitea, forgejo,
+	                              bitbucket) for any other host
 
 	Namespaces:
 	${_ns_help}
@@ -1310,6 +1335,10 @@ _ns_base_of() {
 	https://*) url="${spec}" ;;
 	*) _err "bad base '${spec}': use gh:USER/REPO[/DIR][@REF], [FORGE+]https://HOST/PROJECT//DIR[@REF] or an https:// URL" ;;
 	esac
+	# Stored verbatim and joined into every URL the namespace resolves, so a
+	# space or control character would reach curl in each one: refuse it now.
+	[[ ${url} != *[[:space:][:cntrl:]]* ]] ||
+		_err "bad base '${spec}': a URL cannot contain whitespace or control characters"
 	printf '%s\n' "${url%/}"
 }
 
@@ -1338,16 +1367,29 @@ _ns_add() {
 
 _ns_rm() {
 	[[ $# -eq 1 ]] || _err "usage: ${_ME} rm NAME"
-	local name="${1}" row line tmp
+	local name="${1}" row line first tmp removed=0
 	for row in "${_NAMESPACES[@]}"; do
 		[[ ${row%% *} != "${name}" ]] ||
 			_err "'${name}' is a built-in namespace and cannot be removed"
 	done
-	_ns_base "${name}" >/dev/null || _err "'${name}' is not one of your namespaces"
+	# The name is compared as a string with the row's first field, never
+	# put in a pattern: a hand-written 'a.b' must not take 'axb' with it.
+	# Matching the raw field, not _ns_parse's rows, lets rm remove a row
+	# that warns, which is how a broken row is fixed with the tool.
+	[[ -f ${_NS_FILE} ]] || _err "'${name}' is not one of your namespaces"
 	tmp="${_NS_FILE}.new"
 	while IFS= read -r line || [[ -n ${line} ]]; do
-		[[ ${line} =~ ^[[:space:]]*${name}[[:space:]] ]] || printf '%s\n' "${line}"
+		IFS=$' \t' read -r first _ <<<"${line%$'\r'}"
+		if [[ ${first} == "${name}" ]]; then
+			removed=1
+			continue
+		fi
+		printf '%s\n' "${line}"
 	done <"${_NS_FILE}" >"${tmp}"
+	if [[ ${removed} -eq 0 ]]; then
+		rm -f "${tmp}"
+		_err "'${name}' is not one of your namespaces"
+	fi
 	mv "${tmp}" "${_NS_FILE}"
 	printf 'removed %s\n' "${name}"
 }
