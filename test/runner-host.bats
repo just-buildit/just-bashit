@@ -62,6 +62,7 @@ setup() {
 			# A clone that dies halfway still leaves a VM on disk.
 			exit "${TART_CLONE_RC:-0}" ;;
 		delete) rm -f "${STATE}/$2" ;;
+		set) exit "${TART_SET_RC:-0}" ;;
 		rename) mv "${STATE}/$2" "${STATE}/$3" ;;
 		run)
 			# Which softnet tart would find: the first on its PATH.
@@ -672,4 +673,19 @@ _org_b_token() {
 	assert_success
 	run grep -E '^curl-as \S+/orgs/org-a/actions/runners/registration-token Authorization: Bearer pat-OWN-A$' "${LOG}"
 	assert_success
+}
+
+@test 'run: each VM is sized as configured, not as the image was built' {
+	JB_RUNNER_CPU=3 JB_RUNNER_MEMORY=5120 run runner-host.sh run --once
+	assert_success
+	run grep -cE '^tart set jb-job-testhost-s1-[0-9]+ --cpu 3 --memory 5120$' "${LOG}"
+	assert_output 1
+	# Sized before it boots.
+	run grep -nE '^tart (set|run) ' "${LOG}"
+	assert_line --index 0 --regexp '^[0-9]+:tart set '
+	# And a set that fails deletes the clone.
+	TART_SET_RC=1 run runner-host.sh run --once
+	assert_failure
+	run ls "${STATE}"
+	assert_output jb-base
 }
