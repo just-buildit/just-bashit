@@ -152,8 +152,12 @@ _tty_type() {
 	printf -v cmd '%q ' "$@"
 	: >"${log}"
 	{
+		# Type only once the prompt is the last thing written: it ends in
+		# ': ' with no newline after it. A trace line under SHELLOPTS=xtrace
+		# can hold ': ' too (`_SECRET_HELP=$'Usage: ...`) and ends in a
+		# newline, so `grep ': '` let the input go before the read started.
 		for ((i = 0; i < 200; i++)); do
-			grep -q ': ' "${log}" && break
+			[[ $(tail -c 2 "${log}") == ': ' ]] && break
 			sleep 0.1
 		done
 		printf '%s\n' "${input}"
