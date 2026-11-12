@@ -15,8 +15,38 @@
 
 **One curl. Any machine. Your shell.**
 
-A bare Linux, macOS or WSL box becomes a working dev machine in one command,
-and every script runs straight from a URL with nothing installed.
+Turns a bare Linux, macOS or WSL box into a dev box, taking only the parts
+you choose. Get `jbx` (only `bash` and `curl` needed), then read the plan
+before anything changes:
+
+```bash
+. <(curl -sSL https://just-buildit.github.io/get-jb.sh)   # jbx, in this shell
+jbx setup-system --dry-run                                # the plan, no changes
+```
+
+Then take the lot, or just the parts you want:
+
+```bash
+jbx setup-system                   # everything below
+jbx setup-system -s shell,ssh,git  # only these
+jbx setup-system -x claude,pwsh    # all but these
+```
+
+| Step     | What you get                                        |
+| -------- | --------------------------------------------------- |
+| `deps`   | compiler, make, cmake, git, curl, ssh, gpg, age     |
+| `shell`  | bash config, one source line in `~/.bashrc`         |
+| `ssh`    | permissions fixed; a host key only if you have none |
+| `git`    | defaults only where you haven't set one             |
+| `tools`  | uv, plus pre-commit hooks in a repo that has them   |
+| `pwsh`   | PowerShell 7 + PSScriptAnalyzer                     |
+| `claude` | Claude Code                                         |
+
+`certs` and `sshd` run only when you name them; on native Windows `sshd`
+and `folders` run by default.
+[Every step in full](https://just-buildit.github.io/just-bashit/setup-system/) ·
+[Setting up a new machine](https://just-buildit.github.io/just-bashit/guides/new-machine/)
+
 shellcheck-clean, shfmt-formatted, and 500+ bats tests on Debian, Arch,
 Fedora, Alpine, macOS and Windows for every change.
 
@@ -24,21 +54,13 @@ Fedora, Alpine, macOS and Windows for every change.
 
 ## Install
 
-```bash
-. <(curl -sSL https://just-buildit.github.io/get-jb.sh)   # jbx, in this shell
-jbx setup-system                                          # the rest of the box
-```
-
-Only `bash` and `curl` needed. On Windows, from PowerShell — no bash window
-to open:
+The commands above are the install. On Windows, from PowerShell — no bash
+window to open:
 
 ```powershell
 irm https://just-buildit.github.io/get-jb.ps1 | iex   # jbx, as a PowerShell function
-jbx setup-system
+jbx setup-system --dry-run
 ```
-
-[Setting up a new machine](https://just-buildit.github.io/just-bashit/guides/new-machine/)
-walks through it.
 
 Or as a Python tool:
 

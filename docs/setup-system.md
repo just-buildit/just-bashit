@@ -743,7 +743,7 @@ table the step installs from, so the two cannot disagree. Each package
 reports as the command of its own name (`cmake`), as the commands its table
 names in `provides` (`build-essential` → `cc`, `make`), or, when it declares
 `vs_requires`, as each Visual Studio id, by the vswhere probe
-[install-deps](install-deps.md#a-package-that-provides-visual-studio-workloads)
+[install-deps](install-deps.md#a-package-that-provides-visual-studio-workloads-and-components)
 installs by. After those come `gh`, `uv`, `pwsh` and `claude`. On native
 Windows that means cmake, git, clang-cl, pwsh and the C++ workload, not
 make, cc and pkg-config, which the winget baseline does not install.
