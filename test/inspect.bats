@@ -309,3 +309,12 @@ EOF
 	assert_output --partial "[dev.apt]"
 	refute_output --partial "[runtime.apt]"
 }
+
+@test 'gh-248: -- ends options; the deps file after it parses as on its own' {
+	run inspect.sh -s apt "${DEPS_FILE}"
+	assert_success
+	local plain="${output}"
+	run inspect.sh -s apt -- "${DEPS_FILE}"
+	assert_success
+	assert_output "${plain}"
+}

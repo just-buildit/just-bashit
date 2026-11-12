@@ -819,3 +819,25 @@ _on_windows() { [[ ${OSTYPE:-} == msys* || ${OSTYPE:-} == cygwin* ]]; }
 	assert_output "just-runit secret: error: ${CONF%/*} is writable by others (mode 775): chmod 700 ${CONF%/*}"
 	[[ ! -e ${STORE}/A.age ]] || fail 'stored anyway'
 }
+
+@test 'gh-248: -- ends options; what follows is the NAME' {
+	run just-runit secret get -- -x
+	assert_failure
+	refute_output --partial 'unknown option'
+	for verb in get migrate; do
+		run just-runit secret "${verb}" -- A B
+		assert_failure
+		assert_output --partial "${verb} takes one NAME"
+	done
+	run just-runit secret set -- A B <<<v
+	assert_failure
+	assert_output --partial 'set takes one NAME'
+	_need gpg
+	_conf "gpg $(_fpr 1)"
+	run just-runit secret set --backend gpg -- TOK <<<"${VALUE}"
+	assert_success
+	assert_output 'stored TOK (gpg)'
+	run just-runit secret get -- TOK
+	assert_success
+	assert_output "${VALUE}"
+}
