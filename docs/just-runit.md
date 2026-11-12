@@ -407,18 +407,19 @@ ______________________________________________________________________
 
 ## Options
 
-| Flag          | Description                                                     |
-| ------------- | --------------------------------------------------------------- |
-| `-l`          | List functions the script defines, then exit (see below)        |
-| `-f`          | Fetch only — cache the script, print its path, run nothing      |
-| `-r`          | Refresh — re-fetch even if the cache is fresh                   |
-| `-n`          | No-cache — fetch fresh, discard on exit; the cache is untouched |
-| `-c`          | Clean environment (minimal env, like `sudo` without `-E`)       |
-| `-p VARS`     | Comma-separated vars to pass through when using `-c`            |
-| `-t TTL`      | Cache TTL in seconds. Default `3600`. `0` = keep forever        |
-| `-k HASH`     | Verify before running: `sha256:HASH` or `md5:HASH`              |
-| `-v`          | Verbose — prints fetch/cache activity to stderr                 |
-| `--no-verify` | Skip TLS certificate checks on jbx's own downloads (see below)  |
+| Flag           | Description                                                     |
+| -------------- | --------------------------------------------------------------- |
+| `-l`           | List functions the script defines, then exit (see below)        |
+| `-f`           | Fetch only — cache the script, print its path, run nothing      |
+| `-r`           | Refresh — re-fetch even if the cache is fresh                   |
+| `-n`           | No-cache — fetch fresh, discard on exit; the cache is untouched |
+| `-c`           | Clean environment (minimal env, like `sudo` without `-E`)       |
+| `-p VARS`      | Comma-separated vars to pass through when using `-c`            |
+| `-t TTL`       | Cache TTL in seconds. Default `3600`. `0` = keep forever        |
+| `-k HASH`      | Verify before running: `sha256:HASH` or `md5:HASH`              |
+| `-v`           | Verbose — prints fetch/cache activity to stderr                 |
+| `--no-verify`  | Skip TLS certificate checks on jbx's own downloads (see below)  |
+| `-h`, `--help` | This help. After SPEC, either one goes to the script instead    |
 
 ### `--no-verify`
 
