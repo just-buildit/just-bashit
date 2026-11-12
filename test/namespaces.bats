@@ -361,3 +361,85 @@ setup = "ps/setup.ps1"'
 	assert_output --partial "cannot resolve 'ns'"
 	[ ! -e "${XDG_CONFIG_HOME}/jb/namespaces" ]
 }
+
+# ---------------------------------------------------------------------------
+# The namespaces file is hand-editable: rows are read the way a person
+# writes them, and a broken row warns, naming the file and line.
+# ---------------------------------------------------------------------------
+
+@test 'a hand-written row with leading space, a tab or CRLF resolves' {
+	_ns_stub
+	mkdir -p "${XDG_CONFIG_HOME}/jb"
+	printf '  lead https://example.com/lead\ntab\thttps://example.com/tab/\ncr https://example.com/cr\r\n' \
+		>"${XDG_CONFIG_HOME}/jb/namespaces"
+	local ns
+	for ns in lead tab cr; do
+		_ns_put "https://example.com/${ns}/aliases.toml" '[aliases]'
+		_ns_put "https://example.com/${ns}/t.sh" "echo ran ${ns}"
+		run just-runit run -n "${ns}:t"
+		assert_success
+		assert_output "ran ${ns}"
+	done
+	run just-runit ns list
+	assert_line 'tab                   https://example.com/tab/'
+	assert_line 'cr                    https://example.com/cr/'
+}
+
+@test 'a hand-written row with no https base is skipped with a warning naming the line' {
+	_ns_stub
+	mkdir -p "${XDG_CONFIG_HOME}/jb"
+	printf '# mine\nbroken\nplain http://example.com\ngood https://example.com/good\n' \
+		>"${XDG_CONFIG_HOME}/jb/namespaces"
+	run just-runit ns list
+	assert_success
+	assert_output --partial "namespaces:2: skipped 'broken'"
+	assert_output --partial "namespaces:3: skipped 'plain http://example.com'"
+	assert_line 'good                  https://example.com/good/'
+	refute_line --regexp '^(broken|plain) '
+	# The broken row is removable with the tool.
+	run just-runit ns rm broken
+	assert_success
+	run grep -c broken "${XDG_CONFIG_HOME}/jb/namespaces"
+	assert_output 0
+}
+
+@test 'ns rm removes an indented or tab-separated row' {
+	_ns_stub
+	mkdir -p "${XDG_CONFIG_HOME}/jb"
+	printf '  lead https://example.com/lead\ntab\thttps://example.com/tab\n' \
+		>"${XDG_CONFIG_HOME}/jb/namespaces"
+	run just-runit ns rm lead
+	assert_success
+	run just-runit ns rm tab
+	assert_success
+	run grep -c example "${XDG_CONFIG_HOME}/jb/namespaces"
+	assert_output 0
+}
+
+@test 'ns rm compares the name literally: rm a.b leaves axb' {
+	_ns_stub
+	mkdir -p "${XDG_CONFIG_HOME}/jb"
+	printf 'a.b https://example.com/dot\naxb https://example.com/x\n' \
+		>"${XDG_CONFIG_HOME}/jb/namespaces"
+	run just-runit ns rm a.b
+	assert_success
+	run cat "${XDG_CONFIG_HOME}/jb/namespaces"
+	assert_output 'axb https://example.com/x'
+}
+
+@test 'ns add refuses a base with whitespace or a control character' {
+	_ns_stub
+	local base
+	for base in 'https://example.com/a b' $'https://example.com/a\tb' $'https://example.com/a\x01b'; do
+		run just-runit ns add sp "${base}"
+		assert_failure
+		assert_output --partial 'whitespace or control characters'
+	done
+	[ ! -e "${XDG_CONFIG_HOME}/jb/namespaces" ]
+}
+
+@test '-h says a self-hosted forge needs FORGE+' {
+	run just-runit run -h
+	assert_output --partial '[FORGE+]https://HOST/PROJECT//PATH[@REF]'
+	refute_output --partial 'on any forge'
+}
