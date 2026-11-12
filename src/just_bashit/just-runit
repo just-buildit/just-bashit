@@ -35,6 +35,27 @@ _NAMESPACES=(
 	"just-bashit ${_JBS_BASE}"
 	"just-makeit ${_JB_DEFAULT_BASE}/just-makeit"
 )
+
+# The user's own namespaces, added with `just-runit ns add NAME BASE`: one
+# "NAME BASE-URL" row per line, the same shape as _NAMESPACES, so every reader
+# of that table reads this file the same way. BASE is stored resolved (an
+# https URL with no trailing slash), so resolving NAME:SCRIPT is a lookup,
+# not a parse. Per user, beside jb/secrets: which bases to trust is the
+# user's call. A built-in name is never read from here (_ns_base checks the
+# table first), so a hand-edited row cannot redirect one.
+_NS_FILE="${XDG_CONFIG_HOME:-${HOME}/.config}/jb/namespaces"
+_NS_CMD=0
+
+# _ns_user_rows -- the user's namespaces, one "NAME BASE" row per line;
+# nothing when there is no file. Comments and blank lines are skipped.
+_ns_user_rows() {
+	local line
+	[[ -f ${_NS_FILE} ]] || return 0
+	while IFS= read -r line || [[ -n ${line} ]]; do
+		[[ ${line} =~ ^[[:space:]]*(#|$) ]] && continue
+		printf '%s\n' "${line}"
+	done <"${_NS_FILE}"
+}
 # The PowerShell hand-off (see "PowerShell scripts" below). get-jb.ps1's jbx
 # function sets JB_PS1_OUT to a file of its own; a run that resolves to a
 # PowerShell script writes it there instead of running it. Taken out of the
@@ -816,6 +837,15 @@ if [[ ${_ME} == "just-runit" ]]; then
 		_secret_main "$@"
 		exit 0
 		;;
+	ns)
+		# Dispatched here, run at the top of main: `ns add` resolves a base
+		# with the same code a SPEC is resolved with, defined further down.
+		shift
+		_ME="${_ME} ns"
+		_NS_CMD=1
+		_NS_ARGS=("$@")
+		set --
+		;;
 	version | -V | --version)
 		echo "${_ME} v${_VERSION}"
 		exit 0
@@ -829,6 +859,7 @@ if [[ ${_ME} == "just-runit" ]]; then
 			  install  Pre-fetch all tools declared in bootstrap.toml
 			  cache    Manage the local script cache
 			  secret   Store, get and use secrets encrypted with gpg or age
+			  ns       Add, list and remove your own namespaces (NS:NAME)
 			  version  Print version and exit
 
 			Run '${_ME} <command> -h' for details.
@@ -869,6 +900,10 @@ for _row in "${_NAMESPACES[@]}"; do
 	[[ ${_row%% *} == "${_JB_DEFAULT_NS}" ]] && _ns_help+="   (default)"
 	_ns_help+=$'\n'
 done
+while IFS= read -r _row; do
+	[[ -n ${_row} ]] || continue
+	_ns_help+="$(printf '  %-21s %s/   (yours)' "${_row%% *}" "${_row#* }")"$'\n'
+done < <(_ns_user_rows)
 _ns_help="${_ns_help%$'\n'}"
 
 read -r -d '' HELP <<-EOF || true
@@ -1013,22 +1048,25 @@ if [[ ${OPT_NO_VERIFY} -eq 1 ]]; then
 	echo "${_ME}: warning: --no-verify: TLS certificates are not checked" >&2
 fi
 
-[[ $# -eq 0 ]] && {
-	echo "${HELP}"
-	exit 1
-}
+# `just-runit ns` has no SPEC; it runs at the top of main.
+if [[ ${_NS_CMD} -eq 0 ]]; then
+	[[ $# -eq 0 ]] && {
+		echo "${HELP}"
+		exit 1
+	}
 
-RAW_SPEC="${1}"
-shift
-# Only treat the next arg as a function name if it doesn't look like a flag.
-# Flags (starting with -) and missing args fall through to ARGS unchanged.
-FUNC="${1:-}"
-if [[ -n ${FUNC} && ${FUNC} != -* ]]; then
-	shift || true
-else
-	FUNC=""
+	RAW_SPEC="${1}"
+	shift
+	# Only treat the next arg as a function name if it doesn't look like a
+	# flag. Flags (starting with -) and missing args fall through to ARGS.
+	FUNC="${1:-}"
+	if [[ -n ${FUNC} && ${FUNC} != -* ]]; then
+		shift || true
+	else
+		FUNC=""
+	fi
+	ARGS=("$@")
 fi
-ARGS=("$@")
 
 # ---- helpers ----------------------------------------------------------------
 
@@ -1157,7 +1195,8 @@ _head_ok() {
 	[[ ${code} == "200" || ${code} == "301" || ${code} == "302" ]]
 }
 
-# _ns_base NS -- the base URL of a built-in namespace; fails for any other.
+# _ns_base NS -- the base URL of a built-in namespace, else of one of the
+# user's; fails for any other. Built-ins first, so none can be redefined.
 _ns_base() {
 	local row
 	for row in "${_NAMESPACES[@]}"; do
@@ -1166,7 +1205,35 @@ _ns_base() {
 			return 0
 		fi
 	done
+	while IFS= read -r row; do
+		if [[ ${row%% *} == "${1}" ]]; then
+			printf '%s\n' "${row#* }"
+			return 0
+		fi
+	done < <(_ns_user_rows)
 	return 1
+}
+
+# _ns_known -- every namespace name, built-ins first, comma-separated.
+_ns_known() {
+	local row known=""
+	for row in "${_NAMESPACES[@]}"; do known+="${known:+, }${row%% *}"; done
+	while IFS= read -r row; do
+		known+="${known:+, }${row%% *}"
+	done < <(_ns_user_rows)
+	printf '%s\n' "${known}"
+}
+
+# _alias_url BASE VALUE -- an aliases.toml value as a URL. A value with no
+# colon is a path relative to BASE (`hello = "hello-world.sh"`), so a
+# namespace pinned to a ref keeps every alias at that ref; anything else (an
+# https URL, as every built-in serves) is used as written.
+_alias_url() {
+	if [[ ${2} == *:* ]]; then
+		printf '%s\n' "${2}"
+	else
+		printf '%s/%s\n' "${1}" "${2#./}"
+	fi
 }
 
 # Resolve NS:NAME or bare NAME against a namespace base URL.
@@ -1174,11 +1241,9 @@ _ns_base() {
 _resolve_ns() {
 	local ns="${1}" name="${2}"
 
-	local base row known=""
-	base=$(_ns_base "${ns}") || {
-		for row in "${_NAMESPACES[@]}"; do known+="${known:+, }${row%% *}"; done
-		_err "unknown namespace '${ns}'; known: ${known}"
-	}
+	local base
+	base=$(_ns_base "${ns}") ||
+		_err "unknown namespace '${ns}'; known: $(_ns_known) (add one: just-runit ns add NAME BASE)"
 	if [[ ${ns} == just-bashit ]]; then
 		# just-bashit uses the co-fetch mechanism; return internal marker.
 		echo "jbs:${name}"
@@ -1191,6 +1256,7 @@ _resolve_ns() {
 	# refusal _lookup_alias made would otherwise be dropped right here.
 	alias_url=$(_lookup_alias "${base}" "${name}") || exit 1
 	if [[ -n ${alias_url} ]]; then
+		alias_url=$(_alias_url "${base}" "${alias_url}")
 		_log "resolved '${name}' via aliases.toml -> ${alias_url}"
 		echo "${alias_url}"
 		return
@@ -1211,6 +1277,119 @@ _resolve_ns() {
 	fi
 
 	_err "cannot resolve '${name}' in namespace '${ns}' (checked ${base}/aliases.toml and ${url_sh})"
+}
+
+# ---- ns: the user's own namespaces -----------------------------------------
+
+read -r -d '' _NS_HELP <<-EOF || true
+	Usage: ${_ME} COMMAND [ARGS]
+
+	  Your own namespaces, so \`jbx NAME:SCRIPT\` works like the built-ins.
+	  Kept in ${_NS_FILE}.
+
+	Commands:
+	  add NAME BASE  Register NAME. BASE is one of:
+	                   gh:USER/REPO[/DIR][@REF]
+	                   [FORGE+]https://HOST/PROJECT//DIR[@REF]
+	                   https://HOST/PATH
+	  list           Every namespace: built-in, then yours
+	  rm NAME        Remove one of yours
+
+	  NAME:SCRIPT resolves as a built-in does: BASE/aliases.toml first (which
+	  BASE must serve), then BASE/SCRIPT.sh and BASE/SCRIPT.py. Pin a REF to
+	  pin every script the namespace serves.
+
+	Example:
+	  ${_ME} add examples gh:hunterdsp/examples/scripts
+	  jbx examples:hello
+EOF
+
+# _ns_base_of BASE -- BASE as the https URL it names, no trailing slash.
+# The SPEC forms, resolved by the same code a script SPEC is.
+_ns_base_of() {
+	local spec="${1}" url
+	case "${spec}" in
+	gh:*)
+		[[ ${spec} =~ ^gh:[^/@]+/[^/@]+(/[^@]*)?(@[^@/]+)?$ ]] ||
+			_err "bad gh: base '${spec}': use gh:USER/REPO[/DIR][@REF]"
+		url=$(_gh_raw "${spec#gh:}")
+		;;
+	[a-z]*+*://* | *://*/*//*)
+		# A raw-file layout is OWNER/REPO/REF/PATH, so the repository root
+		# is only nameable where jbx owns the shorthand: gh:USER/REPO.
+		[[ ${spec%@*} != *// ]] ||
+			_err "a repository base needs a DIR after '//' (${spec}); for a GitHub repository's root use gh:USER/REPO[@REF]"
+		url=$(_resolve_repo "${spec}") || exit 1
+		;;
+	https://*) url="${spec}" ;;
+	*) _err "bad base '${spec}': use gh:USER/REPO[/DIR][@REF], [FORGE+]https://HOST/PROJECT//DIR[@REF] or an https:// URL" ;;
+	esac
+	printf '%s\n' "${url%/}"
+}
+
+_ns_add() {
+	[[ $# -eq 2 ]] || _err "usage: ${_ME} add NAME BASE"
+	local name="${1}" base row
+	[[ ${name} =~ ^[a-z0-9][a-z0-9-]*$ ]] ||
+		_err "bad namespace name '${name}': lowercase letters, digits and '-'"
+	# gh:... is matched as the GitHub shorthand before any namespace is.
+	[[ ${name} != gh ]] ||
+		_err "'gh' is the GitHub shorthand (gh:USER/REPO/PATH), not a namespace"
+	for row in "${_NAMESPACES[@]}"; do
+		[[ ${row%% *} != "${name}" ]] ||
+			_err "'${name}' is a built-in namespace and cannot be redefined"
+	done
+	if row=$(_ns_base "${name}"); then
+		_err "'${name}' is already yours (${row}); remove it first: ${_ME} rm ${name}"
+	fi
+	base=$(_ns_base_of "${2}") || exit 1
+	mkdir -p "${_NS_FILE%/*}"
+	[[ -s ${_NS_FILE} ]] ||
+		printf '# jbx namespaces, "NAME BASE-URL" per line: just-runit ns\n' >"${_NS_FILE}"
+	printf '%s %s\n' "${name}" "${base}" >>"${_NS_FILE}"
+	printf '%s -> %s/\n' "${name}" "${base}"
+}
+
+_ns_rm() {
+	[[ $# -eq 1 ]] || _err "usage: ${_ME} rm NAME"
+	local name="${1}" row line tmp
+	for row in "${_NAMESPACES[@]}"; do
+		[[ ${row%% *} != "${name}" ]] ||
+			_err "'${name}' is a built-in namespace and cannot be removed"
+	done
+	_ns_base "${name}" >/dev/null || _err "'${name}' is not one of your namespaces"
+	tmp="${_NS_FILE}.new"
+	while IFS= read -r line || [[ -n ${line} ]]; do
+		[[ ${line} =~ ^[[:space:]]*${name}[[:space:]] ]] || printf '%s\n' "${line}"
+	done <"${_NS_FILE}" >"${tmp}"
+	mv "${tmp}" "${_NS_FILE}"
+	printf 'removed %s\n' "${name}"
+}
+
+_ns_list() {
+	local row
+	for row in "${_NAMESPACES[@]}"; do
+		printf '%-21s %s/   (built-in)\n' "${row%% *}" "${row#* }"
+	done
+	while IFS= read -r row; do
+		printf '%-21s %s/\n' "${row%% *}" "${row#* }"
+	done < <(_ns_user_rows)
+}
+
+_ns_main() {
+	local cmd="${1:-}"
+	shift || true
+	case "${cmd}" in
+	add) _ns_add "$@" ;;
+	list) _ns_list ;;
+	rm) _ns_rm "$@" ;;
+	"" | -h | --help | help) printf '%s\n' "${_NS_HELP}" ;;
+	*)
+		echo "${_ME}: unknown command '${cmd}'" >&2
+		echo "Run '${_ME} -h' for usage." >&2
+		exit 1
+		;;
+	esac
 }
 
 # ---- PowerShell scripts -----------------------------------------------------
@@ -1255,6 +1434,7 @@ _resolve_ps1() {
 	base=$(_ns_base "${ns}") || return 0
 	url=$(_lookup_alias "${base}" "${name}" aliases.ps1) || exit 1
 	if [[ -n ${url} ]]; then
+		url=$(_alias_url "${base}" "${url}")
 		_log "resolved '${name}' via aliases.toml [aliases.ps1] -> ${url}"
 		printf '%s\n' "${url}"
 		return 0
@@ -1388,6 +1568,22 @@ _resolve_repo() {
 	esac
 }
 
+# _gh_raw USER/REPO[/PATH][@REF] -- the raw.githubusercontent.com URL of
+# the gh: shorthand; REF defaults to main. With no PATH it is the repository
+# root at REF, which is what a namespace based on a whole repository needs.
+_gh_raw() {
+	local spec="${1}" ref="main" user repo path=""
+	if [[ ${spec} == *@* ]]; then
+		ref="${spec##*@}"
+		spec="${spec%@*}"
+	fi
+	user="${spec%%/*}"
+	spec="${spec#*/}"
+	repo="${spec%%/*}"
+	[[ ${spec} == */* ]] && path="/${spec#*/}"
+	echo "https://raw.githubusercontent.com/${user}/${repo}/${ref}${path}"
+}
+
 _resolve() {
 	local raw="${1}"
 	case "${raw}" in
@@ -1409,19 +1605,7 @@ _resolve() {
 		*) _err "unrecognised URL scheme: ${raw}" ;;
 		esac
 		;;
-	gh:*)
-		local spec="${raw#gh:}" ref="main"
-		if [[ ${spec} == *@* ]]; then
-			ref="${spec##*@}"
-			spec="${spec%@*}"
-		fi
-		local user repo path
-		user="${spec%%/*}"
-		spec="${spec#*/}"
-		repo="${spec%%/*}"
-		path="${spec#*/}"
-		echo "https://raw.githubusercontent.com/${user}/${repo}/${ref}/${path}"
-		;;
+	gh:*) _gh_raw "${raw#gh:}" ;;
 	*:*)
 		# NS:NAME form (not a URL scheme — no :// present).
 		local ns="${raw%%:*}" name="${raw#*:}"
@@ -2622,6 +2806,11 @@ _run() {
 }
 
 # ---- main -------------------------------------------------------------------
+
+if [[ ${_NS_CMD} -eq 1 ]]; then
+	_ns_main "${_NS_ARGS[@]+"${_NS_ARGS[@]}"}"
+	exit 0
+fi
 
 # -n fetches into a directory this shell owns, so it is THIS shell's EXIT
 # trap that removes it, after the script has run -- not the trap of the

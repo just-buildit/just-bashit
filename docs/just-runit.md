@@ -248,7 +248,7 @@ ______________________________________________________________________
 | Form                                       | Example                                        | Resolves to                                                                       |
 | ------------------------------------------ | ---------------------------------------------- | --------------------------------------------------------------------------------- |
 | `NAME`                                     | `install-deps`                                 | default namespace (`just-buildit.github.io`) via `aliases.toml` then direct probe |
-| `NS:NAME`                                  | `just-bashit:logging`                          | namespace `NS` — built-in: `just-buildit`, `just-bashit`, `just-makeit`           |
+| `NS:NAME`                                  | `just-bashit:logging`                          | namespace `NS` — built-in, or [your own](#your-own-namespaces)                    |
 | `gh:USER/REPO/PATH`                        | `gh:user/repo/tool.sh`                         | GitHub raw content, default branch `main`                                         |
 | `gh:USER/REPO/PATH@REF`                    | `gh:user/repo/tool.sh@v2.1.0`                  | GitHub raw content at a specific ref/tag/SHA                                      |
 | `https://...`                              | `https://example.com/tool.sh`                  | Any HTTPS URL                                                                     |
@@ -300,6 +300,55 @@ jbx https://gitlab.com/acme/tools//ci/deploy.sh@v1.4.0 run --env prod
     libraries. When you use `just-bashit:NAME`, `jbx` co-fetches the entire `src/`
     directory into a single cache folder so relative inter-source calls
     resolve correctly — you don't have to manage this yourself.
+
+### Your own namespaces
+
+Register a base once and its scripts get the same short form as the
+built-ins:
+
+```bash
+just-runit ns add examples gh:hunterdsp/examples/scripts
+jbx examples:hello
+# Hello World!
+```
+
+`NAME:SCRIPT` then resolves exactly as a built-in does: `BASE/aliases.toml`
+first, then `BASE/SCRIPT.sh` and `BASE/SCRIPT.py`. Caching, `-r`, `-n`, `-k`
+and the [PowerShell hand-off](#powershell-scripts) all apply unchanged.
+
+| BASE                                      | Example                                 |
+| ----------------------------------------- | --------------------------------------- |
+| `gh:USER/REPO[/DIR][@REF]`                | `gh:hunterdsp/examples/scripts@50b94ec` |
+| `[FORGE+]https://HOST/PROJECT//DIR[@REF]` | `https://gitlab.com/acme/tools//ci@v2`  |
+| `https://HOST/PATH`                       | `https://tools.example.com/sh`          |
+
+`gh:` defaults to `main` and a repository URL to the default branch, as they
+do for a script. **Pin a REF to pin the whole namespace:** every script it
+serves then comes from that commit.
+
+**The repository chooses the short names**, in an `aliases.toml` at BASE.
+It must serve one even if it is empty, as every built-in does — a base whose
+`aliases.toml` cannot be fetched is refused rather than probed
+([#164](https://github.com/just-buildit/just-bashit/issues/164)). A value
+with no `:` is a path relative to BASE, so it stays at a pinned REF:
+
+```toml
+[aliases]
+hello = "hello-world.sh"                       # BASE/hello-world.sh
+far   = "https://cdn.example.org/far.sh"       # used as written
+```
+
+```
+just-runit ns add NAME BASE   # register; BASE is stored as the URL it names
+just-runit ns list            # built-ins, then yours
+just-runit ns rm NAME         # remove one of yours
+```
+
+They are kept in `${XDG_CONFIG_HOME:-~/.config}/jb/namespaces`, one
+`NAME BASE-URL` per line. A built-in name cannot be added or removed, and a
+built-in always resolves first, so a hand-edited line cannot redirect
+`just-bashit:` or the default namespace. `gh` is not a namespace name: it is
+the GitHub shorthand.
 
 ### Repository URLs
 
@@ -602,6 +651,10 @@ with the rename to make. See [bootstrap.toml](bootstrap-toml.md).
 
 `just-runit install --no-verify` fetches every tool with
 [`--no-verify`](#-no-verify).
+
+### `just-runit ns`
+
+Add, list and remove [your own namespaces](#your-own-namespaces).
 
 ### `just-runit cache`
 
