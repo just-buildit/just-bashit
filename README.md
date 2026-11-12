@@ -32,15 +32,15 @@ jbx setup-system -s shell,ssh,git  # only these
 jbx setup-system -x claude,pwsh    # all but these
 ```
 
-| Step     | What you get                                        |
-| -------- | --------------------------------------------------- |
-| `deps`   | compiler, make, cmake, git, curl, ssh, gpg, age     |
-| `shell`  | bash config, one source line in `~/.bashrc`         |
-| `ssh`    | permissions fixed; a host key only if you have none |
-| `git`    | defaults only where you haven't set one             |
-| `tools`  | uv, plus pre-commit hooks in a repo that has them   |
-| `pwsh`   | PowerShell 7 + PSScriptAnalyzer                     |
-| `claude` | Claude Code                                         |
+| Step     | What you get                                                                |
+| -------- | --------------------------------------------------------------------------- |
+| `deps`   | compiler, make, cmake, git, curl, ssh, gpg, age                             |
+| `shell`  | bash config, a source line in `~/.bashrc` and `~/.profile`                  |
+| `ssh`    | permissions fixed; a user key named for this machine, only if you have none |
+| `git`    | defaults only where you haven't set one                                     |
+| `tools`  | uv, plus pre-commit hooks in a repo that has them                           |
+| `pwsh`   | PowerShell 7 + PSScriptAnalyzer                                             |
+| `claude` | Claude Code                                                                 |
 
 `certs` and `sshd` run only when you name them; on native Windows `sshd`
 and `folders` run by default.
