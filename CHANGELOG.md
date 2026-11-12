@@ -68,6 +68,12 @@
 
 ### Fixed
 
+- **runner-host: each job VM is sized as configured.** A clone kept the
+    CPU and memory the image was built with, so an image built before
+    `JB_RUNNER_MEMORY` fell to 6144 MB booted two 8 GB VMs on a 16 GB Mac.
+    `run` now sets each clone to `JB_RUNNER_CPU` and `JB_RUNNER_MEMORY`
+    before it boots.
+
 - **setup-system's ssh step keeps a Mac's key name and reaches GitHub
     (#225).** A Mac with no `HostName` takes its name from the network, so
     the box key's name and ssh's `%l` drifted apart. The step now sets
