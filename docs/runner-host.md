@@ -38,13 +38,41 @@ clones its own VM, and registers its own runner, with the same labels. One
 slot failing backs off only that slot. A SIGTERM stops every slot: each
 deletes its VM and deregisters its runner.
 
+### One Mac, two orgs
+
+Each slot can serve a different org. `JB_RUNNER_ORGS` lists them in slot
+order, so this gives slot 1 to just-buildit and slot 2 to doppler-dsp:
+
+```sh
+JB_RUNNER_ORGS=just-buildit,doppler-dsp runner-host.sh install
+```
+
+One org (the default, `JB_RUNNER_ORG`) serves every slot. Two orgs need two
+slots, one each, since the two-VM limit still holds. The slot's org decides
+its registration token, where its runner registers, and where it is
+deregistered. `status` lists each org's runners, and `uninstall` and the
+start-up sweep of leftover VMs deregister in every org.
+
+Both orgs' runners carry the same labels. That is harmless: a runner
+registered to one org never sees another org's jobs.
+
 ## The token
 
-`run` needs a fine-grained personal access token. Its resource owner is the
-org, with the Organization permission **Self-hosted runners: Read and write**.
-Save it, mode 600, at `~/.config/jb-runner/token`. `run` and `install` refuse
-a token file another account can read, one owned by another user, or a
-symlink.
+`run` needs a fine-grained personal access token per org. Its resource owner
+is the org, with the Organization permission **Self-hosted runners: Read and
+write**. A fine-grained token has one resource owner, so a second org needs a
+token of its own.
+
+| org                            | token file (mode 600)                   |
+| ------------------------------ | --------------------------------------- |
+| `JB_RUNNER_ORG` (just-buildit) | `~/.config/jb-runner/token`             |
+| any other, e.g. doppler-dsp    | `~/.config/jb-runner/token.doppler-dsp` |
+
+`token.<org>` sits beside `JB_RUNNER_TOKEN_FILE`, and wins for
+`JB_RUNNER_ORG` too when it exists. Another org never falls back to the
+plain `token`: that would send one org's token to another's API. `run` and
+`install` check every org's token first, and refuse a missing one, one
+another account can read, one owned by another user, or a symlink.
 
 The token never enters a VM. It reaches `curl` as a header on stdin, so no
 `ps` on the host can see it. Each VM gets only a short-lived registration

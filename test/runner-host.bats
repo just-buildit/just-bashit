@@ -87,7 +87,13 @@ setup() {
 	cat >"${STUBS}/curl" <<-'EOF'
 		#!/bin/bash
 		printf 'curl %s\n' "$*" >>"${LOG}"
-		[[ " $* " == *" @- "* ]] && printf 'curl-stdin %s\n' "$(cat)" >>"${LOG}"
+		if [[ " $* " == *" @- "* ]]; then
+			hdr="$(cat)"
+			printf 'curl-stdin %s\n' "${hdr}" >>"${LOG}"
+			# One line, one write: which PAT went to which URL, even with
+			# two slots calling at once.
+			printf 'curl-as %s %s\n' "${@: -1}" "${hdr}" >>"${LOG}"
+		fi
 		case "$*" in
 		*registration-token*) printf '{"token":"REG-TOKEN-456"}\n' ;;
 		*-X\ DELETE*) ;;
@@ -131,6 +137,12 @@ setup() {
 	PATH="${STUBS}:${PATH}"
 }
 
+# org-b's own PAT, beside the default one, as token.<org>.
+_org_b_token() {
+	printf 'pat-OTHER-789\n' >"${BATS_TEST_TMPDIR}/token.org-b"
+	chmod 600 "${BATS_TEST_TMPDIR}/token.org-b"
+}
+
 @test 'runner-host --help prints usage' {
 	run runner-host.sh --help
 	assert_success
@@ -172,7 +184,7 @@ setup() {
 	run grep -F 'curl-stdin Authorization: Bearer pat-SECRET-123' "${LOG}"
 	assert_success
 	# On no command line, and never in what a VM is sent.
-	run grep -F 'pat-SECRET-123' <(grep -v '^curl-stdin ' "${LOG}")
+	run grep -F 'pat-SECRET-123' <(grep -vE '^curl-(stdin|as) ' "${LOG}")
 	assert_failure
 	# The VM gets the short-lived registration token, on stdin.
 	run grep -Fx 'stdin REG-TOKEN-456' "${LOG}"
@@ -293,16 +305,20 @@ setup() {
 }
 
 @test 'install: writes the effective configuration into the daemon' {
+	_org_b_token
 	JB_RUNNER_PLIST="${BATS_TEST_TMPDIR}/daemon.plist" \
 		JB_RUNNER_INSTALL_DIR="${BATS_TEST_TMPDIR}/libexec" \
 		JB_RUNNER_LABELS='self-hosted, macOS ,ARM64' \
-		JB_RUNNER_ORG='a&b' \
+		JB_RUNNER_IMAGE='a&b' \
+		JB_RUNNER_ORG=org-a JB_RUNNER_ORGS='org-a,org-b' JB_RUNNER_VMS=2 \
 		run runner-host.sh install
 	assert_success
 	local plist="${BATS_TEST_TMPDIR}/daemon.plist"
 	run grep -F '<key>JB_RUNNER_LABELS</key><string>self-hosted,macOS,ARM64</string>' "${plist}"
 	assert_success
-	run grep -F '<key>JB_RUNNER_ORG</key><string>a&amp;b</string>' "${plist}"
+	run grep -F '<key>JB_RUNNER_IMAGE</key><string>a&amp;b</string>' "${plist}"
+	assert_success
+	run grep -F '<key>JB_RUNNER_ORGS</key><string>org-a,org-b</string>' "${plist}"
 	assert_success
 	run grep -F '<key>JB_RUNNER_HOST_TAG</key><string>testhost</string>' "${plist}"
 	assert_success
@@ -457,14 +473,14 @@ setup() {
 	run grep -cE '^tart clone jb-base jb-job-testhost-s2-[0-9]+$' "${LOG}"
 	assert_output 1
 	# A registration token each, minted separately.
-	run grep -c 'registration-token' "${LOG}"
+	run grep -c '^curl .*registration-token' "${LOG}"
 	assert_output 2
 	# Each runner registered under its own VM's name.
 	run sort -u "${REGISTERED}"
 	assert_line --regexp '^jb-job-testhost-s1-[0-9]+$'
 	assert_line --regexp '^jb-job-testhost-s2-[0-9]+$'
 	# And the PAT still never left curl's stdin.
-	run grep -F 'pat-SECRET-123' <(grep -v '^curl-stdin ' "${LOG}")
+	run grep -F 'pat-SECRET-123' <(grep -vE '^curl-(stdin|as) ' "${LOG}")
 	assert_failure
 	run ls "${STATE}"
 	assert_output jb-base
@@ -560,4 +576,100 @@ setup() {
 	refute_output --partial 'lock.stale'
 	run grep -E '^tart (clone|delete)' "${LOG}"
 	assert_failure
+}
+
+@test 'orgs: one slot per org, each with its own PAT' {
+	_org_b_token
+	JB_RUNNER_ORG=org-a JB_RUNNER_ORGS='org-a, org-b' JB_RUNNER_VMS=2 \
+		run runner-host.sh run --once
+	assert_success
+	# Slot 1 mints for org-a with org-a's PAT, slot 2 for org-b with its own.
+	run grep -E '^curl-as \S+/orgs/org-a/actions/runners/registration-token Authorization: Bearer pat-SECRET-123$' "${LOG}"
+	assert_success
+	run grep -E '^curl-as \S+/orgs/org-b/actions/runners/registration-token Authorization: Bearer pat-OTHER-789$' "${LOG}"
+	assert_success
+	# Neither PAT ever reaches the other org.
+	run grep -E '^curl-as \S+/orgs/org-a/.*pat-OTHER-789|^curl-as \S+/orgs/org-b/.*pat-SECRET-123' "${LOG}"
+	assert_failure
+	# Each runner registers to its slot's org.
+	run grep -E '_ https://github\.com/org-a jb-job-testhost-s1-[0-9]+ ' "${LOG}"
+	assert_success
+	run grep -E '_ https://github\.com/org-b jb-job-testhost-s2-[0-9]+ ' "${LOG}"
+	assert_success
+	# And each cleans up in its own org.
+	run grep -E '^curl .*-X DELETE .*/orgs/org-a/actions/runners/7$' "${LOG}"
+	assert_success
+	run grep -E '^curl .*-X DELETE .*/orgs/org-b/actions/runners/7$' "${LOG}"
+	assert_success
+	run grep -F 'pat-' <(grep -vE '^curl-(stdin|as) ' "${LOG}")
+	assert_failure
+}
+
+@test 'orgs: another org never falls back to the default PAT' {
+	JB_RUNNER_ORG=org-a JB_RUNNER_ORGS=org-a,org-b JB_RUNNER_VMS=2 \
+		run runner-host.sh run --once
+	assert_failure
+	assert_output --partial "no token at ${BATS_TEST_TMPDIR}/token.org-b"
+	run cat "${LOG}"
+	assert_output ''
+	# Its own PAT is held to the same rules as the default one.
+	_org_b_token
+	chmod 644 "${BATS_TEST_TMPDIR}/token.org-b"
+	JB_RUNNER_ORG=org-a JB_RUNNER_ORGS=org-a,org-b JB_RUNNER_VMS=2 \
+		run runner-host.sh run --once
+	assert_failure
+	assert_output --partial 'token.org-b is mode 644'
+}
+
+@test 'orgs: a name that is not an org, or a count that is not the slots, is refused' {
+	local orgs
+	for orgs in 'org-a,../x' 'org-a,' 'a b' '-org' 'org-a,org-b,org-c'; do
+		: >"${LOG}"
+		JB_RUNNER_ORGS="${orgs}" JB_RUNNER_VMS=2 run runner-host.sh run --once
+		assert_failure
+		run cat "${LOG}"
+		assert_output ''
+	done
+	JB_RUNNER_ORGS=org-a,org-b JB_RUNNER_VMS=1 run runner-host.sh run --once
+	assert_failure
+	assert_output --partial 'names 2 orgs for 1 slot(s)'
+	JB_RUNNER_ORGS='org-a,../x' JB_RUNNER_VMS=2 run runner-host.sh --dry-run install
+	assert_failure
+	assert_output --partial 'not a GitHub org name'
+}
+
+@test 'orgs: stale runners, uninstall and status cover every org' {
+	_org_b_token
+	export JB_RUNNER_ORG=org-a JB_RUNNER_ORGS=org-a,org-b JB_RUNNER_VMS=2
+	touch "${STATE}/jb-job-testhost-s2-1"
+	printf '%s\n' jb-job-testhost-s2-1 >"${REGISTERED}"
+	run runner-host.sh run --once
+	assert_success
+	# The stale VM's runner could be in either org; both are asked, each
+	# with its own PAT: once for the stale VM, once as its slot cleans up.
+	run grep -cE '^curl-as \S+/orgs/org-a/actions/runners\?per_page=100 Authorization: Bearer pat-SECRET-123$' "${LOG}"
+	assert_output 2
+	run grep -cE '^curl-as \S+/orgs/org-b/actions/runners\?per_page=100 Authorization: Bearer pat-OTHER-789$' "${LOG}"
+	assert_output 2
+	: >"${LOG}"
+	printf '%s\n' jb-job-testhost-1 >"${REGISTERED}"
+	JB_RUNNER_PLIST="${BATS_TEST_TMPDIR}/daemon.plist" run runner-host.sh uninstall
+	assert_success
+	run grep -cE '^curl .*-X DELETE .*/orgs/org-[ab]/actions/runners/7$' "${LOG}"
+	assert_output 2
+	run grep -E '^curl .*-X DELETE .*/orgs/org-b/' "${LOG}"
+	assert_success
+	run runner-host.sh status
+	assert_success
+	assert_line 'runners registered to org-a:'
+	assert_line 'runners registered to org-b:'
+}
+
+@test 'orgs: a token.<org> for the default org wins over the default file' {
+	printf 'pat-OWN-A\n' >"${BATS_TEST_TMPDIR}/token.org-a"
+	chmod 600 "${BATS_TEST_TMPDIR}/token.org-a"
+	JB_RUNNER_ORG=org-a run runner-host.sh run --once
+	assert_success
+	run grep -E '^curl-as \S+/orgs/org-a/actions/runners/registration-token Authorization: Bearer pat-OWN-A$' "${LOG}"
+	assert_success
 }
