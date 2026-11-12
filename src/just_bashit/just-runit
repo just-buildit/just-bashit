@@ -906,74 +906,55 @@ while IFS= read -r _row; do
 done < <(_ns_user_rows)
 _ns_help="${_ns_help%$'\n'}"
 
+# The help is an index, not the manual: what to type, one line per option,
+# and a link for the rest (forge syntax, resolution order, --no-verify's
+# caveats live in the docs). Under `just-runit run` the jbx spelling is shown
+# too; under `jbx` it would be the same line twice.
+_usage_alt=""
+[[ ${_ME} == jbx ]] || _usage_alt=$'\n   or: jbx [OPTIONS] SPEC [FUNCTION [ARGS...]]'
+
 read -r -d '' HELP <<-EOF || true
-	Usage: ${_ME} [OPTIONS] SPEC [FUNCTION [ARGS...]]
-	   or: jbx [OPTIONS] SPEC [FUNCTION [ARGS...]]
+	Usage: ${_ME} [OPTIONS] SPEC [FUNCTION [ARGS...]]${_usage_alt}
 
-	  Ephemeral tool runner. Resolve SPEC to a script, optionally call
-	  FUNCTION with ARGS, then discard — no installation, no env pollution.
+	  Fetch a script and run it, or just one FUNCTION in it, then discard
+	  it. Nothing is installed.
 
-	SPEC forms:
-	  NAME                  bare name, resolved via default namespace (just-buildit)
-	  NS:NAME               explicit namespace (e.g. just-bashit:logging)
-	  gh:USER/REPO/PATH     GitHub raw, default branch main
-	  gh:USER/REPO/PATH@REF GitHub raw at a specific ref/tag/sha
-	  https://URL           direct URL
-	  [FORGE+]https://HOST[:PORT]/PROJECT//PATH[@REF]
-	                        a script in a repository, by its path in the
-	                        repo; REF defaults to HEAD (the default branch).
-	                        FORGE: github, gitlab, gitea (forgejo), bitbucket;
-	                        optional for github.com, gitlab.com, codeberg.org
-	                        and bitbucket.org. Public repos only, HTTPS only.
+	SPEC:
+	  NAME                        a script in the default namespace
+	  NS:NAME                     a script in namespace NS (below)
+	  gh:USER/REPO/PATH[@REF]     a file on GitHub; REF defaults to main
+	  https://URL                 any HTTPS URL
+	  https://HOST/PROJECT//PATH[@REF]
+	                              a file in a repository on any forge
 
 	Namespaces:
 	${_ns_help}
-
-	Resolution order for NAME / NS:NAME:
-	  1. aliases.toml at namespace base
-	  2. Direct URL probe: NS_BASE/NAME.sh then NS_BASE/NAME.py
-	  From PowerShell (get-jb.ps1's jbx), first [aliases.ps1] in
-	  aliases.toml, then NS_BASE/NAME.ps1: run in the PowerShell session.
+	  Add your own: just-runit ns add NAME BASE
 
 	Options:
-	  -h        Show this message and exit.
-	  -l        List functions defined by SPEC, and by the files it sources,
-	            then exit. Nothing runs: a shell script is read, a Python
-	            one parsed.
-	  -f        Fetch only — cache SPEC, print its path, run nothing.
-	  -r        Refresh — ignore and overwrite cached copy.
-	  -n        No-cache — fetch fresh, discard on exit (cache untouched).
-	  -c        Clean environment (minimal, like sudo without -E).
-	  -p VARS   Comma-separated var names to pass through with -c.
-	  -t TTL    Cache TTL in seconds (default 3600). 0 = keep forever.
-	  -k HASH   Verify script before running: sha256:HASH or md5:HASH.
-	  --no-verify
-	            Skip TLS certificate checks on ${_ME}'s own downloads
-	            (curl --insecure), e.g. behind a TLS-intercepting proxy.
-	            Warns when used. Pair it with -k HASH so the script is
-	            still verified. Downloads the script itself makes are
-	            not affected.
-	  -v        Verbose.
+	  -k HASH      verify before running: sha256:HASH or md5:HASH
+	  -l           list the functions SPEC defines; run nothing
+	  -f           fetch only: print the cached path; run nothing
+	  -r           refetch, ignoring the cache
+	  -n           fetch fresh and keep nothing
+	  -t TTL       cache lifetime in seconds (default ${_DEFAULT_TTL}; 0 = forever)
+	  -c           clean environment; -p VARS passes the named vars through
+	  --no-verify  skip TLS checks on jbx's own downloads; pair it with -k
+	  -v           verbose
+	  -h, --help   this help
 
-	Language detection (automatic):
-	  .sh / bash shebang   Sourced into a bash subshell; FUNCTION supported.
-	  .py / python shebang Run with uv run (PEP 723 inline deps) or python3.
-	                       FUNCTION not supported for Python — pass args directly.
+	  A .py script runs under uv (PEP 723) or python3, and takes ARGS, not
+	  FUNCTION.
 
 	Examples:
-	  ${_ME} install-deps -s apt
-	  ${_ME} just-bashit:logging log "hello"
-	  ${_ME} just-makeit:install-deps
-	  ${_ME} just-bashit:datetime iso-8601-basic -m
-	  ${_ME} gh:user/repo/tools/deploy.sh run --env prod
-	  ${_ME} gh:user/repo/tool.sh@v2.1.0 setup
-	  ${_ME} https://gitlab.com/group/sub/repo//bin/tool.sh@v2 run
-	  ${_ME} gitea+https://git.example.com:3000/ops/tools//deploy.sh deploy
-	  ${_ME} https://example.com/tool.sh
-	  ${_ME} https://example.com/tool.py --flag value
-	  ${_ME} -l just-bashit:logging
-	  ${_ME} -c -p HOME,TERM https://example.com/tool.sh func arg
-	  ${_ME} -n -k sha256:abc123 https://example.com/tool.sh fn
+	  jbx install-deps -s apt
+	  jbx just-bashit:datetime iso-8601-basic
+	  jbx -l just-bashit:logging
+	  jbx gh:user/repo/tool.sh@v2.1.0 setup
+	  jbx -k sha256:HASH https://example.com/tool.sh
+
+	More: https://just-buildit.github.io/just-bashit/just-runit/
+	just-runit also has commands (install, cache, secret, ns): just-runit -h
 EOF
 
 # ---- parse options ----------------------------------------------------------
@@ -990,6 +971,10 @@ while [[ $# -gt 0 ]]; do
 	--no-verify)
 		OPT_NO_VERIFY=1
 		shift
+		;;
+	--help)
+		echo "${HELP}"
+		exit 0
 		;;
 	--)
 		_opts+=("${1}")
@@ -1276,6 +1261,7 @@ _resolve_ns() {
 		return
 	fi
 
+	[[ ${name} == help ]] && _err "no script named 'help' in namespace '${ns}'; for jbx's own help: ${_ME} -h"
 	_err "cannot resolve '${name}' in namespace '${ns}' (checked ${base}/aliases.toml and ${url_sh})"
 }
 
