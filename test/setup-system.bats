@@ -3331,6 +3331,16 @@ _osup_fixture() {
 		fi
 		exec "$@"
 	EOF2
+	# CI's distro containers run as root, where there is no one to grant
+	# anything; the step is tested as an ordinary user (OSUP_UID overrides).
+	cat >"${stubs}/id" <<-'EOF2'
+		#!/usr/bin/env bash
+		case "$*" in
+		-u) echo "${OSUP_UID:-1000}" ;;
+		-un) echo osup-tester ;;
+		*) exec /usr/bin/id "$@" ;;
+		esac
+	EOF2
 	cat >"${stubs}/visudo" <<-'EOF2'
 		#!/usr/bin/env bash
 		echo "visudo $*" >>"${CALLS}"
@@ -3358,7 +3368,7 @@ _osup_run() { run env JB_UNAME_S="${OSUP_UNAME:-Linux}" setup-system.sh -s certs
 	assert_success
 	assert_output --partial "os-upgrade-no-pass: ok (sudo -n /usr/local/sbin/jb-os-upgrade)"
 	run cat "${OSUP_RULE}"
-	assert_output "$(id -un) ALL=(root) NOPASSWD: /usr/local/sbin/jb-os-upgrade \"\""
+	assert_output "osup-tester ALL=(root) NOPASSWD: /usr/local/sbin/jb-os-upgrade \"\""
 	run grep -c 'apt-get' "${OSUP_BIN}"
 	assert_output "2"
 	assert [ -x "${OSUP_BIN}" ]
@@ -3405,6 +3415,14 @@ _osup_run() { run env JB_UNAME_S="${OSUP_UNAME:-Linux}" setup-system.sh -s certs
 	assert_output --partial "os-upgrade-no-pass: failed (rule not in effect)"
 }
 
+@test 'os-upgrade-no-pass: as root there is no one to grant' {
+	_osup_fixture
+	OSUP_UID=0 _osup_run --os-upgrade-no-pass
+	assert_success
+	assert_output --partial "os-upgrade-no-pass: skipped (root)"
+	assert [ ! -e "${OSUP_RULE}" ]
+}
+
 @test 'os-upgrade-no-pass: brew needs no sudo, so nothing is written' {
 	_osup_fixture
 	OSUP_UNAME=Darwin _osup_run --os-upgrade-no-pass
@@ -3417,7 +3435,7 @@ _osup_run() { run env JB_UNAME_S="${OSUP_UNAME:-Linux}" setup-system.sh -s certs
 	_osup_fixture
 	_osup_run --os-upgrade-no-pass --dry-run
 	assert_success
-	assert_output --regexp "would run: (sudo )?install -m 0440 <$(id -un) NOPASSWD: /usr/local/sbin/jb-os-upgrade> ${OSUP_RULE}"
+	assert_output --regexp "would run: (sudo )?install -m 0440 <osup-tester NOPASSWD: /usr/local/sbin/jb-os-upgrade> ${OSUP_RULE}"
 	assert [ ! -e "${OSUP_RULE}" ]
 	assert [ ! -e "${OSUP_BIN}" ]
 }
