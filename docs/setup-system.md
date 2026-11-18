@@ -652,8 +652,40 @@ ______________________________________________________________________
 |            | `--key-name NAME`           | ssh key filename (default: this hostname)                                                                                                                                                                                                                          |
 |            | `--github-user NAME`        | sshd: authorize `github.com/NAME.keys`                                                                                                                                                                                                                             |
 |            | `--sshd-allow ADDRS`        | sshd: addresses the firewall admits to port 22                                                                                                                                                                                                                     |
+|            | `--os-upgrade-no-pass`      | Also let this user upgrade the OS packages with no password, and nothing else ([below](#passwordless-os-upgrades))                                                                                                                                                 |
 |            | `--template [PATH]`         | Write the bashrc template to PATH, or stdout                                                                                                                                                                                                                       |
 |            | `--template-profile [PATH]` | Write the profile template to PATH, or stdout                                                                                                                                                                                                                      |
+
+### Passwordless OS upgrades
+
+`--os-upgrade-no-pass` is for a machine whose packages are upgraded
+unattended: over a one-shot `ssh`, from a timer, or by an agent such as a
+maintenance bot. None of them has a terminal to type a sudo password into,
+so `sudo -n apt-get upgrade` fails with `a password is required`. The flag
+grants that one command and no other:
+
+| File                            | Owner, mode | What it is                                                                                                                                                                            |
+| ------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/usr/local/sbin/jb-os-upgrade` | root, 0755  | This machine's full upgrade (`apt-get update` + `upgrade`, `pacman -Syu`, `dnf upgrade`, `zypper update` or `apk upgrade`), non-interactive. It takes no arguments and never reboots. |
+| `/etc/sudoers.d/jb-os-upgrade`  | root, 0440  | `<you> ALL=(root) NOPASSWD: /usr/local/sbin/jb-os-upgrade ""`, where `""` means no arguments are allowed.                                                                             |
+
+```sh
+jbx setup-system -s deps --os-upgrade-no-pass   # asks for your password once
+sudo -n jb-os-upgrade                          # from then on, never
+```
+
+A rule naming the package manager itself would also let anyone holding the
+account run `pacman -U <any package>`, which amounts to root. The upgrader
+runs only the commands baked into it when it was written, and it sources
+nothing a user can edit. `visudo` checks the rule before it is installed.
+Afterwards, `sudo -n -l` confirms it is in effect, so a sudoers file that
+does not include `/etc/sudoers.d` is reported rather than trusted.
+
+It is never part of a default run or of `bootstrap.toml`: a privilege is
+granted only when asked for by name. On macOS there is nothing to grant,
+because brew upgrades without sudo. Re-running it is safe, and it asks for
+no password once the rule is in effect. To undo it, run
+`sudo rm /etc/sudoers.d/jb-os-upgrade /usr/local/sbin/jb-os-upgrade`.
 
 ______________________________________________________________________
 

@@ -3302,3 +3302,122 @@ _mac_stubs() {
 	assert_failure
 	assert_output --partial 'Unexpected argument: extra'
 }
+
+# ---------------------------------------------------------------------------
+# --os-upgrade-no-pass
+# ---------------------------------------------------------------------------
+
+# _osup_fixture [ID] -- Linux (OSUP_UNAME overrides) with os-release ID (default debian), a root
+# tree under JB_OSUP_ROOT, and stubs that record each call in ${CALLS}:
+# sudo runs its command, except `sudo -n -l`, which answers from whether the
+# rule is installed (OSUP_RULE_IGNORED=1: as if sudoers.d were not
+# included); visudo exits OSUP_VISUDO_EXIT.
+_osup_fixture() {
+	export JB_OS_RELEASE="${BATS_TEST_TMPDIR}/os-release"
+	printf 'ID=%s\n' "${1:-debian}" >"${JB_OS_RELEASE}"
+	export JB_OSUP_ROOT="${BATS_TEST_TMPDIR}/root"
+	export OSUP_BIN="${JB_OSUP_ROOT}/usr/local/sbin/jb-os-upgrade"
+	export OSUP_RULE="${JB_OSUP_ROOT}/etc/sudoers.d/jb-os-upgrade"
+	export CALLS="${BATS_TEST_TMPDIR}/calls"
+	: >"${CALLS}"
+	local stubs="${BATS_TEST_TMPDIR}/osup-stubs"
+	mkdir -p "${stubs}"
+	cat >"${stubs}/sudo" <<-'EOF2'
+		#!/usr/bin/env bash
+		echo "sudo $*" >>"${CALLS}"
+		if [[ $1 == -n && $2 == -l ]]; then
+			[[ -z ${OSUP_RULE_IGNORED:-} && -e ${OSUP_RULE} ]]
+			exit
+		fi
+		exec "$@"
+	EOF2
+	cat >"${stubs}/visudo" <<-'EOF2'
+		#!/usr/bin/env bash
+		echo "visudo $*" >>"${CALLS}"
+		exit "${OSUP_VISUDO_EXIT:-0}"
+	EOF2
+	chmod +x "${stubs}"/*
+	export PATH="${stubs}:${PATH}"
+}
+
+# The cheapest run that still reaches the flag: certs, which skips off WSL.
+_osup_run() { run env JB_UNAME_S="${OSUP_UNAME:-Linux}" setup-system.sh -s certs "$@"; }
+
+@test 'os-upgrade-no-pass: without the flag nothing is granted' {
+	_osup_fixture
+	_osup_run
+	assert_success
+	refute_output --partial "os-upgrade-no-pass"
+	assert [ ! -e "${OSUP_BIN}" ]
+	assert [ ! -e "${OSUP_RULE}" ]
+}
+
+@test 'os-upgrade-no-pass: installs the upgrader and a rule for exactly it' {
+	_osup_fixture
+	_osup_run --os-upgrade-no-pass
+	assert_success
+	assert_output --partial "os-upgrade-no-pass: ok (sudo -n /usr/local/sbin/jb-os-upgrade)"
+	run cat "${OSUP_RULE}"
+	assert_output "$(id -un) ALL=(root) NOPASSWD: /usr/local/sbin/jb-os-upgrade \"\""
+	run grep -c 'apt-get' "${OSUP_BIN}"
+	assert_output "2"
+	assert [ -x "${OSUP_BIN}" ]
+	# visudo checked the rule before it went in.
+	run grep -c '^visudo -c -q -f ' "${CALLS}"
+	assert_output "1"
+}
+
+@test 'os-upgrade-no-pass: the upgrader takes no arguments' {
+	_osup_fixture arch
+	_osup_run --os-upgrade-no-pass
+	assert_success
+	run grep -x 'pacman -Syu --noconfirm' "${OSUP_BIN}"
+	assert_success
+	run sh "${OSUP_BIN}" -U evil.pkg.tar.zst
+	assert_failure 2
+	assert_output --partial "takes no arguments"
+}
+
+@test 'os-upgrade-no-pass: a re-run with the rule in effect changes nothing' {
+	_osup_fixture
+	_osup_run --os-upgrade-no-pass
+	: >"${CALLS}"
+	_osup_run --os-upgrade-no-pass
+	assert_success
+	assert_output --partial "os-upgrade-no-pass: ok (unchanged)"
+	run grep -v '^sudo -n -l ' "${CALLS}"
+	assert_output ""
+}
+
+@test 'os-upgrade-no-pass: a rule visudo rejects is never installed' {
+	_osup_fixture
+	OSUP_VISUDO_EXIT=1 _osup_run --os-upgrade-no-pass
+	assert_success
+	assert_output --partial "os-upgrade-no-pass: failed (visudo)"
+	assert [ ! -e "${OSUP_RULE}" ]
+	assert [ ! -e "${OSUP_BIN}" ]
+}
+
+@test 'os-upgrade-no-pass: a rule sudo ignores is reported, not trusted' {
+	_osup_fixture
+	OSUP_RULE_IGNORED=1 _osup_run --os-upgrade-no-pass
+	assert_success
+	assert_output --partial "os-upgrade-no-pass: failed (rule not in effect)"
+}
+
+@test 'os-upgrade-no-pass: brew needs no sudo, so nothing is written' {
+	_osup_fixture
+	OSUP_UNAME=Darwin _osup_run --os-upgrade-no-pass
+	assert_success
+	assert_output --partial "os-upgrade-no-pass: ok (brew needs no sudo)"
+	assert [ ! -e "${OSUP_RULE}" ]
+}
+
+@test 'os-upgrade-no-pass: dry run prints the installs and writes nothing' {
+	_osup_fixture
+	_osup_run --os-upgrade-no-pass --dry-run
+	assert_success
+	assert_output --regexp "would run: (sudo )?install -m 0440 <$(id -un) NOPASSWD: /usr/local/sbin/jb-os-upgrade> ${OSUP_RULE}"
+	assert [ ! -e "${OSUP_RULE}" ]
+	assert [ ! -e "${OSUP_BIN}" ]
+}
