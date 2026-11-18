@@ -4,6 +4,15 @@
 
 ### Added
 
+- **`setup-system --os-upgrade-no-pass`: unattended OS upgrades, without
+    granting more than that.** It writes a root-owned
+    `/usr/local/sbin/jb-os-upgrade`, which runs this machine's full package
+    upgrade, takes no arguments and never reboots. It also writes a sudoers
+    rule letting you run exactly that, with no arguments and no password.
+    An ssh one-shot, a timer or an agent can then run
+    `sudo -n jb-os-upgrade`. visudo checks the rule before it goes in, and
+    `sudo -n -l` confirms it took effect. A default run never does this.
+
 - **`jbx update-path`: `~/.local/bin` on PATH in every shell you have.**
     It writes a marked, idempotent block to `~/.bashrc`, and to `~/.zshrc`
     when there is a zsh (always on macOS, whose login shell never read the
