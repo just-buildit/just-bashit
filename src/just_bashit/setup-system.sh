@@ -3000,8 +3000,10 @@ if [[ -n ${TEMPLATE} ]]; then
 	# target decides: a .ps1 path, or stdout read by a PowerShell caller,
 	# gets the PowerShell profile template.
 	if [[ ${TEMPLATE} == profile-template.sh ]]; then
-		case "${TEMPLATE_PATH,,}" in
-		*.ps1) TEMPLATE="profile-template.ps1" ;;
+		# Bracketed, not ${TEMPLATE_PATH,,}: macOS's bash 3.2 has no case
+		# conversion, and $PROFILE on Windows can end .PS1.
+		case "${TEMPLATE_PATH}" in
+		*.[Pp][Ss]1) TEMPLATE="profile-template.ps1" ;;
 		-) [[ ${JB_CALLER:-} == pwsh ]] && TEMPLATE="profile-template.ps1" ;;
 		esac
 	fi

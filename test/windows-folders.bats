@@ -176,10 +176,10 @@ False"
 	assert_line "writes=0"
 }
 
-# The fallback (the owner's, on the issue): OneDrive would redirect them
-# again, so nothing moves and nothing is uninstalled; PowerShell is fixed by
-# a stub in each redirected profile that loads the local one.
-@test 'windows-folders: with OneDrive running nothing moves, and each redirected profile loads its local twin' {
+# OneDrive would redirect them again, so nothing moves and nothing is
+# uninstalled. jbx goes in the LOCAL profiles only: nothing is ever written
+# under OneDrive, which is unreliable (#202).
+@test 'windows-folders: with OneDrive running nothing moves, and only the local profile is written' {
 	mkdir -p "${OD}/Documents/WindowsPowerShell"
 	printf '%s\n' 'Set-Alias ll Get-ChildItem' >"${OD}/Documents/WindowsPowerShell/profile.ps1"
 	run _ps "${_kfm}"'
@@ -189,17 +189,14 @@ False"
 	assert_success
 	assert_line --partial "Documents: left on OneDrive"
 	assert_line --partial "not moved: OneDrive is running"
-	assert_line "result: skipped (Documents, Pictures on OneDrive: OneDrive is running; profile stub written)"
+	assert_line "result: skipped (Documents, Pictures on OneDrive: OneDrive is running; jbx in the local profile; PowerShell loads it once Documents is local)"
 	assert_line "writes=0"
 	assert [ -f "${OD}/Documents/a.txt" ]
 	run cat "${HOME_DIR}/Documents/WindowsPowerShell/profile.ps1"
 	assert_line --partial "function global:jbx {"
 	run cat "${OD}/Documents/WindowsPowerShell/profile.ps1"
-	assert_line 'Set-Alias ll Get-ChildItem'
-	assert_line --regexp "\. '.*home.Documents.WindowsPowerShell.profile\.ps1'"
-	refute_line --partial "function global:jbx {"
-	run cat "${OD}/Documents/PowerShell/profile.ps1"
-	assert_line --regexp "home.Documents.PowerShell.profile"
+	assert_output 'Set-Alias ll Get-ChildItem'
+	assert [ ! -e "${OD}/Documents/PowerShell" ]
 }
 
 @test 'windows-folders: a Known Folder Move policy blocks the move; a zero KFMBlockOptOut does not' {
@@ -211,7 +208,7 @@ False"
 	refute_output --partial "KFMBlockOptOut"
 }
 
-@test 'windows-folders: a redirected profile it cannot read is never written' {
+@test 'windows-folders: a redirected profile is never read or written' {
 	mkdir -p "${OD}/Documents/WindowsPowerShell"
 	echo 'keep me' >"${OD}/Documents/WindowsPowerShell/profile.ps1"
 	run _ps "${_kfm}"'
@@ -219,7 +216,7 @@ False"
 		function Read-JbProfile { param($Path) throw (New-Object IO.IOException("cloud", -2147024534)) }
 		Invoke-JbKnownFolderRestore'
 	assert_success
-	assert_line --partial "result: skipped (Documents, Pictures on OneDrive: OneDrive is running; profile stub written; skipped"
+	assert_line "result: skipped (Documents, Pictures on OneDrive: OneDrive is running; jbx in the local profile; PowerShell loads it once Documents is local)"
 	run cat "${OD}/Documents/WindowsPowerShell/profile.ps1"
 	assert_output "keep me"
 }
