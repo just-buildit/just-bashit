@@ -105,7 +105,12 @@ $threw = ''
 $hold = [IO.File]::Open($locked, 'Open', 'ReadWrite', 'None')
 try {
     # Not redirected: 5.1 makes a redirected native stderr line an error.
-    try { Get-Content -Raw -LiteralPath $script | Invoke-Expression } catch { $threw = "$_" }
+    # -InformationVariable fills as each progress line is written, so it
+    # holds them even though this run ends in a throw.
+    $info = @()
+    try {
+        Get-Content -Raw -LiteralPath $script | Invoke-Expression -InformationVariable info
+    } catch { $threw = "$_" }
 } finally {
     $hold.Dispose()
     $env:JB_PS_PROFILE = $savedProfile
@@ -113,6 +118,7 @@ try {
 Assert-That ($threw -like "*NOT added to $locked*") "an unreadable profile fails the run, naming it (got '$threw')"
 Assert-That ((Get-Content -Raw -LiteralPath $locked).Trim() -eq 'keep me') 'the unreadable profile is left exactly as it was'
 Assert-That ((Get-Content -Raw -LiteralPath $other) -match '# >>> just-bashit get-jb.ps1 >>>') 'the other profile is still written'
+Assert-That (@($info | Where-Object { "$_" -like "*created local profile $other*" }).Count -eq 1) 'a profile that did not exist is reported as created'
 Assert-That ([bool](Get-Command jbx -CommandType Function -ErrorAction SilentlyContinue)) 'jbx is still defined in this session'
 
 $exe = (Get-Process -Id $PID).Path

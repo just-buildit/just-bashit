@@ -132,6 +132,8 @@ read -r -d '' HELP <<-'EOF' || true
 	       --template [PATH]     Write the bashrc template to PATH (or stdout).
 	       --template-profile [PATH]
 	                             Write the profile template to PATH (or stdout).
+	                             A .ps1 PATH, or stdout when called from
+	                             PowerShell, gets profile-template.ps1.
 
 	Default steps: all of them except certs and sshd; on native Windows,
 	all but certs. To restrict the default set, declare steps = [...]
@@ -2992,6 +2994,17 @@ step_claude() {
 # ---------------------------------------------------------------------------
 
 if [[ -n ${TEMPLATE} ]]; then
+	# A PowerShell profile is not sh. `--template-profile $PROFILE` typed in
+	# pwsh hands a .ps1 path, and writing the POSIX template there makes
+	# every new PowerShell session start with a wall of parse errors. So the
+	# target decides: a .ps1 path, or stdout read by a PowerShell caller,
+	# gets the PowerShell profile template.
+	if [[ ${TEMPLATE} == profile-template.sh ]]; then
+		case "${TEMPLATE_PATH,,}" in
+		*.ps1) TEMPLATE="profile-template.ps1" ;;
+		-) [[ ${JB_CALLER:-} == pwsh ]] && TEMPLATE="profile-template.ps1" ;;
+		esac
+	fi
 	_src="$(_asset "${TEMPLATE}")"
 	if [[ ${TEMPLATE_PATH} == "-" ]]; then
 		cat "${_src}"

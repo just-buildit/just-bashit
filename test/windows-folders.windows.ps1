@@ -23,7 +23,7 @@
         REG_EXPAND_SZ, and the jbx block written into the new profile;
       - a second run reports every folder ok (local);
       - with OneDrive "running" (this process's own name) nothing moves, the
-        local profile gets jbx and the redirected one a stub loading it;
+        local profile gets jbx and nothing is written under OneDrive;
       - a KFMSilentOptIn policy blocks the move just the same.
 
     Every failure throws, so the step fails naming the check.
@@ -121,16 +121,17 @@ try {
     $out = Invoke-FolderScript
     Assert-That ($out -contains 'Documents: ok (local)' -and $out -contains 'result: ok (local)') 'a second run finds Documents local'
 
-    # -- OneDrive running: the stub -------------------------------------------
+    # -- OneDrive running: local only -----------------------------------------
     Initialize-Scratch
     $env:JB_ONEDRIVE_PROCESS = (Get-Process -Id $PID).ProcessName
     $out = Invoke-FolderScript
     $out | ForEach-Object { Write-Information "    | $_" }
-    Assert-That (@($out | Where-Object { $_ -like 'result: skipped (Documents on OneDrive: OneDrive is running; profile stub written)' }).Count -eq 1) 'with OneDrive running it reports the stub'
+    Assert-That (@($out | Where-Object { $_ -like 'result: skipped (Documents on OneDrive: OneDrive is running; jbx in the local profile; PowerShell loads it once Documents is local)' }).Count -eq 1) 'with OneDrive running it reports the local profile'
     Assert-That ((Get-Item -LiteralPath $key).GetValue('Personal', $null, 'DoNotExpandEnvironmentNames') -eq '%USERPROFILE%\OneDrive\Documents') 'Personal is left on OneDrive'
     Assert-That (Test-Path -LiteralPath (Join-Path $od 'a.txt')) 'nothing moved'
-    $stub = Get-Content -Raw -LiteralPath (Join-Path $od 'WindowsPowerShell\profile.ps1')
-    Assert-That ($stub -match 'Set-Alias ll Get-ChildItem' -and $stub -match [regex]::Escape(". '$docs\WindowsPowerShell\profile.ps1'")) 'the redirected profile keeps its line and loads the local one'
+    $odProf = Get-Content -Raw -LiteralPath (Join-Path $od 'WindowsPowerShell\profile.ps1')
+    Assert-That ($odProf -match 'Set-Alias ll Get-ChildItem' -and $odProf -notmatch 'just-bashit') 'the OneDrive profile is not written'
+    Assert-That (-not (Test-Path -LiteralPath (Join-Path $od 'PowerShell\profile.ps1'))) 'no profile is created under OneDrive'
     Assert-That ((Get-Content -Raw -LiteralPath (Join-Path $docs 'WindowsPowerShell\profile.ps1')) -match 'function global:jbx') 'the local profile has jbx'
     $env:JB_ONEDRIVE_PROCESS = 'jb-no-such-process'
 

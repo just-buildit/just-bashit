@@ -209,6 +209,27 @@ _write_deps_toml() {
 	assert_output --partial "_jb_path_prepend"
 }
 
+@test '--template-profile writes the PowerShell template to a .ps1 path' {
+	# `jbx setup-system --template-profile $PROFILE` in pwsh: $PROFILE is a
+	# .ps1, and the POSIX template there broke every PowerShell session.
+	run setup-system.sh --template-profile \
+		"${BATS_TEST_TMPDIR}/Microsoft.PowerShell_profile.PS1"
+	assert_success
+	run grep -q 'PSReadLine' \
+		"${BATS_TEST_TMPDIR}/Microsoft.PowerShell_profile.PS1"
+	assert_success
+	run grep -q '_jb_path_prepend' \
+		"${BATS_TEST_TMPDIR}/Microsoft.PowerShell_profile.PS1"
+	assert_failure
+}
+
+@test '--template-profile from PowerShell prints the PowerShell template' {
+	JB_CALLER=pwsh run setup-system.sh --template-profile
+	assert_success
+	assert_output --partial "PSReadLine"
+	refute_output --partial "_jb_path_prepend"
+}
+
 # ---------------------------------------------------------------------------
 # Dry run
 # ---------------------------------------------------------------------------
