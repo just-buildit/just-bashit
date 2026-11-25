@@ -276,7 +276,7 @@ _iex() {
 	run _e2e JB_BASH="${BASH_BIN}" JB_PS_PROFILE="${E2E_HOME}/locked.ps1:${E2E_HOME}/profile.ps1"
 	assert_success
 	assert_output --partial "skipped ${E2E_HOME}/locked.ps1 -- it could not be read"
-	assert_output --partial "ok  jbx function in ${E2E_HOME}/profile.ps1"
+	assert_output --partial "ok  created local profile ${E2E_HOME}/profile.ps1, with the jbx function"
 	assert_output --partial "THREW: get-jb.ps1: jbx works in this session, but its function was NOT added to ${E2E_HOME}/locked.ps1"
 	assert_output --partial "[after] n=1"
 	assert_line "rc=0"

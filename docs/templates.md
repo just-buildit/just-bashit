@@ -108,8 +108,11 @@ The PowerShell half. `bashrc-template.sh` makes bash behave; this makes
 does not mean holding two sets of key bindings in your head.
 
 ```powershell
-Copy-Item profile-template.ps1 $PROFILE.CurrentUserAllHosts
+jbx setup-system --template-profile $PROFILE.CurrentUserAllHosts
 ```
+
+A `.ps1` path, or stdout when jbx is called from PowerShell, gets this
+template rather than the POSIX one.
 
 **The headline is Up/Down.** In bash, `history-search-backward` on the arrow
 keys means typing a prefix and pressing Up walks only the commands that
