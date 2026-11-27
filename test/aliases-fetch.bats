@@ -185,6 +185,23 @@ _stale_cache() {
 	refute [ -e "${home}/.local/bin/just-runit" ]
 }
 
+# A temp file that cannot be made is named as that, before any fetch: an
+# empty path used to reach curl -o, and the install blamed the download
+# (just-buildit.github.io#251). The fixture serves just-runit, so only the
+# temp directory can fail it.
+@test 'get-jb.sh names a TMPDIR it cannot write instead of a failed download' {
+	_case get-jb-tmpdir
+	local home="${BATS_TEST_TMPDIR}/home" missing="${BATS_TEST_TMPDIR}/no-such-dir"
+	mkdir -p "${home}"
+	cp "${PROJECT_ROOT}/src/just_bashit/just-runit" "${CASE_FX}/"
+	HOME="${home}" TMPDIR="${missing}" \
+		run bash -c '. "$1"' _ "${PROJECT_ROOT}/src/just_bashit/get-jb.sh"
+	assert_output --partial "cannot create a temp file in ${missing} (TMPDIR)"
+	refute_output --partial 'failed to download jb'
+	refute_output --partial 'fetching jb from'
+	refute [ -e "${home}/.local/bin/just-runit" ]
+}
+
 # get-jb.sh installs uv through jbx and pkg.sh's install-uv (#171). On
 # Windows that is winget, whose Links directory reaches only new shells; the
 # script is sourced, so it puts that directory on the caller's PATH itself.
