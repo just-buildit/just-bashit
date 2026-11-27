@@ -66,7 +66,7 @@ cd "${VERSION_FILES_ROOT:-$(dirname "${BASH_SOURCE[0]}")/..}" || exit 1
 rc=0
 CONFIG="pyproject.toml"
 
-current=$(sed -n 's/^current_version = "\(.*\)"/\1/p' "${CONFIG}" | head -1)
+current=$(sed -n 's/^current_version = "\(.*\)"/\1/p' "${CONFIG}" | sed -n 1p)
 if [[ -z "${current}" ]]; then
 	echo "ERROR: no [tool.bumpversion] current_version in ${CONFIG}"
 	exit 1

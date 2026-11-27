@@ -258,8 +258,8 @@ jobs:
 
       - name: Generate coverage badge JSON
         run: |
-          XML=$(find test-results/coverage -name cobertura.xml | head -1)
-          RATE=$(grep -oP 'line-rate="\K[^"]+' "${XML}" | head -1)
+          XML=$(find test-results/coverage -name cobertura.xml | sed -n 1p)
+          RATE=$(grep -oP 'line-rate="\K[^"]+' "${XML}" | sed -n 1p)
           PCT=$(awk "BEGIN { printf \"%d\", ${RATE} * 100 }")
           if   [ "${PCT}" -ge 90 ]; then COLOR="brightgreen"
           elif [ "${PCT}" -ge 75 ]; then COLOR="green"

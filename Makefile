@@ -155,6 +155,24 @@ LOCAL_TARGETS += workflow-check
 workflow-check: ## Verify workflow artifact hand-offs and pre-merge coverage
 	@bash scripts/workflow_check.sh
 
+# ── pipefail readers ──────────────────────────────────────────────────────────
+# Under pipefail, `producer | grep -q` (or head, sed 1q, awk exit) fails when
+# the reader exits before the producer has finished writing (SIGPIPE, rc 141),
+# and a `!` in front inverts the answer; whether it happens is timing. The
+# rules are canonical's vendored scripts/pipefail-readers.py, not a copy here.
+#
+# Vendored files are left out: canonical holds its own to the same script, and
+# a fix to one lands here by re-vendoring. Dispatched from
+# .pre-commit-config.yaml like the gates above, so `make lint` runs it.
+PIPEFAIL_READERS_FILES = $(filter-out $(VENDORED_FILES),$(shell git ls-files \
+    'src/just_bashit/*.sh' src/just_bashit/just-runit \
+    src/just_bashit/script-template 'scripts/*.sh' '.github/workflows/*.yml'))
+
+LOCAL_TARGETS += pipefail-readers-check
+
+pipefail-readers-check: ## Verify no pipefail pipe ends in grep -q, head or the like
+	@python3 scripts/pipefail-readers.py --pipefail-only $(PIPEFAIL_READERS_FILES)
+
 # ── all ───────────────────────────────────────────────────────────────────────
 # Lint first: shellcheck and shfmt are seconds, the bats suite is minutes.
 #

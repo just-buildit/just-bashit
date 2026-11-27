@@ -76,3 +76,10 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+
+      - id: pipefail-readers-check
+        name: pipefail-readers-check
+        entry: make -s pipefail-readers-check
+        language: system
+        pass_filenames: false
+        always_run: true

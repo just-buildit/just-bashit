@@ -191,7 +191,7 @@ for wf_path in "${WF_DIR}"/*.yml; do
 
 	# 4. The required check waits for every job a pull request runs.
 	if printf '%s\n' "${wf}" | awk -F'\t' '$1=="job" && $2=="ci-passed"' |
-		grep -q .; then
+		grep . >/dev/null; then
 		mainonly=$(printf '%s\n' "${wf}" | awk -F'\t' '$1=="mainonly" { print $2 }')
 		while IFS=$'\t' read -r _ job; do
 			[[ -n "${job}" && "${job}" != "ci-passed" ]] || continue
