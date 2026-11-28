@@ -139,29 +139,52 @@ _tty() {
 	fi
 }
 
-# _tty_type INPUT CMD... -- as _tty, and type INPUT once CMD has printed
-# its prompt (a line ending ": "), the way a person would: typed before it,
-# the terminal echoes it whatever the prompt then does. Prints the
-# terminal's transcript, which script(1) writes to stdout as it goes -- so
-# the writer can watch it for the prompt. No fifo and no `script -F`: the
-# BSD script on the macOS runner never wrote the prompt through either.
+# _tty_type INPUT CMD... -- as _tty, and type INPUT once CMD's read is
+# actually waiting, the way a person would. Prints the terminal's
+# transcript, which script(1) writes to stdout as it goes -- so the writer
+# can watch it for the prompt. No fifo and no `script -F`: the BSD script on
+# the macOS runner never wrote the prompt through either.
+#
+# "Waiting" is two facts, and the prompt alone is only the first. `read -s
+# -p` WRITES the prompt and only then turns echo off, so input typed when
+# the prompt appears can land in that window. And when stdin ends, script(1)
+# types the terminal's EOF character (VEOF) into the pty: on the macOS runner
+# the read once got EOF with nothing before it (output `A: `, status 1 --
+# just-runit's `read` failing under errexit). So the writer types only once
+# the transcript ends in the prompt AND the pty's own termios says -echo,
+# read off the terminal CMD runs on (tty_run records its name), and keeps
+# stdin open until CMD has finished, so no EOF is ever typed while it reads.
 # shellcheck disable=SC2094  # reading the transcript as script writes it is the point
 _tty_type() {
 	local input="$1" log="${BATS_TEST_TMPDIR}/tty.log" cmd rc=0
+	local state="${BATS_TEST_TMPDIR}/tty-state" tty=""
 	shift
+	mkdir -p "${state}"
+	rm -f "${state}/tty" "${state}/done"
+	# shellcheck disable=SC2016  # the runner's own script: expanded there
+	set -- bash -c 'tty >"$0/tty"; rc=0; "$@" || rc=$?; : >"$0/done"; exit "$rc"' \
+		"${state}" "$@"
 	printf -v cmd '%q ' "$@"
 	: >"${log}"
 	{
-		# Type only once the prompt is the last thing written: it ends in
-		# ': ' with no newline after it. A trace line under SHELLOPTS=xtrace
-		# can hold ': ' too (`_SECRET_HELP=$'Usage: ...`) and ends in a
-		# newline, so `grep ': '` let the input go before the read started.
+		# The prompt is the last thing written: it ends in ': ' with no
+		# newline after it. A trace line under SHELLOPTS=xtrace can hold
+		# ': ' too (`_SECRET_HELP=$'Usage: ...`) and ends in a newline, so
+		# `grep ': '` let the input go before the read started.
 		for ((i = 0; i < 200; i++)); do
-			[[ $(tail -c 2 "${log}") == ': ' ]] && break
+			if [[ $(tail -c 2 "${log}") == ': ' ]]; then
+				[[ -n ${tty} ]] || tty="$(cat "${state}/tty" 2>/dev/null || true)"
+				[[ -n ${tty} ]] && stty -a <"${tty}" 2>/dev/null |
+					grep -E '(^|[[:space:]])-echo([[:space:]]|;|$)' >/dev/null && break
+			fi
 			sleep 0.1
 		done
 		printf '%s\n' "${input}"
-	} | if script --version 2>/dev/null | grep -q util-linux; then
+		for ((i = 0; i < 200; i++)); do
+			[[ -e ${state}/done ]] && break
+			sleep 0.1
+		done
+	} | if script --version 2>/dev/null | grep util-linux >/dev/null; then
 		SHELL="$(command -v bash)" script -qec "${cmd}" /dev/null
 	else
 		script -q /dev/null "$@"
@@ -492,6 +515,21 @@ _roundtrip() {
 	assert_output --partial 'stored A (age)'
 	refute_output --partial "${VALUE}"
 	assert_equal "$(just-runit secret get A)" "${VALUE}"
+}
+
+# The helper itself: it types only once the read has turned echo off, not
+# when the prompt appears. A command that prompts, then waits, then reads
+# silently widens the window `read -s -p` has between the two to a second:
+# input typed at the prompt lands in it and the terminal echoes it, as a
+# flaky macOS run of the test above suggested (it read EOF instead).
+@test '_tty_type waits for echo to be off, not just for the prompt' {
+	_need script
+	# shellcheck disable=SC2016  # the command's own script, run under the pty
+	run _tty_type "${VALUE}" bash -c \
+		'printf "A: "; sleep 1; IFS= read -r -s v; echo; echo "read ${#v} chars"'
+	assert_success
+	assert_output --partial "read ${#VALUE} chars"
+	refute_output --partial "${VALUE}"
 }
 
 # Sabotage-proven (PR for #229): dropping the empty-stdin check turns this
