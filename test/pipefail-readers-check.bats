@@ -12,7 +12,13 @@ _common_setup
 # The rules are canonical's vendored scripts/pipefail-readers.py, tested
 # there; these cases test the wiring: the target reads this repo's shell,
 # and goes red naming a file that breaks the rule.
+#
+# Tagged `lint`: the gate needs python3, which the portability matrix's
+# images deliberately lack, so `make test` leaves these out and `make lint`
+# runs them (test-lint-gates, in the lint job), where the gate itself runs.
 # ---------------------------------------------------------------------------
+
+# bats file_tags=lint
 
 @test 'pipefail-readers-check passes on this repo, having read its shell' {
 	run make -s -C "${PROJECT_ROOT}" pipefail-readers-check

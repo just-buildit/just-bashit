@@ -83,3 +83,13 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+
+      # The bats tests of the gates above that need python3 (file_tags=lint):
+      # the portability matrix's images have none, so they run here, in the
+      # lint job, and nowhere else.
+      - id: test-lint-gates
+        name: test-lint-gates
+        entry: make -s test-lint-gates
+        language: system
+        pass_filenames: false
+        always_run: true

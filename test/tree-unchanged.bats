@@ -176,12 +176,14 @@ _make() {
 	assert_output --partial "changed the working tree"
 }
 
-@test 'BATS_ARGS reaches bats in both commands, and defaults to test' {
+@test 'BATS_ARGS reaches bats in both commands, and defaults to the suite' {
 	_make_repo
 	_make test-fast
 	assert_success
 	run cat "${FAKE_BATS_ARGS}"
-	assert_output "--abort test"
+	# The suite without the lint-tagged files, which `make lint` runs
+	# (test-lint-gates): the portability matrix has no python3 for them.
+	assert_output "--abort --filter-tags !lint test"
 
 	_make test-fast BATS_ARGS='-f deps test/setup-system.bats'
 	assert_success
