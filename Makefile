@@ -42,7 +42,15 @@ TREE_UNCHANGED = bash scripts/tree_unchanged.sh
 # What bats runs: the whole suite by default. Override it to run a subset
 # through make rather than calling bats by hand, which bypasses the gate:
 #     make test-fast BATS_ARGS='-f deps test/setup-system.bats'
-BATS_ARGS ?= test
+#
+# A file tagged `# bats file_tags=lint` tests a gate that needs what only the
+# lint job has (python3, for canonical's vendored scripts/pipefail-readers.py),
+# so the suite leaves it out: the portability matrix -- debian, arch, alpine,
+# windows/ucrt64 -- runs `make test` in images that deliberately have no
+# python3, to test python-free behaviour. Those files run in `make lint`
+# instead, through `test-lint-gates` below, which fails when it runs none.
+BATS_SUITE = --filter-tags '!lint' test
+BATS_ARGS ?= $(BATS_SUITE)
 
 define TEST_CMD
 mkdir -p $(REPORT_PATH)
@@ -173,6 +181,19 @@ LOCAL_TARGETS += pipefail-readers-check
 pipefail-readers-check: ## Verify no pipefail pipe ends in grep -q, head or the like
 	@python3 scripts/pipefail-readers.py --pipefail-only $(PIPEFAIL_READERS_FILES)
 
+# The bats files tagged `lint` (see BATS_SUITE): the tests of gates that run
+# where python3 is, so they run where the gates do -- `make lint`, through
+# .pre-commit-config.yaml. A filter that selected nothing would pass having
+# run nothing, so a run with no test in it fails: a skip is a failure.
+LOCAL_TARGETS += test-lint-gates
+
+test-lint-gates: ## Run the bats tests of lint-side gates (file_tags=lint)
+	@out=$$($(TREE_UNCHANGED) $(BATS) --filter-tags lint test 2>&1); rc=$$?; \
+	 printf '%s\n' "$$out"; \
+	 [ "$$rc" -eq 0 ] || exit "$$rc"; \
+	 printf '%s\n' "$$out" | grep -E '^1\.\.[1-9]' >/dev/null \
+	     || { echo "test-lint-gates: no test is tagged lint -- nothing ran"; exit 1; }
+
 # ── all ───────────────────────────────────────────────────────────────────────
 # Lint first: shellcheck and shfmt are seconds, the bats suite is minutes.
 #
@@ -217,7 +238,7 @@ COVERAGE_MIN = 60
 define COVERAGE_CMD
 mkdir -p $(REPORT_PATH)
 $(TREE_UNCHANGED) kcov --include-pattern=/src --exclude-pattern=/test \
-    $(REPORT_PATH)/coverage $(BATS) test
+    $(REPORT_PATH)/coverage $(BATS) $(BATS_SUITE)
 endef
 
 # CI's coverage job runs `make coverage` only to produce the report the
