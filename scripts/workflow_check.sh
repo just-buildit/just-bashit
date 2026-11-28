@@ -166,6 +166,23 @@ _shape() {
 			if ($0 ~ /^[ \t]*- /) scalarind = match($0, /-[ \t]+[^ \t]/) + 1
 		}
 
+		# The parser walks jobs, each job, its steps and each step as BLOCK
+		# YAML. A flow collection at one of those levels (`jobs: {...}`, a
+		# job `name: {...}`, `steps: [...]`, a step `- {..., k: {...}}` that
+		# nests flow) holds keys it cannot see, so it is refused, as an
+		# alias is. A flow VALUE inside a step (`with: {submodules: ...}`)
+		# is read, and a flat flow step (`- {uses: ...}`) too.
+		mask($0) ~ /^jobs:[ \t]*[{[]/ { print "flow\tjobs"; next }
+		injobs && mask($0) ~ /^  [A-Za-z0-9_-]+:[ \t]*[{[]/ {
+			v = trim($0); sub(/:.*$/, "", v); print "flow\tjob " v; next
+		}
+		injobs && mask($0) ~ /^[ \t]+steps:[ \t]*[{[]/ {
+			print "flow\tsteps of job " job; next
+		}
+		injobs && mask($0) ~ /^[ \t]*-[ \t]*\{[^{}[]*[{[]/ {
+			print "flow\ta step of job " job
+		}
+
 		/^jobs:[ \t]*$/ { injobs = 1; next }
 		# A top-level key other than jobs: ends the jobs block.
 		/^[^ \t#]/ && !/^jobs:/ { flush(); injobs = 0 }
@@ -326,6 +343,17 @@ for wf_path in "${WF_DIR}"/*.yml; do
 			rc=1
 		fi
 	done < <(printf '%s\n' "${wf}" | awk -F'\t' '$1=="mainonly"')
+
+	# A flow collection where the parser walks blocks: refused, by name.
+	while IFS=$'\t' read -r _ where; do
+		[[ -n "${where}" ]] || continue
+		key="${where%% *}"
+		[[ ${where} == job\ * ]] && key="${where#job }"
+		[[ ${where} == "a step"* ]] && key="that step"
+		echo "ERROR: ${name}: ${where} is a YAML flow collection, which this"
+		echo "  check cannot walk; write ${key} as a block list/mapping."
+		rc=1
+	done < <(printf '%s\n' "${wf}" | awk -F'\t' '$1=="flow"')
 
 	# 5. Every checkout of this repo fetches the submodules.
 	while IFS=$'\t' read -r _ job subm repo alias; do

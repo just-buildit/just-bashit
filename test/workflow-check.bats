@@ -351,10 +351,6 @@ YAML
 		_gate
 		assert_success
 	done
-	setup
-	_with_job '      - {uses: actions/checkout@v7, with: {submodules: true}}'
-	_gate
-	assert_success
 }
 
 @test 'submodules: false is not submodules' {
@@ -406,5 +402,71 @@ YAML
 			fi
 		done
 	done
+	# The same bare checkout with its steps as a flow sequence: refused for
+	# its form, whatever is injected, never passed.
+	for inj in 'submodules: recursive' 'repository: o/other'; do
+		setup
+		printf 'name: flow\non: push\njobs:\n  suite:\n    runs-on: ubuntu-latest\n    steps: [{uses: actions/checkout@v7, with: {%s}}]\n' \
+			"${inj}" >"${REPO}/.github/workflows/flow.yml"
+		_gate
+		if [[ ${status} -eq 0 || ${output} != *'steps of job suite is a YAML flow collection'* ]]; then
+			passed+=("[${inj}] steps: [{uses: actions/checkout@v7, with: {${inj}}}]")
+		fi
+	done
 	((${#passed[@]} == 0)) || fail "read as a key (or as foreign):"$'\n'"$(printf '%s\n---\n' "${passed[@]}")"
+}
+
+# K1, as a class: the parser walks jobs, each job, its steps and each step as
+# BLOCK YAML, so a FLOW collection at one of those levels is refused by name,
+# the way an alias is; a flow value inside a step (`with: {...}`) is still
+# read. _flow_job WORKFLOW_BODY writes a workflow whose jobs: block is given.
+_flow_wf() {
+	printf 'name: flow\non: push\n%s\n' "$1" >"${REPO}/.github/workflows/flow.yml"
+}
+
+@test 'jobs written as a flow mapping is refused' {
+	_flow_wf 'jobs: {suite: {runs-on: ubuntu-latest, steps: [{uses: actions/checkout@v7}]}}'
+	_gate
+	assert_failure
+	assert_output --partial 'flow.yml: jobs is a YAML flow collection'
+	assert_output --partial 'write jobs as a block list/mapping'
+}
+
+@test 'a job written as a flow mapping is refused' {
+	_flow_wf $'jobs:\n  suite: {runs-on: ubuntu-latest, steps: [{uses: actions/checkout@v7}]}'
+	_gate
+	assert_failure
+	assert_output --partial 'flow.yml: job suite is a YAML flow collection'
+	assert_output --partial 'write suite as a block list/mapping'
+}
+
+@test 'steps written as a flow sequence is refused (K1)' {
+	_flow_wf $'jobs:\n  suite:\n    runs-on: ubuntu-latest\n    steps: [{uses: actions/checkout@v7}]'
+	_gate
+	assert_failure
+	assert_output --partial 'flow.yml: steps of job suite is a YAML flow collection'
+	assert_output --partial 'write steps as a block list/mapping'
+}
+
+@test 'a flow step holding nested flow is refused; a flat one is read' {
+	_with_job '      - {uses: actions/checkout@v7, with: {submodules: true}}'
+	_gate
+	assert_failure
+	assert_output --partial 'a step of job suite is a YAML flow collection'
+	assert_output --partial 'write that step as a block list/mapping'
+	setup
+	# Flat, it is read like any step: this bare checkout of this repo is red
+	# for its submodules, not refused for its form.
+	_with_job '      - {uses: actions/checkout@v7}'
+	_gate
+	assert_failure
+	assert_output --partial "job 'suite' checks out this repo without"
+	refute_output --partial 'flow collection'
+}
+
+@test 'with: as a flow mapping is still read, not refused' {
+	_with_job $'      - uses: actions/checkout@v7\n        with: {submodules: recursive}'
+	_gate
+	assert_success
+	refute_output --partial 'flow collection'
 }
