@@ -152,15 +152,22 @@ _tty() {
 # the read once got EOF with nothing before it (output `A: `, status 1 --
 # just-runit's `read` failing under errexit). So the writer types only once
 # the transcript ends in the prompt AND the pty's own termios says -echo,
-# read off the terminal CMD runs on (tty_run records its name), and keeps
+# read off the terminal CMD runs on (a wrapper records its name), and keeps
 # stdin open until CMD has finished, so no EOF is ever typed while it reads.
+#
+# A wait that runs out is loud, never a fallback to the old race: if -echo
+# never shows (no read -s, or no tty to read), the writer types nothing,
+# closes stdin so CMD ends, and the transcript ends with why
+# (`_tty_type: <tty> never showed -echo`), the helper returning 1.
+# _TTY_TYPE_TRIES (tenths of a second, default 200) bounds each wait.
 # shellcheck disable=SC2094  # reading the transcript as script writes it is the point
 _tty_type() {
 	local input="$1" log="${BATS_TEST_TMPDIR}/tty.log" cmd rc=0
 	local state="${BATS_TEST_TMPDIR}/tty-state" tty=""
+	local tries="${_TTY_TYPE_TRIES:-200}"
 	shift
 	mkdir -p "${state}"
-	rm -f "${state}/tty" "${state}/done"
+	rm -f "${state}/tty" "${state}/done" "${state}/why"
 	# shellcheck disable=SC2016  # the runner's own script: expanded there
 	set -- bash -c 'tty >"$0/tty"; rc=0; "$@" || rc=$?; : >"$0/done"; exit "$rc"' \
 		"${state}" "$@"
@@ -171,25 +178,38 @@ _tty_type() {
 		# newline after it. A trace line under SHELLOPTS=xtrace can hold
 		# ': ' too (`_SECRET_HELP=$'Usage: ...`) and ends in a newline, so
 		# `grep ': '` let the input go before the read started.
-		for ((i = 0; i < 200; i++)); do
+		local waiting=0
+		for ((i = 0; i < tries; i++)); do
 			if [[ $(tail -c 2 "${log}") == ': ' ]]; then
 				[[ -n ${tty} ]] || tty="$(cat "${state}/tty" 2>/dev/null || true)"
-				[[ -n ${tty} ]] && stty -a <"${tty}" 2>/dev/null |
-					grep -E '(^|[[:space:]])-echo([[:space:]]|;|$)' >/dev/null && break
+				if [[ -n ${tty} ]] && stty -a <"${tty}" 2>/dev/null |
+					grep -E '(^|[[:space:]])-echo([[:space:]]|;|$)' >/dev/null; then
+					waiting=1
+					break
+				fi
 			fi
 			sleep 0.1
 		done
-		printf '%s\n' "${input}"
-		for ((i = 0; i < 200; i++)); do
-			[[ -e ${state}/done ]] && break
-			sleep 0.1
-		done
+		if ((waiting == 0)); then
+			printf '_tty_type: %s never showed -echo\n' "${tty:-<no tty recorded>}" \
+				>"${state}/why"
+		else
+			printf '%s\n' "${input}"
+			for ((i = 0; i < tries; i++)); do
+				[[ -e ${state}/done ]] && break
+				sleep 0.1
+			done
+		fi
 	} | if script --version 2>/dev/null | grep util-linux >/dev/null; then
 		SHELL="$(command -v bash)" script -qec "${cmd}" /dev/null
 	else
 		script -q /dev/null "$@"
 	fi >"${log}" 2>&1 || rc=$?
 	cat "${log}"
+	if [[ -s ${state}/why ]]; then
+		cat "${state}/why"
+		return 1
+	fi
 	return "${rc}"
 }
 
@@ -530,6 +550,34 @@ _roundtrip() {
 	assert_success
 	assert_output --partial "read ${#VALUE} chars"
 	refute_output --partial "${VALUE}"
+}
+
+# A prompt whose read never turns echo off: the helper says so and types
+# nothing, rather than typing anyway and passing or failing by luck.
+@test '_tty_type fails loudly when -echo never shows' {
+	_need script
+	# shellcheck disable=SC2016  # the command's own script, run under the pty
+	_TTY_TYPE_TRIES=20 run _tty_type "${VALUE}" bash -c \
+		'printf "A: "; IFS= read -r v; echo "read ${#v} chars"'
+	assert_failure
+	assert_output --partial 'never showed -echo'
+	assert_output --partial 'read 0 chars'
+	refute_output --partial "${VALUE}"
+}
+
+# stdin stays open until the command has finished. Closed straight after the
+# value, script(1) types the terminal's EOF into the pty, and a later read
+# gets EOF (status 1) instead of waiting (`read -t` times out, status >128):
+# measured on Linux (util-linux script), so this holds here, not only on
+# the macOS leg.
+@test '_tty_type sends no EOF while the command is still reading' {
+	_need script
+	# shellcheck disable=SC2016  # the command's own script, run under the pty
+	run _tty_type "${VALUE}" bash -c \
+		'IFS= read -r -s -p "A: " v; echo; sleep 1; IFS= read -r -t 1 w; echo "later read rc=$?"'
+	assert_success
+	assert_output --partial 'later read rc=142'
+	refute_output --regexp 'later read rc=1([^0-9]|$)'
 }
 
 # Sabotage-proven (PR for #229): dropping the empty-stdin check turns this
