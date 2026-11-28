@@ -567,17 +567,29 @@ _roundtrip() {
 
 # stdin stays open until the command has finished. Closed straight after the
 # value, script(1) types the terminal's EOF into the pty, and a later read
-# gets EOF (status 1) instead of waiting (`read -t` times out, status >128):
-# measured on Linux (util-linux script), so this holds here, not only on
-# the macOS leg.
+# gets EOF (status 1) instead of waiting (`read -t` times out, status >128,
+# 128 + SIGALRM): measured on Linux (util-linux script), so this holds here,
+# not only on the macOS leg.
+#
+# Needs bash 4 or later, where a `read -t` timeout returns >128: bash 3.2
+# (stock macOS /bin/bash, which just-bashit still supports for the scripts
+# that run there, docs/getting-started.md) returns 1 for a timeout, the same
+# as EOF, so the two cannot be told apart. That is a failure naming the
+# reason, never a skip.
 @test '_tty_type sends no EOF while the command is still reading' {
 	_need script
+	local major
+	# shellcheck disable=SC2016  # expanded by that bash, not this one
+	major="$(bash -c 'printf %s "${BASH_VERSINFO[0]}"')"
+	((major >= 4)) || fail "this case needs bash >= 4 on PATH (found ${major}):" \
+		"bash 3.2's read -t returns 1 on a timeout, the same as EOF"
 	# shellcheck disable=SC2016  # the command's own script, run under the pty
 	run _tty_type "${VALUE}" bash -c \
 		'IFS= read -r -s -p "A: " v; echo; sleep 1; IFS= read -r -t 1 w; echo "later read rc=$?"'
 	assert_success
-	assert_output --partial 'later read rc=142'
-	refute_output --regexp 'later read rc=1([^0-9]|$)'
+	[[ ${output} =~ later\ read\ rc=([0-9]+) ]] || fail "no rc in: ${output}"
+	((BASH_REMATCH[1] > 128)) ||
+		fail "the later read returned ${BASH_REMATCH[1]}, not a timeout (>128): EOF reached it"
 }
 
 # Sabotage-proven (PR for #229): dropping the empty-stdin check turns this
