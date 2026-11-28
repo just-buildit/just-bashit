@@ -219,3 +219,52 @@ YAML
 	_gate
 	assert_success
 }
+
+# Check 5: a job that runs make lint, test* or coverage runs bats, and bats is
+# a submodule, so its checkout fetches the submodules. The lint job's had
+# none, and test-lint-gates died on a missing test/bats/bin/bats (#258).
+_with_job() {
+	local step="$1" checkout="$2"
+	cat >>"${REPO}/.github/workflows/ci.yml" <<YAML
+
+  suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+${checkout}
+      # A comment saying make test runs nothing.
+      - name: run it
+        run: ${step}
+YAML
+}
+
+@test 'a job running make lint without the submodules fails' {
+	_with_job 'make lint' ''
+	_gate
+	assert_failure
+	assert_output --partial "job 'suite' runs make lint/test/coverage"
+	assert_output --partial 'submodules: recursive'
+}
+
+@test 'make test-fast and make coverage count too' {
+	for step in 'make -s test-fast' 'make coverage'; do
+		setup
+		_with_job "${step}" ''
+		_gate
+		assert_failure
+		assert_output --partial "job 'suite' runs make lint/test/coverage"
+	done
+}
+
+@test 'a job running make test with the submodules passes' {
+	_with_job 'make test' $'        with:\n          submodules: recursive'
+	_gate
+	assert_success
+	assert_output --partial '1 job(s) running bats with its submodules'
+}
+
+@test 'a comment naming make test is not a step that runs it' {
+	_with_job 'true' ''
+	_gate
+	assert_success
+}

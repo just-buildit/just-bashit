@@ -30,6 +30,12 @@
 #      main for #142 and the merge went through, because nothing that         #
 #      gates a merge waited for it.                                           #
 #                                                                            #
+#   5. Every job that runs `make lint`, `make test*` or `make coverage`      #
+#      checks out the submodules: bats and its helpers are submodules, and   #
+#      both run bats (lint through test-lint-gates). The lint job's checkout #
+#      had none, so test-lint-gates died on a missing test/bats/bin/bats     #
+#      (just-bashit#258) while every test job, which had them, passed.       #
+#                                                                            #
 # Parsing is deliberately shallow and stdlib-only: awk over the keys this     #
 # needs, not a YAML library, because the gate has to run in the same          #
 # containers as the suite and those carry no Python. A parser that reads      #
@@ -48,6 +54,7 @@ rc=0
 total_jobs=0
 total_up=0
 total_down=0
+total_bats=0
 
 # ---------------------------------------------------------------------------
 # Extract the shape of one workflow: one record per line, so the shell side
@@ -58,6 +65,8 @@ total_down=0
 #   up<TAB>NAME<TAB>ARTIFACT
 #   down<TAB>NAME<TAB>ARTIFACT
 #   mainonly<TAB>NAME
+#   runsbats<TAB>NAME     (a step runs make lint / test* / coverage)
+#   submodules<TAB>NAME   (its checkout sets submodules: recursive|true)
 # ---------------------------------------------------------------------------
 _shape() {
 	awk '
@@ -94,6 +103,15 @@ _shape() {
 			next
 		}
 		inneeds && /^    [A-Za-z]/ { inneeds = 0 }
+
+		# A comment is prose, not a step: it may name `make test` freely.
+		/^[ \t]*#/ { next }
+		/(^|[^A-Za-z0-9_-])make[ \t]+(-[A-Za-z]+[ \t]+)*(lint|test[A-Za-z-]*|coverage)([^A-Za-z0-9_-]|$)/ {
+			print "runsbats\t" job
+		}
+		/^[ \t]+submodules:[ \t]*(recursive|true)[ \t]*$/ {
+			print "submodules\t" job
+		}
 
 		# `if:` mentioning the default branch means no pull-request run.
 		/^    if:/ && /refs\/heads\/main/ { print "mainonly\t" job; next }
@@ -189,6 +207,19 @@ for wf_path in "${WF_DIR}"/*.yml; do
 		fi
 	done < <(printf '%s\n' "${wf}" | awk -F'\t' '$1=="mainonly"')
 
+	# 5. A job that runs bats has bats: its checkout fetches the submodules.
+	while IFS= read -r job; do
+		[[ -n "${job}" ]] || continue
+		total_bats=$((total_bats + 1))
+		printf '%s\n' "${wf}" | awk -F'\t' -v j="${job}" \
+			'$1=="submodules" && $2==j' | grep . >/dev/null && continue
+		echo "ERROR: ${name}: job '${job}' runs make lint/test/coverage, which"
+		echo "  run bats, but its checkout has no \`submodules: recursive\`:"
+		echo "  test/bats is a submodule, so bats is not there."
+		rc=1
+	done < <(printf '%s\n' "${wf}" | awk -F'\t' '$1=="runsbats" { print $2 }' |
+		sort -u)
+
 	# 4. The required check waits for every job a pull request runs.
 	if printf '%s\n' "${wf}" | awk -F'\t' '$1=="job" && $2=="ci-passed"' |
 		grep . >/dev/null; then
@@ -228,8 +259,8 @@ if ((total_jobs == 0 || total_up == 0 || total_down == 0)); then
 fi
 
 if ((rc == 0)); then
-	printf 'workflow-check: %d job(s), %d artifact hand-off(s) all awaited\n' \
-		"${total_jobs}" "${total_down}"
+	printf 'workflow-check: %d job(s), %d artifact hand-off(s) all awaited, %d job(s) running bats with its submodules\n' \
+		"${total_jobs}" "${total_down}" "${total_bats}"
 fi
 
 exit "${rc}"

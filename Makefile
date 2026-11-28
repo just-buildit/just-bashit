@@ -183,16 +183,26 @@ pipefail-readers-check: ## Verify no pipefail pipe ends in grep -q, head or the 
 
 # The bats files tagged `lint` (see BATS_SUITE): the tests of gates that run
 # where python3 is, so they run where the gates do -- `make lint`, through
-# .pre-commit-config.yaml. A filter that selected nothing would pass having
-# run nothing, so a run with no test in it fails: a skip is a failure.
+# .pre-commit-config.yaml. A run that checked nothing has not passed: one
+# with no test in it fails, and so does one where any test skipped (a TAP
+# `ok N ... # skip`), since a skip there is a gate's test not run. Bats is a
+# submodule, so the stamp is a prerequisite, as it is for `test`.
+# LINT_BATS_ARGS is what bats runs; test/suite-tags.bats points it at a
+# fixture to prove both refusals.
+LINT_BATS_ARGS ?= --filter-tags lint test
 LOCAL_TARGETS += test-lint-gates
 
+test-lint-gates: $(SUBMODULE_STAMP)
 test-lint-gates: ## Run the bats tests of lint-side gates (file_tags=lint)
-	@out=$$($(TREE_UNCHANGED) $(BATS) --filter-tags lint test 2>&1); rc=$$?; \
+	@out=$$($(TREE_UNCHANGED) $(BATS) $(LINT_BATS_ARGS) 2>&1); rc=$$?; \
 	 printf '%s\n' "$$out"; \
 	 [ "$$rc" -eq 0 ] || exit "$$rc"; \
 	 printf '%s\n' "$$out" | grep -E '^1\.\.[1-9]' >/dev/null \
-	     || { echo "test-lint-gates: no test is tagged lint -- nothing ran"; exit 1; }
+	     || { echo "test-lint-gates: no test is tagged lint -- nothing ran"; exit 1; }; \
+	 skipped=$$(printf '%s\n' "$$out" | grep -E '^ok [0-9]+ .*# skip' || true); \
+	 [ -z "$$skipped" ] || { \
+	     echo "test-lint-gates: a lint-tagged test skipped -- a skip is a failure:"; \
+	     printf '%s\n' "$$skipped"; exit 1; }
 
 # ── all ───────────────────────────────────────────────────────────────────────
 # Lint first: shellcheck and shfmt are seconds, the bats suite is minutes.
