@@ -46,8 +46,11 @@ YAML
 	: >"${REPO}/.github/no-pre-merge-run"
 }
 
+# The fixture is this repo as far as check 5 is concerned: it has no remote,
+# so its own slug comes from GITHUB_REPOSITORY, as it does in Actions.
 _gate() {
-	WORKFLOW_CHECK_ROOT="${REPO}" run bash "${REPO}/scripts/workflow_check.sh"
+	GITHUB_REPOSITORY="${OWN_SLUG-just-buildit/just-bashit}" \
+		WORKFLOW_CHECK_ROOT="${REPO}" run bash "${REPO}/scripts/workflow_check.sh"
 }
 
 _edit() {
@@ -301,4 +304,71 @@ YAML
 	assert_failure
 	assert_output --partial "changes.yml: job 'other' checks out this repo without"
 	refute_output --partial "job 'changes'"
+}
+
+# H1: `repository:` makes a checkout another repo's only when it is a literal
+# slug other than this one. This repo named by expression or by its own
+# slug, in any case, is still this repo; an expression that cannot be read
+# counts as this repo too, so a doubt fails closed.
+@test 'a checkout naming this repo by expression is still this repo' {
+	_with_job $'      - uses: actions/checkout@v7\n        with:\n          repository: ${{ github.repository }}'
+	_gate
+	assert_failure
+	assert_output --partial "job 'suite' checks out this repo without"
+}
+
+@test "a checkout naming this repo's own slug, in any case, is still this repo" {
+	_with_job $'      - uses: actions/checkout@v7\n        with:\n          repository: Just-Buildit/Just-Bashit'
+	_gate
+	assert_failure
+	assert_output --partial "job 'suite' checks out this repo without"
+}
+
+@test 'an expression the check cannot read counts as this repo' {
+	_with_job $'      - uses: actions/checkout@v7\n        with:\n          repository: ${{ inputs.repo }}'
+	_gate
+	assert_failure
+	assert_output --partial "job 'suite' checks out this repo without"
+}
+
+@test 'with no slug to compare against, a literal one counts as this repo' {
+	OWN_SLUG='' _with_job $'      - uses: actions/checkout@v7\n        with:\n          repository: o/other'
+	OWN_SLUG='' _gate
+	assert_failure
+	assert_output --partial "job 'suite' checks out this repo without"
+}
+
+# H2: the spellings of `submodules:` YAML allows all count.
+@test 'submodules is read quoted, commented and in a flow mapping' {
+	local with
+	for with in \
+		$'        with:\n          submodules: "recursive"' \
+		$'        with:\n          submodules: \'true\'' \
+		$'        with:\n          submodules: recursive  # bats' \
+		'        with: {submodules: recursive, fetch-depth: 0}'; do
+		setup
+		_with_job "      - uses: actions/checkout@v7"$'\n'"${with}"
+		_gate
+		assert_success
+	done
+	setup
+	_with_job '      - {uses: actions/checkout@v7, with: {submodules: true}}'
+	_gate
+	assert_success
+}
+
+@test 'submodules: false is not submodules' {
+	_with_job $'      - uses: actions/checkout@v7\n        with:\n          submodules: false'
+	_gate
+	assert_failure
+}
+
+# An alias pulls a step's keys from elsewhere -- an anchor in an exempt job,
+# say -- which a line reader cannot follow, so a checkout using one is
+# refused rather than guessed at.
+@test 'a checkout step that uses a YAML alias is refused' {
+	_with_job $'      - uses: actions/checkout@v7\n        with: *checkout_with'
+	_gate
+	assert_failure
+	assert_output --partial 'has a checkout step that uses a'
 }
