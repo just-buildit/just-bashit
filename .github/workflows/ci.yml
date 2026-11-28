@@ -286,7 +286,12 @@ jobs:
       security-events: write
 
     steps:
+      # The submodules too: `make lint` runs bats (test-lint-gates), and
+      # bats is a submodule. workflow_check.sh holds every job that runs
+      # make lint/test/coverage to this.
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
 
       - uses: astral-sh/setup-uv@v9.0.0
         with:

@@ -35,3 +35,37 @@ _common_setup
 		"${PROJECT_ROOT}/.pre-commit-config.yaml"
 	assert_success
 }
+
+# _lint_gates FIXTURE_BODY -- test-lint-gates over one fixture bats file
+# holding FIXTURE_BODY, instead of the repo's lint-tagged files.
+_lint_gates() {
+	local dir="${BATS_TEST_TMPDIR}/lint-fixture"
+	mkdir -p "${dir}"
+	printf '%s\n' "$1" >"${dir}/fixture.bats"
+	# A bats run inside this one starts from a clean environment (the outer
+	# run's BATS_* variables, and MAKEFLAGS' overrides), and is handed the
+	# real bats: inside a run, PATH leads with bats' libexec, whose internal
+	# `bats` is what `command -v bats` would otherwise find.
+	run env -i PATH="${PATH}" HOME="${HOME}" TMPDIR="${TMPDIR:-/tmp}" \
+		make -s -C "${PROJECT_ROOT}" --no-print-directory test-lint-gates \
+		BATS="${PROJECT_ROOT}/test/bats/bin/bats" LINT_BATS_ARGS="${dir}"
+}
+
+@test 'test-lint-gates passes a run where every test ran and passed' {
+	_lint_gates '@test "a" { true; }'
+	assert_success
+	assert_output --partial 'ok 1 a'
+}
+
+@test 'test-lint-gates fails a run in which a test skipped' {
+	_lint_gates $'@test "a" { true; }\n@test "b" { skip "no tool"; }'
+	assert_failure
+	assert_output --partial 'a lint-tagged test skipped -- a skip is a failure'
+	assert_output --partial 'ok 2 b # skip no tool'
+}
+
+@test 'test-lint-gates fails a run that ran no test' {
+	_lint_gates '# no tests'
+	assert_failure
+	assert_output --partial 'nothing ran'
+}
