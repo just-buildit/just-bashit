@@ -30,11 +30,15 @@
 #      main for #142 and the merge went through, because nothing that         #
 #      gates a merge waited for it.                                           #
 #                                                                            #
-#   5. Every job that runs `make lint`, `make test*` or `make coverage`      #
-#      checks out the submodules: bats and its helpers are submodules, and   #
-#      both run bats (lint through test-lint-gates). The lint job's checkout #
-#      had none, so test-lint-gates died on a missing test/bats/bin/bats     #
-#      (just-bashit#258) while every test job, which had them, passed.       #
+#   5. Every `actions/checkout` of THIS repo (a step with no `repository:`) #
+#      sets `submodules: recursive` (or true), whatever its job runs. bats   #
+#      and its helpers are submodules; the lint job's checkout had none, so  #
+#      test-lint-gates died on a missing test/bats/bin/bats (#258) while     #
+#      every test job passed. The rule is per STEP and structural: deciding  #
+#      which jobs "run bats" is a spelling chase (`make -C . test`, a direct #
+#      bats call), and another repo's checkout never counts for this one.    #
+#      A job that must not fetch them is named in SUBMODULES_EXEMPT below,   #
+#      with its reason: today only canonical's vendored workflows.           #
 #                                                                            #
 # Parsing is deliberately shallow and stdlib-only: awk over the keys this     #
 # needs, not a YAML library, because the gate has to run in the same          #
@@ -54,7 +58,16 @@ rc=0
 total_jobs=0
 total_up=0
 total_down=0
-total_bats=0
+total_co=0
+# workflow:job pairs whose checkout does not fetch the submodules, each with
+# its reason. Both are canonical's workflows, vendored verbatim (standard.mk
+# VENDORED_FILES): this repo cannot edit them, and neither runs bats.
+SUBMODULES_EXEMPT=(
+	# changes reads `git diff` to decide what CI runs; it runs no suite.
+	changes.yml:changes
+	# retire deletes a merged train's branches through the API.
+	train-retire.yml:retire
+)
 
 # ---------------------------------------------------------------------------
 # Extract the shape of one workflow: one record per line, so the shell side
@@ -65,20 +78,27 @@ total_bats=0
 #   up<TAB>NAME<TAB>ARTIFACT
 #   down<TAB>NAME<TAB>ARTIFACT
 #   mainonly<TAB>NAME
-#   runsbats<TAB>NAME     (a step runs make lint / test* / coverage)
-#   submodules<TAB>NAME   (its checkout sets submodules: recursive|true)
+#   checkout<TAB>NAME<TAB>SUBMODULES<TAB>FOREIGN   (one per checkout step;
+#                         SUBMODULES 1 when it sets recursive|true, FOREIGN
+#                         1 when it names a `repository:`)
 # ---------------------------------------------------------------------------
 _shape() {
 	awk '
 		function trim(x) { gsub(/^[ \t]+|[ \t\r]+$/, "", x); return x }
+		function flush() {
+			if (initem && co) print "checkout\t" job "\t" subm "\t" foreign
+			initem = 0; co = 0
+		}
+		END { flush() }
 
 		/^jobs:[ \t]*$/ { injobs = 1; next }
 		# A top-level key other than jobs: ends the jobs block.
-		/^[^ \t#]/ && !/^jobs:/ { injobs = 0 }
+		/^[^ \t#]/ && !/^jobs:/ { flush(); injobs = 0 }
 		!injobs { next }
 
 		# Two-space indent under jobs: is a job name.
 		/^  [A-Za-z0-9_-]+:[ \t]*$/ {
+			flush()
 			job = trim($0); sub(/:$/, "", job)
 			print "job\t" job
 			pending_art = 0
@@ -104,14 +124,20 @@ _shape() {
 		}
 		inneeds && /^    [A-Za-z]/ { inneeds = 0 }
 
-		# A comment is prose, not a step: it may name `make test` freely.
+		# Each list item (a step) is read on its own: its keys, up to the next
+		# item or the first line back at its own indent. A comment is prose.
 		/^[ \t]*#/ { next }
-		/(^|[^A-Za-z0-9_-])make[ \t]+(-[A-Za-z]+[ \t]+)*(lint|test[A-Za-z-]*|coverage)([^A-Za-z0-9_-]|$)/ {
-			print "runsbats\t" job
+		/^[ \t]*- / {
+			flush()
+			initem = 1; itemind = match($0, /-/) - 1
+			co = ($0 ~ /uses:[ \t]*actions\/checkout@/); subm = 0; foreign = 0
 		}
-		/^[ \t]+submodules:[ \t]*(recursive|true)[ \t]*$/ {
-			print "submodules\t" job
+		initem && !/^[ \t]*- / && /[^ \t]/ && match($0, /[^ \t]/) - 1 <= itemind {
+			flush()
 		}
+		initem && /^[ \t]+uses:[ \t]*actions\/checkout@/ { co = 1 }
+		initem && /^[ \t]+repository:/ { foreign = 1 }
+		initem && /^[ \t]+submodules:[ \t]*(recursive|true)[ \t]*$/ { subm = 1 }
 
 		# `if:` mentioning the default branch means no pull-request run.
 		/^    if:/ && /refs\/heads\/main/ { print "mainonly\t" job; next }
@@ -207,18 +233,21 @@ for wf_path in "${WF_DIR}"/*.yml; do
 		fi
 	done < <(printf '%s\n' "${wf}" | awk -F'\t' '$1=="mainonly"')
 
-	# 5. A job that runs bats has bats: its checkout fetches the submodules.
-	while IFS= read -r job; do
-		[[ -n "${job}" ]] || continue
-		total_bats=$((total_bats + 1))
-		printf '%s\n' "${wf}" | awk -F'\t' -v j="${job}" \
-			'$1=="submodules" && $2==j' | grep . >/dev/null && continue
-		echo "ERROR: ${name}: job '${job}' runs make lint/test/coverage, which"
-		echo "  run bats, but its checkout has no \`submodules: recursive\`:"
-		echo "  test/bats is a submodule, so bats is not there."
+	# 5. Every checkout of this repo fetches the submodules.
+	while IFS=$'\t' read -r _ job subm foreign; do
+		[[ -n "${job}" && ${foreign} == 0 ]] || continue
+		total_co=$((total_co + 1))
+		[[ ${subm} == 1 ]] && continue
+		exempt=0
+		for e in ${SUBMODULES_EXEMPT[@]+"${SUBMODULES_EXEMPT[@]}"}; do
+			[[ "${e}" == "${name}:${job}" ]] && exempt=1
+		done
+		((exempt)) && continue
+		echo "ERROR: ${name}: job '${job}' checks out this repo without"
+		echo "  \`submodules: recursive\`. bats is a submodule, and whether a"
+		echo "  job runs it is not read here: every checkout fetches them."
 		rc=1
-	done < <(printf '%s\n' "${wf}" | awk -F'\t' '$1=="runsbats" { print $2 }' |
-		sort -u)
+	done < <(printf '%s\n' "${wf}" | awk -F'\t' '$1=="checkout"')
 
 	# 4. The required check waits for every job a pull request runs.
 	if printf '%s\n' "${wf}" | awk -F'\t' '$1=="job" && $2=="ci-passed"' |
@@ -259,8 +288,8 @@ if ((total_jobs == 0 || total_up == 0 || total_down == 0)); then
 fi
 
 if ((rc == 0)); then
-	printf 'workflow-check: %d job(s), %d artifact hand-off(s) all awaited, %d job(s) running bats with its submodules\n' \
-		"${total_jobs}" "${total_down}" "${total_bats}"
+	printf 'workflow-check: %d job(s), %d artifact hand-off(s) all awaited, %d checkout(s) of this repo fetch submodules or are named exempt\n' \
+		"${total_jobs}" "${total_down}" "${total_co}"
 fi
 
 exit "${rc}"

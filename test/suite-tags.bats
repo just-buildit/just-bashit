@@ -64,6 +64,12 @@ _lint_gates() {
 	assert_output --partial 'ok 2 b # skip no tool'
 }
 
+@test 'test-lint-gates fails a run in which a test failed' {
+	_lint_gates $'@test "a" { true; }\n@test "b" { false; }'
+	assert_failure
+	assert_output --partial 'not ok 2 b'
+}
+
 @test 'test-lint-gates fails a run that ran no test' {
 	_lint_gates '# no tests'
 	assert_failure
