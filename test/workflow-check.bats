@@ -220,51 +220,85 @@ YAML
 	assert_success
 }
 
-# Check 5: a job that runs make lint, test* or coverage runs bats, and bats is
-# a submodule, so its checkout fetches the submodules. The lint job's had
-# none, and test-lint-gates died on a missing test/bats/bin/bats (#258).
+# Check 5: every checkout of THIS repo fetches the submodules, read per step,
+# whatever the job runs. The lint job's had none, and test-lint-gates died on
+# a missing test/bats/bin/bats (#258). Asking which jobs "run bats" was a
+# spelling chase (`make -C . test`, a direct bats call), so it is not asked.
 _with_job() {
-	local step="$1" checkout="$2"
+	local steps="$1"
 	cat >>"${REPO}/.github/workflows/ci.yml" <<YAML
 
   suite:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-${checkout}
-      # A comment saying make test runs nothing.
-      - name: run it
-        run: ${step}
+${steps}
+      - run: true
 YAML
 }
 
-@test 'a job running make lint without the submodules fails' {
-	_with_job 'make lint' ''
+@test 'a checkout of this repo without the submodules fails' {
+	_with_job '      - uses: actions/checkout@v7'
 	_gate
 	assert_failure
-	assert_output --partial "job 'suite' runs make lint/test/coverage"
-	assert_output --partial 'submodules: recursive'
+	assert_output --partial "job 'suite' checks out this repo without"
 }
 
-@test 'make test-fast and make coverage count too' {
-	for step in 'make -s test-fast' 'make coverage'; do
-		setup
-		_with_job "${step}" ''
-		_gate
-		assert_failure
-		assert_output --partial "job 'suite' runs make lint/test/coverage"
-	done
-}
-
-@test 'a job running make test with the submodules passes' {
-	_with_job 'make test' $'        with:\n          submodules: recursive'
+@test 'a checkout of this repo with the submodules passes' {
+	_with_job $'      - uses: actions/checkout@v7\n        with:\n          submodules: recursive'
 	_gate
 	assert_success
-	assert_output --partial '1 job(s) running bats with its submodules'
+	assert_output --partial '1 checkout(s) of this repo fetch submodules'
 }
 
-@test 'a comment naming make test is not a step that runs it' {
-	_with_job 'true' ''
+@test 'submodules: true counts, and a name: before uses: is the same step' {
+	_with_job $'      - name: Check out\n        uses: actions/checkout@v7\n        with:\n          submodules: true'
 	_gate
 	assert_success
+}
+
+@test "another repo's checkout with submodules does not cover this one's" {
+	# Credited per step: the second checkout is of another repository.
+	_with_job $'      - uses: actions/checkout@v7\n      - uses: actions/checkout@v7\n        with:\n          repository: o/other\n          submodules: recursive'
+	_gate
+	assert_failure
+	assert_output --partial "job 'suite' checks out this repo without"
+}
+
+@test "another repo's checkout alone needs no submodules" {
+	_with_job $'      - uses: actions/checkout@v7\n        with:\n          repository: o/other'
+	_gate
+	assert_success
+}
+
+@test 'whatever the job runs: no step that runs bats is needed to require them' {
+	# The old rule asked which jobs ran `make test`; this one does not ask.
+	_with_job $'      - uses: actions/checkout@v7\n      - run: echo nothing here runs bats'
+	_gate
+	assert_failure
+	assert_output --partial "job 'suite' checks out this repo without"
+}
+
+@test 'only a named exemption skips the rule, and only for its own job' {
+	# changes.yml:changes is exempt (canonical's vendored workflow).
+	cat >"${REPO}/.github/workflows/changes.yml" <<'YAML'
+name: changes
+on: push
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+YAML
+	_gate
+	assert_success
+	cat >>"${REPO}/.github/workflows/changes.yml" <<'YAML'
+  other:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+YAML
+	_gate
+	assert_failure
+	assert_output --partial "changes.yml: job 'other' checks out this repo without"
+	refute_output --partial "job 'changes'"
 }
