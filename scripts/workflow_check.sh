@@ -85,11 +85,41 @@ SUBMODULES_EXEMPT=(
 _shape() {
 	awk '
 		function trim(x) { gsub(/^[ \t]+|[ \t\r]+$/, "", x); return x }
-		# The value of KEY on this line, block (`key: v`) or flow
-		# (`{key: v, ...}`) form: quotes and a trailing comment stripped. "\001"
-		# when the line has no such key.
+		# LINE cut at its comment: the first `#` outside quotes that starts
+		# the line or follows a blank. Everything a key could be read from
+		# goes through this first, so a key in a comment is never a key.
+		function decomment(line,   i, c, q, n) {
+			n = length(line); q = ""
+			for (i = 1; i <= n; i++) {
+				c = substr(line, i, 1)
+				if (q != "") { if (c == q) q = ""; continue }
+				if (c == "\"" || c == "\047") { q = c; continue }
+				if (c == "#" && (i == 1 || substr(line, i - 1, 1) ~ /[ \t]/))
+					return substr(line, 1, i - 1)
+			}
+			return line
+		}
+		# LINE with the contents of every quoted string blanked to "_", the quotes
+		# kept and the length unchanged: where a key may be looked for, so
+		# `name: "submodules: recursive"` holds no key but name.
+		function mask(line,   i, c, q, n, out) {
+			n = length(line); q = ""; out = ""
+			for (i = 1; i <= n; i++) {
+				c = substr(line, i, 1)
+				if (q != "") {
+					if (c == q) { q = ""; out = out c } else out = out "_"
+					continue
+				}
+				if (c == "\"" || c == "\047") q = c
+				out = out c
+			}
+			return out
+		}
+		# The value of KEY on this (decommented) line, block (`key: v`) or
+		# flow (`{key: v, ...}`) form, quotes stripped; found in the masked
+		# line, so only in a key position. "\001" when there is no such key.
 		function val(line, key,   v) {
-			if (!match(line, "(^|[{, \t])" key ":[ \t]*")) return "\001"
+			if (!match(mask(line), "(^|[{, \t])" key ":[ \t]*")) return "\001"
 			v = substr(line, RSTART + RLENGTH)
 			if (v ~ /^"/) { v = substr(v, 2); sub(/".*$/, "", v); return v }
 			if (v ~ /^\047/) { v = substr(v, 2); sub(/\047.*$/, "", v); return v }
@@ -100,15 +130,15 @@ _shape() {
 			return trim(v)
 		}
 		function readitem(line,   v) {
-			if (line ~ /uses:[ \t]*actions\/checkout@/) co = 1
+			if (val(line, "uses") ~ /^actions\/checkout@/) co = 1
 			v = val(line, "submodules")
 			if (v == "recursive" || v == "true") subm = 1
 			v = val(line, "repository")
 			if (v != "\001") repo = v
 			# An alias (`*name`, `<<: *name`) pulls keys from elsewhere,
 			# which this line reader cannot see: refused, not guessed at.
-			if (line ~ /(:|^[ \t]*-)[ \t]+\*[A-Za-z0-9_.-]+[ \t]*(#.*)?$/ ||
-			    line ~ /<<:/) alias = 1
+			if (mask(line) ~ /(:|^[ \t]*-)[ \t]+\*[A-Za-z0-9_.-]+[ \t]*$/ ||
+			    mask(line) ~ /<<:/) alias = 1
 		}
 		function flush() {
 			if (initem && co)
@@ -116,6 +146,25 @@ _shape() {
 			initem = 0; co = 0
 		}
 		END { flush() }
+
+		# Comments are cut before anything is read (a full-line one leaves a
+		# blank line, which ends nothing).
+		{ $0 = decomment($0) }
+
+		# A block scalar (`key: |`, `key: >-`, ...) is text, not keys: its
+		# body is every following line indented deeper than the key, and
+		# blank lines within it. Skipped whole, so nothing in a `run: |` or a
+		# folded value is read as a key, a step or a job.
+		inscalar {
+			if ($0 !~ /[^ \t]/ || match($0, /[^ \t]/) - 1 > scalarind) next
+			inscalar = 0
+		}
+		mask($0) ~ /:[ \t]+[|>][-+0-9]*[ \t]*$/ {
+			inscalar = 1
+			scalarind = match($0, /[^ \t]/) - 1
+			# `- key: |`: the key, not the dash, sets the body indent.
+			if ($0 ~ /^[ \t]*- /) scalarind = match($0, /-[ \t]+[^ \t]/) + 1
+		}
 
 		/^jobs:[ \t]*$/ { injobs = 1; next }
 		# A top-level key other than jobs: ends the jobs block.

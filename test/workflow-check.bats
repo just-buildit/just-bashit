@@ -372,3 +372,39 @@ YAML
 	assert_failure
 	assert_output --partial 'has a checkout step that uses a'
 }
+
+# J1, as a class: a key-like string in a NON-key position is never a key.
+# Three review rounds each found one more position; this case walks them
+# all. The base is this repo's checkout, BARE, which must stay red: an
+# injected `submodules: recursive` in any of these places must not credit
+# it, and an injected `repository: o/other` must not make it someone
+# else's. Each site is one shape YAML has for text that is not a key.
+@test 'a key in a comment, a quoted value, a block scalar or another step is never read' {
+	local co='      - uses: actions/checkout@v7'
+	local -a sites=(
+		"${co}"$'\n        with:\n          fetch-depth: 0  # INJ'
+		"${co}"$'\n        with: {fetch-depth: 0}  # INJ'
+		"${co}"$'\n        with:\n          # INJ\n          fetch-depth: 0'
+		$'      - name: "INJ"\n        uses: actions/checkout@v7'
+		$'      - name: "check out, INJ"\n        uses: actions/checkout@v7'
+		"${co}"$'\n        with:\n          ref: \'INJ\''
+		"${co}"$'\n        with:\n          ref: |\n            INJ'
+		"${co}"$'\n        with:\n          ref: >-\n            INJ'
+		"${co}"$'\n      - run: |\n          INJ\n          - uses: actions/checkout@v7\n            with:\n              INJ'
+		"${co}"$'\n      - run: >\n          echo\n          INJ'
+		"${co}"$'\n      - uses: actions/setup-python@v5\n        with:\n          INJ'
+	)
+	local inj site steps passed=()
+	for inj in 'submodules: recursive' 'repository: o/other'; do
+		for site in "${sites[@]}"; do
+			setup
+			steps="${site//INJ/${inj}}"
+			_with_job "${steps}"
+			_gate
+			if [[ ${status} -eq 0 || ${output} != *"job 'suite' checks out this repo without"* ]]; then
+				passed+=("[${inj}] ${steps}")
+			fi
+		done
+	done
+	((${#passed[@]} == 0)) || fail "read as a key (or as foreign):"$'\n'"$(printf '%s\n---\n' "${passed[@]}")"
+}
