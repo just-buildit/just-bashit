@@ -85,8 +85,34 @@ SUBMODULES_EXEMPT=(
 _shape() {
 	awk '
 		function trim(x) { gsub(/^[ \t]+|[ \t\r]+$/, "", x); return x }
+		# The value of KEY on this line, block (`key: v`) or flow
+		# (`{key: v, ...}`) form: quotes and a trailing comment stripped. "\001"
+		# when the line has no such key.
+		function val(line, key,   v) {
+			if (!match(line, "(^|[{, \t])" key ":[ \t]*")) return "\001"
+			v = substr(line, RSTART + RLENGTH)
+			if (v ~ /^"/) { v = substr(v, 2); sub(/".*$/, "", v); return v }
+			if (v ~ /^\047/) { v = substr(v, 2); sub(/\047.*$/, "", v); return v }
+			# An expression is kept whole: its braces are not the mapping
+			# closing.
+			if (v ~ /^\$\{\{/) { sub(/\}\}.*$/, "}}", v); return v }
+			sub(/[ \t]+#.*$/, "", v); sub(/[,}].*$/, "", v)
+			return trim(v)
+		}
+		function readitem(line,   v) {
+			if (line ~ /uses:[ \t]*actions\/checkout@/) co = 1
+			v = val(line, "submodules")
+			if (v == "recursive" || v == "true") subm = 1
+			v = val(line, "repository")
+			if (v != "\001") repo = v
+			# An alias (`*name`, `<<: *name`) pulls keys from elsewhere,
+			# which this line reader cannot see: refused, not guessed at.
+			if (line ~ /(:|^[ \t]*-)[ \t]+\*[A-Za-z0-9_.-]+[ \t]*(#.*)?$/ ||
+			    line ~ /<<:/) alias = 1
+		}
 		function flush() {
-			if (initem && co) print "checkout\t" job "\t" subm "\t" foreign
+			if (initem && co)
+				print "checkout\t" job "\t" subm "\t" (repo == "" ? "-" : repo) "\t" alias
 			initem = 0; co = 0
 		}
 		END { flush() }
@@ -130,14 +156,12 @@ _shape() {
 		/^[ \t]*- / {
 			flush()
 			initem = 1; itemind = match($0, /-/) - 1
-			co = ($0 ~ /uses:[ \t]*actions\/checkout@/); subm = 0; foreign = 0
+			co = 0; subm = 0; repo = ""; alias = 0
 		}
 		initem && !/^[ \t]*- / && /[^ \t]/ && match($0, /[^ \t]/) - 1 <= itemind {
 			flush()
 		}
-		initem && /^[ \t]+uses:[ \t]*actions\/checkout@/ { co = 1 }
-		initem && /^[ \t]+repository:/ { foreign = 1 }
-		initem && /^[ \t]+submodules:[ \t]*(recursive|true)[ \t]*$/ { subm = 1 }
+		initem { readitem($0) }
 
 		# `if:` mentioning the default branch means no pull-request run.
 		/^    if:/ && /refs\/heads\/main/ { print "mainonly\t" job; next }
@@ -180,6 +204,27 @@ if [[ -f "${ALLOW_FILE}" ]]; then
 fi
 
 seen_mainonly=()
+
+# This repo's own slug, owner/name, lower case: from Actions when it is set,
+# else from the origin remote. Empty when neither says.
+own_repo="${GITHUB_REPOSITORY:-}"
+if [[ -z ${own_repo} ]]; then
+	own_repo="$(git remote get-url origin 2>/dev/null |
+		sed -n 's#^.*[:/]\([^/:]*/[^/]*\)$#\1#p' | sed 's#\.git$##')"
+fi
+own_repo="$(printf '%s' "${own_repo}" | tr '[:upper:]' '[:lower:]')"
+
+# _foreign VALUE -- true only when a checkout's `repository:` VALUE is a
+# literal slug other than this repo's. No key ("-"), an expression
+# (`${{ github.repository }}`, or any other, which cannot be read here), or a
+# repo whose own slug is unknown: all count as THIS repo, so a doubt fails
+# closed.
+_foreign() {
+	local r="$1"
+	# shellcheck disable=SC2016  # the literal `${{` of an Actions expression
+	[[ ${r} != "-" && ${r} != *'${{'* && -n ${own_repo} ]] || return 1
+	[[ "$(printf '%s' "${r}" | tr '[:upper:]' '[:lower:]')" != "${own_repo}" ]]
+}
 
 for wf_path in "${WF_DIR}"/*.yml; do
 	[[ -f "${wf_path}" ]] || continue
@@ -234,8 +279,16 @@ for wf_path in "${WF_DIR}"/*.yml; do
 	done < <(printf '%s\n' "${wf}" | awk -F'\t' '$1=="mainonly"')
 
 	# 5. Every checkout of this repo fetches the submodules.
-	while IFS=$'\t' read -r _ job subm foreign; do
-		[[ -n "${job}" && ${foreign} == 0 ]] || continue
+	while IFS=$'\t' read -r _ job subm repo alias; do
+		[[ -n "${job}" ]] || continue
+		if [[ ${alias} == 1 ]]; then
+			echo "ERROR: ${name}: job '${job}' has a checkout step that uses a"
+			echo "  YAML alias. Its keys come from elsewhere, which this check"
+			echo "  cannot read; write them out in the step."
+			rc=1
+			continue
+		fi
+		_foreign "${repo}" && continue
 		total_co=$((total_co + 1))
 		[[ ${subm} == 1 ]] && continue
 		exempt=0
